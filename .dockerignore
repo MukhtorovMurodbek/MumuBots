@@ -1,0 +1,16 @@
+# The whole repository is every bot's build context (each Dockerfile copies
+# shared/ and its own folder). This keeps the rest out -- above all every
+# .env and testbot/token.env, which hold real tokens.
+.env
+**/.env
+testbot/token.env
+testbot/.persona
+testbot/.lock
+.git
+**/__pycache__
+**/*.pyc
+**/logs
+backups
+tests
+docs
+Design

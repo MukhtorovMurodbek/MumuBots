@@ -1,0 +1,62 @@
+python-telegram-bot[job-queue]>=21.3
+Pillow>=10.0
+python-dotenv>=1.0
+
+# Files over the Bot API's 20 MB (download) and 50 MB (send), over MTProto --
+# see big_files.py. Imported only when such a file arrives, and only used at
+# all with CBOT_API_ID and CBOT_API_HASH set. cryptg does MTProto's AES in
+# native code; without it Telethon falls back to OpenSSL through ctypes, which
+# a Nix-built container may not find, and then to pure Python, which moves a
+# 100 MB file at a crawl.
+Telethon>=1.40
+cryptg>=0.5
+
+# psycopg's connection pool. Every query in db.py and family_link.py goes
+# through it -- see the comment block at the top of db.py for why a bot that
+# opened a fresh connection per query is the single most expensive thing this
+# family did to its database.
+psycopg[binary,pool]>=3.2
+
+# ---------------------------------------------------------------------------
+# The converters past images and ffmpeg
+# ---------------------------------------------------------------------------
+# All optional, all pure wheels with their native code bundled -- nothing here
+# needs a system package, which is why nixpacks.toml still asks only for
+# ffmpeg. About 45 MB of image between them, most of it PyMuPDF.
+#
+# "Optional" is enforced rather than claimed: formats.py probes for each one at
+# startup and does not offer the formats it cannot produce, so a build that
+# drops any line below is a bot with a shorter /formats rather than a bot that
+# fails when somebody picks PDF. Every import of these is inside the function
+# that needs it.
+
+# PDF, EPUB, MOBI, FB2, CBZ, XPS and SVG: reading them, rendering their pages
+# to pictures, extracting their text, and laying HTML out onto a page.
+PyMuPDF>=1.24
+
+# HEIC and HEIF -- what an iPhone camera writes, and the format most likely to
+# arrive from somebody who has never converted a file before. AVIF is native
+# in Pillow 11 and later; this covers the older ones too.
+pillow-heif>=0.16
+
+# .docx to semantic HTML, which PyMuPDF then renders. Pure Python.
+mammoth>=1.7
+
+# And the other direction: writing a .docx. Pure Python and about 250 KB,
+# which is the whole reason PDF -> Word is done by hand here rather than with
+# pdf2docx -- that would be right about layout and would cost OpenCV and NumPy
+# to be right. See doc_convert.py.
+python-docx>=1.1
+
+# Markdown to HTML, for the same reason.
+Markdown>=3.5
+
+# .xlsx, both directions.
+openpyxl>=3.1
+
+PyYAML>=6.0
+
+# The *safe* XML parser. The standard library's will expand entities, which
+# turns a fourteen-line upload from a stranger into gigabytes of memory or a
+# read of a local file. See data_convert.py.
+defusedxml>=0.7

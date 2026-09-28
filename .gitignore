@@ -1,0 +1,27 @@
+# Real credentials -- every bot's own .env, and TestBot's token. Never commit
+# these; the tracked .env.example / token.env.example files are the templates.
+.env
+testbot/token.env
+# Which bot testbot/switch.py was last -- one word, and nobody else's business.
+testbot/.persona
+# The lock that keeps a second TestBot from polling the same token.
+testbot/.lock
+
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Rotating local log files. Only written when running off a laptop -- in the
+# cloud each bot logs to stdout only (see shared_features.py's setup_logging).
+logs/
+
+# Database dumps taken by db_backup.ps1 -- real user data, never committed.
+# The folder's own README is tracked; nothing else in it ever is.
+backups/*
+!backups/README.md
+scripts/release.log
+
+# The Python 3.9 copies tests/run.py builds of every bot before a run --
+# rebuilt every time, never a source of truth.
+tests/.mirror/

@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Rotating local log files. Only written when running off a laptop -- in the
+# cloud this bot logs to stdout only (see shared_features.py's setup_logging).
+logs/

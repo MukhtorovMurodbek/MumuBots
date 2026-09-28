@@ -1,0 +1,14 @@
+python-telegram-bot[job-queue]>=21.3
+yt-dlp>=2024.1
+python-dotenv>=1.0
+httpx>=0.27
+Pillow>=10.1
+
+# psycopg's connection pool. Every query in db.py and family_link.py goes
+# through it -- see the comment block at the top of db.py for why a bot that
+# opened a fresh connection per query is the single most expensive thing this
+# family did to its database.
+psycopg[binary,pool]>=3.2
+# Downloads over 48 MB go over MTProto (shared/big_files.py, large_files.py).
+Telethon>=1.40
+cryptg>=0.5

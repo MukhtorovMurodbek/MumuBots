@@ -1,0 +1,19 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "manager_bot/Dockerfile",
+    "watchPatterns": [
+      "/manager_bot/**",
+      "/shared/**"
+    ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "numReplicas": 1,
+    "sleepApplication": false,
+    "overlapSeconds": 30,
+    "drainingSeconds": 120
+  }
+}

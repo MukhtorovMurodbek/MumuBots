@@ -1,0 +1,47 @@
+# The family's local Postgres -- one database for all five bots, matching how
+# they run in the cloud. Each bot gets its own schema inside it (DB_SCHEMA in
+# that bot's .env); family_link.py has the full layout.
+#
+#   docker compose up -d      # start it (data persists in the pg-data volume)
+#   docker compose down       # stop it (data is still there next time)
+#   docker compose down -v    # stop AND wipe local data (rarely what you want)
+#
+# Every bot's .env.example already points here:
+#   postgresql://postgres:postgres@localhost:5432/botfamily
+#
+# This is the only compose file in the repo. The bots used to have one each,
+# from when they had separate databases; those went away with the move to one
+# shared database, which is what the family bus (heartbeats, ManagerBot,
+# cross-bot queries) needs.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: botfamily
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    # Five bots hold one pooled connection each while idle, so the stock 100
+    # backends is a large multiple of what this ever needs -- and each one
+    # Postgres reserves costs memory whether it is used or not. These are the
+    # settings a 256 MB container wants; raise them if you ever point real
+    # load at the local copy.
+    command: >
+      postgres
+      -c max_connections=40
+      -c shared_buffers=64MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg-data:
