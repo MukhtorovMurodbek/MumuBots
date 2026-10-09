@@ -48,7 +48,12 @@ DRAIN_SECONDS = float(os.environ.get("UNIFIED_DRAIN_SECONDS") or 30)
 
 STATUS_MINUTES = float(os.environ.get("UNIFIED_STATUS_MINUTES") or 30)
 
-WORKER_THREADS = int(os.environ.get("WORKER_THREADS") or 8)
+# The threads all five bots share for blocking work (database, file I/O, yt-dlp).
+# 8 until 2.1.0: on 2026-10-09 every bot's once-a-second database
+# job was skipped for a minute and a half because the threads were all waiting on
+# the database at once. The pools' timeouts now bound such a wait; this is the
+# headroom while one lasts. An idle thread costs next to nothing.
+WORKER_THREADS = int(os.environ.get("WORKER_THREADS") or 16)
 
 STARTUP_REPORT_SECONDS = 300
 

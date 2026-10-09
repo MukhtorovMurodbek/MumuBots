@@ -99,7 +99,10 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
 
                 "keepalives": 1, "keepalives_idle": 30,
                 "keepalives_interval": 10, "keepalives_count": 5,
@@ -144,6 +147,14 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
     with closing(psycopg.connect(dsn)) as conn:
         conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{DB_SCHEMA}"')
         conn.commit()
+
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None when the table has no such column."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
 
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
@@ -200,8 +211,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -212,9 +226,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS activity_events (
@@ -663,7 +679,10 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
 
                 "keepalives": 1, "keepalives_idle": 30,
                 "keepalives_interval": 10, "keepalives_count": 5,
@@ -709,6 +728,14 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
         conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{DB_SCHEMA}"')
         conn.commit()
 
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None when the table has no such column."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -742,8 +769,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -754,9 +784,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS activity_events (
@@ -1203,7 +1235,10 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
 
                 "keepalives": 1, "keepalives_idle": 30,
                 "keepalives_interval": 10, "keepalives_count": 5,
@@ -1249,6 +1284,14 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
         conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{DB_SCHEMA}"')
         conn.commit()
 
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None when the table has no such column."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -1264,17 +1307,14 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS language TEXT")
+        if _column(conn, "settings", "language") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS language TEXT")
 
-        conn.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS "
-            "lossless_enabled INTEGER NOT NULL DEFAULT 0"
-        )
+        if _column(conn, "settings", "lossless_enabled") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS lossless_enabled INTEGER NOT NULL DEFAULT 0")
 
-        conn.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS "
-            "large_files_enabled INTEGER NOT NULL DEFAULT 0"
-        )
+        if _column(conn, "settings", "large_files_enabled") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS large_files_enabled INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS star_transactions (
@@ -1293,8 +1333,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -1305,9 +1348,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS activity_events (
@@ -1793,7 +1838,10 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
 
                 "keepalives": 1, "keepalives_idle": 30,
                 "keepalives_interval": 10, "keepalives_count": 5,
@@ -1839,6 +1887,14 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
         conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{DB_SCHEMA}"')
         conn.commit()
 
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None when the table has no such column."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -1863,8 +1919,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -1875,9 +1934,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
 
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
 
         conn.execute(
             """
@@ -1887,6 +1948,12 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+
+        knows = _column(conn, "user_settings", "knows_reactions")
+        if knows is None:
+            conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS knows_reactions BOOLEAN")
+        if knows is None or (knows[1] or "").lower() != "true":
+            conn.execute("ALTER TABLE user_settings ALTER COLUMN knows_reactions SET DEFAULT TRUE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS anon_links (
@@ -1912,11 +1979,14 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_first_msg_at TEXT")
+        if _column(conn, "anon_conversations", "follower_first_msg_at") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_first_msg_at TEXT")
 
-        conn.execute("ALTER TABLE anon_conversations DROP COLUMN IF EXISTS owner_replied_at")
+        if _column(conn, "anon_conversations", "owner_replied_at") is not None:
+            conn.execute("ALTER TABLE anon_conversations DROP COLUMN IF EXISTS owner_replied_at")
 
-        conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS archived_at TEXT")
+        if _column(conn, "anon_conversations", "archived_at") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS archived_at TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_anon_conversations_pair "
             "ON anon_conversations (owner_user_id, follower_user_id)"
@@ -1951,12 +2021,16 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
         )
 
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS is_prompt BOOLEAN NOT NULL DEFAULT FALSE")
+        if _column(conn, "anon_relay", "is_prompt") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS is_prompt BOOLEAN NOT NULL DEFAULT FALSE")
 
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS peer_message_id BIGINT")
+        if _column(conn, "anon_relay", "peer_message_id") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS peer_message_id BIGINT")
 
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
+        if _column(conn, "anon_relay", "sent_at") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
+        if _column(conn, "anon_relay", "from_bot") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_anon_relay_conversation "
@@ -2043,6 +2117,38 @@ def set_user_language(user_id: int, language: str) -> None:
             (user_id, language),
         )
         conn.commit()
+
+def claim_reactions_note(user_id: int) -> bool:
+    """True exactly once for a person who has not been told about reactions, and marks them told in the same statement -- so two updates arriving together cannot both send the note."""
+    with pooled() as conn:
+        row = conn.execute(
+            "UPDATE user_settings SET knows_reactions = TRUE "
+            "WHERE user_id = %s AND knows_reactions IS NOT TRUE RETURNING user_id",
+            (user_id,),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+def get_reaction_route(chat_id: int, message_id: int) -> "dict | None":
+    """Where a reaction on this bubble should go: its twin in the other chat, both sides of the conversation, and whether the guest is blocked."""
+    with pooled_read() as conn:
+        row = conn.execute(
+            """
+            SELECT r.peer_message_id, c.id, c.owner_user_id, c.follower_user_id,
+                   EXISTS (SELECT 1 FROM anon_blocks b
+                           WHERE b.owner_user_id = c.owner_user_id
+                             AND b.follower_user_id = c.follower_user_id)
+            FROM anon_relay r
+            JOIN anon_conversations c ON c.id = r.conversation_id
+            WHERE r.chat_id = %s AND r.message_id = %s
+            """,
+            (chat_id, message_id),
+        ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return {"peer_message_id": int(row[0]), "conversation_id": int(row[1]),
+            "owner_user_id": int(row[2]), "follower_user_id": int(row[3]),
+            "blocked": bool(row[4])}
 
 def record_star_invoice(
     user_id: int,
@@ -2841,7 +2947,10 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
 
                 "keepalives": 1, "keepalives_idle": 30,
                 "keepalives_interval": 10, "keepalives_count": 5,
@@ -3163,7 +3272,7 @@ def run_readonly_query(sql: str, limit: int = 50):
     with pooled() as conn:
         conn.execute("SET TRANSACTION READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '10s'")
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, prepare=True)
         cols = [d.name for d in cur.description] if cur.description else []
         rows = cur.fetchmany(limit) if cur.description else []
         conn.rollback()

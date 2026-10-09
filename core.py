@@ -24,6 +24,8 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import psycopg
+
 import db
 import lifecycle
 
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 FAMILY_SCHEMA = "family"
 
-VERSION = os.environ.get("FAMILY_VERSION", "2.0.0")
+VERSION = os.environ.get("FAMILY_VERSION", "2.1.0")
 
 _REPORTS_BECAME_AUTOMATIC = datetime(2026, 9, 13, tzinfo=timezone.utc)
 
@@ -58,6 +60,14 @@ HOUSEKEEPING_SECONDS = int(os.environ.get("FAMILY_HOUSEKEEPING_SECONDS", "21600"
 def _connect():
     return db.pooled()
 
+def _column_missing(conn, table: str, column: str) -> bool:
+    """True when family.<table> has no `column` yet."""
+    return conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+        (FAMILY_SCHEMA, table, column),
+    ).fetchone() is None
+
 def init_family_schema() -> None:
     """Idempotent; every bot calls it at startup, whoever gets there first wins."""
     with _connect() as conn:
@@ -78,8 +88,9 @@ def init_family_schema() -> None:
             """
         )
 
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.heartbeats "
-                     f"ADD COLUMN IF NOT EXISTS commands TEXT")
+        if _column_missing(conn, "heartbeats", "commands"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.heartbeats "
+                         f"ADD COLUMN IF NOT EXISTS commands TEXT")
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.events (
@@ -146,10 +157,11 @@ def init_family_schema() -> None:
         )
 
         for column in ("sleepable_seconds", "max_gap_seconds", "jobs_ok", "jobs_failed"):
-            conn.execute(
-                f"ALTER TABLE {FAMILY_SCHEMA}.usage_samples "
-                f"ADD COLUMN IF NOT EXISTS {column} INTEGER NOT NULL DEFAULT 0"
-            )
+            if _column_missing(conn, "usage_samples", column):
+                conn.execute(
+                    f"ALTER TABLE {FAMILY_SCHEMA}.usage_samples "
+                    f"ADD COLUMN IF NOT EXISTS {column} INTEGER NOT NULL DEFAULT 0"
+                )
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_usage_recent "
             f"ON {FAMILY_SCHEMA}.usage_samples (bot_id, sampled_at DESC)"
@@ -238,22 +250,29 @@ def init_family_schema() -> None:
             """
         )
 
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS user_id BIGINT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS username TEXT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS user_lang TEXT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS chat_kind TEXT")
+        if _column_missing(conn, "problem_reports", "shared_at"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ")
+        if _column_missing(conn, "problem_reports", "user_id"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS user_id BIGINT")
+        if _column_missing(conn, "problem_reports", "username"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS username TEXT")
+        if _column_missing(conn, "problem_reports", "user_lang"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS user_lang TEXT")
+        if _column_missing(conn, "problem_reports", "chat_kind"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS chat_kind TEXT")
 
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS seen INTEGER NOT NULL DEFAULT 1")
+        if _column_missing(conn, "problem_reports", "seen"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS seen INTEGER NOT NULL DEFAULT 1")
 
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 2")
+        if _column_missing(conn, "problem_reports", "level"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 2")
 
         conn.execute(f"UPDATE {FAMILY_SCHEMA}.problem_reports "
                      f"SET shared_at = reported_at "
@@ -263,6 +282,23 @@ def init_family_schema() -> None:
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_problem_reports_recent "
             f"ON {FAMILY_SCHEMA}.problem_reports (reported_at DESC)"
+        )
+
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.feedback (
+                id BIGSERIAL PRIMARY KEY,
+                bot_id TEXT NOT NULL,
+                lang TEXT,
+                body TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                delivered_at TIMESTAMPTZ
+            )
+            """
+        )
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_family_feedback_pending "
+            f"ON {FAMILY_SCHEMA}.feedback (delivered_at, id)"
         )
         conn.commit()
 
@@ -492,29 +528,54 @@ def spend_stars(user_id: int, amount: int, reason: str = "spend",
         conn.commit()
     return after
 
-def topup(user_id: int, stars_paid: int, detail: str | None = None) -> dict:
+def topup(user_id: int, stars_paid: int, detail: str | None = None,
+          charge_id: "str | None" = None) -> "dict | None":
     """The whole of the money-in path."""
-    with _connect() as conn:
-        _lock_wallet_in(conn, user_id)
-        _expire_in(conn, user_id)
-        lifetime = int(conn.execute(
-            f"SELECT lifetime_stars_paid FROM {FAMILY_SCHEMA}.star_balances WHERE user_id = %s",
-            (user_id,),
-        ).fetchone()[0])
-        quote = quote_credit(lifetime, stars_paid)
-        balance = _move_in(conn, user_id, quote["base"], "topup", detail, stars_paid)
-        expires = None
-        if quote["bonus"] > 0:
-            balance = _move_in(conn, user_id, quote["bonus"], "bonus",
-                               f"ladder bonus on {stars_paid} stars, expires in {BONUS_EXPIRY_DAYS} days")
-            expires = conn.execute(
-                f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
-                f"VALUES (%s, %s, %s, now() + make_interval(days => %s)) RETURNING expires_at",
-                (user_id, quote["bonus"], quote["bonus"], BONUS_EXPIRY_DAYS),
-            ).fetchone()[0]
-        conn.commit()
+    for attempt in range(1, _TOPUP_ATTEMPTS + 1):
+        try:
+            with _connect() as conn:
+                _lock_wallet_in(conn, user_id)
+                if charge_id:
+                    won = conn.execute(
+                        f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+                        f"ON CONFLICT (key) DO NOTHING RETURNING key",
+                        (f"stars:paid:{charge_id}", datetime.now(timezone.utc).isoformat()),
+                    ).fetchone()
+                    if not won:
+                        conn.rollback()
+                        if attempt > 1:
+                            logger.error("topup: charge %s was credited by an earlier attempt whose "
+                                         "answer was lost; the payer was credited but not told", charge_id)
+                        return None
+                _expire_in(conn, user_id)
+                lifetime = int(conn.execute(
+                    f"SELECT lifetime_stars_paid FROM {FAMILY_SCHEMA}.star_balances WHERE user_id = %s",
+                    (user_id,),
+                ).fetchone()[0])
+                quote = quote_credit(lifetime, stars_paid)
+                balance = _move_in(conn, user_id, quote["base"], "topup", detail, stars_paid)
+                expires = None
+                if quote["bonus"] > 0:
+                    balance = _move_in(conn, user_id, quote["bonus"], "bonus",
+                                       f"ladder bonus on {stars_paid} stars, expires in {BONUS_EXPIRY_DAYS} days")
+                    expires = conn.execute(
+                        f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
+                        f"VALUES (%s, %s, %s, now() + make_interval(days => %s)) RETURNING expires_at",
+                        (user_id, quote["bonus"], quote["bonus"], BONUS_EXPIRY_DAYS),
+                    ).fetchone()[0]
+                conn.commit()
+            break
+        except psycopg.OperationalError as exc:
+            if attempt == _TOPUP_ATTEMPTS:
+                raise
+            logger.warning("topup: database error on attempt %d of %d (%s); trying again",
+                           attempt, _TOPUP_ATTEMPTS, exc)
+            time.sleep(_TOPUP_BACKOFF_SECONDS[attempt - 1])
     return {"stars": stars_paid, "credited": quote["base"], "bonus": quote["bonus"],
             "balance": balance, "bonus_expires": expires, "lifetime_before": lifetime}
+
+_TOPUP_ATTEMPTS = 3
+_TOPUP_BACKOFF_SECONDS = (1.0, 3.0)
 
 def set_star_balance(user_id: int, target: int, reason: str = "adjustment",
                      detail: str | None = None) -> int:
@@ -740,6 +801,113 @@ def forget_problem_reporter(user_id: int) -> int:
         ).rowcount or 0
         conn.commit()
     return changed
+
+FEEDBACK_RETENTION_DAYS = int(os.environ.get("FEEDBACK_RETENTION_DAYS", "30"))
+FEEDBACK_DELIVERY_KEY = "feedback_delivery"
+FEEDBACK_INSTANT, FEEDBACK_NIGHTLY = "instant", "nightly"
+
+def save_feedback(lang: "str | None", body: str) -> int:
+    """Keep one piece of feedback for ManagerBot to deliver. Returns its id."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.feedback (bot_id, lang, body) "
+            f"VALUES (%s, %s, %s) RETURNING id",
+            (_ledger_bot(), lang, body),
+        ).fetchone()
+        conn.commit()
+    return int(row[0])
+
+def _feedback_row(r) -> dict:
+    return {"id": r[0], "bot_id": r[1], "lang": r[2], "body": r[3],
+            "created_at": r[4], "delivered_at": r[5]}
+
+def take_undelivered_feedback(limit: int = 20) -> list[dict]:
+    """The oldest feedback nobody has been sent yet, marked as sent in the same statement -- so two ManagerBots overlapping in a deploy cannot both send the same one."""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"UPDATE {FAMILY_SCHEMA}.feedback SET delivered_at = now() "
+            f"WHERE id IN (SELECT id FROM {FAMILY_SCHEMA}.feedback "
+            f"             WHERE delivered_at IS NULL ORDER BY id LIMIT %s "
+            f"             FOR UPDATE SKIP LOCKED) "
+            f"RETURNING id, bot_id, lang, body, created_at, delivered_at",
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+        conn.commit()
+    return sorted((_feedback_row(r) for r in rows), key=lambda row: row["id"])
+
+def recent_feedback(limit: int = 10) -> list[dict]:
+    """The latest feedback, newest first, delivered or not -- for ManagerBot's /feedback, which is where it can be read again after the message is gone."""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT id, bot_id, lang, body, created_at, delivered_at "
+            f"FROM {FAMILY_SCHEMA}.feedback ORDER BY id DESC LIMIT %s",
+            (max(1, min(limit, 50)),),
+        ).fetchall()
+    return [_feedback_row(r) for r in rows]
+
+def feedback_count_since(hours: int = 24) -> int:
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT count(*) FROM {FAMILY_SCHEMA}.feedback "
+            f"WHERE created_at > now() - make_interval(hours => %s)",
+            (max(1, min(hours, 168)),),
+        ).fetchone()
+    return int(row[0])
+
+def prune_feedback() -> int:
+    """Drop feedback older than FEEDBACK_RETENTION_DAYS, sent or not."""
+    with _connect() as conn:
+        removed = conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.feedback "
+            f"WHERE created_at < now() - make_interval(days => %s)",
+            (FEEDBACK_RETENTION_DAYS,),
+        ).rowcount or 0
+        conn.commit()
+    return removed
+
+_local_settings: dict = {}
+
+def get_setting(key: str, default: "str | None" = None) -> "str | None":
+    """Blocking. Never raises: a missing database reads as "not set"."""
+    if not _enabled:
+        return _local_settings.get(key, default)
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                f"SELECT value FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (key,)).fetchone()
+        return row[0] if row and row[0] is not None else default
+    except Exception:
+        logger.debug("Could not read family setting %s", key, exc_info=True)
+        return default
+
+def settings_with_prefix(prefix: str) -> dict:
+    """Every setting whose key starts with `prefix`, as {key: value}."""
+    if not _enabled:
+        return {key: value for key, value in _local_settings.items() if key.startswith(prefix)}
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT key, value FROM {FAMILY_SCHEMA}.settings WHERE key LIKE %s",
+                (escaped + "%",)).fetchall()
+        return {key: value for key, value in rows}
+    except Exception:
+        logger.debug("Could not read family settings %s*", prefix, exc_info=True)
+        return {}
+
+def set_setting(key: str, value: str) -> None:
+    """Blocking. Never raises, for the same reason."""
+    if not _enabled:
+        _local_settings[key] = value
+        return
+    try:
+        with _connect() as conn:
+            conn.execute(
+                f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, value))
+            conn.commit()
+    except Exception:
+        logger.debug("Could not write family setting %s", key, exc_info=True)
 
 _bus_active_until = 0.0
 
@@ -970,6 +1138,29 @@ async def _cmd_dbdump(context, args):
     data = await asyncio.to_thread(dump)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
     return f"{len(data)/1024:.0f} KB", f"{_bot_id}_db_{stamp}.zip", data
+
+def installed_versions() -> list[str]:
+    """Every distribution this process can import, as `name==version`, sorted -- what `pip freeze` would print, without starting pip."""
+    from importlib import metadata
+    seen: dict[str, str] = {}
+    for dist in metadata.distributions():
+        name = (dist.metadata["Name"] or "").strip()
+        if name and name.lower() not in seen:
+            seen[name.lower()] = f"{name}=={dist.version}"
+    return [seen[key] for key in sorted(seen)]
+
+async def _cmd_versions(context, args):
+    """`versions` sends the whole list as a requirements-style file; `versions <name>` answers the matching lines as text."""
+    import platform
+    lines = await asyncio.to_thread(installed_versions)
+    head = f"Python {platform.python_version()}, {len(lines)} packages"
+    if args:
+        wanted = args[0].lower()
+        found = [line for line in lines if wanted in line.lower()]
+        return f"{head}; matching '{args[0]}':\n" + ("\n".join(found) or "(none)"), None, None
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
+    data = (f"# {_bot_id} {VERSION}, {head}, read {stamp} UTC\n" + "\n".join(lines) + "\n").encode()
+    return head, f"{_bot_id}_versions_{stamp}.txt", data
 
 async def _cmd_whois(context, args):
     if not args or not args[0].lstrip("-").isdigit():
@@ -1255,6 +1446,7 @@ COMMANDS = {
     "errors": _cmd_errors,
     "users": _cmd_users,
     "dbdump": _cmd_dbdump,
+    "versions": _cmd_versions,
     "whois": _cmd_whois,
     "message": _cmd_message,
     "logs": _cmd_logs,
@@ -1272,6 +1464,7 @@ COMMAND_HELP = {
     "errors": "errors since that bot last started",
     "users": "active users -- users [hours], default 24",
     "dbdump": "that bot's own tables as a zip of CSVs",
+    "versions": "versions [name] -- the installed packages as a requirements file, or the lines matching name",
     "whois": "whois <user_id> -- look a user up through that bot",
     "message": "message <user_id> <text> -- DM someone as that bot",
     "logs": "logs [n] [bot|problems] -- tail errors.log, bot.log with 'bot', problems.log with 'problems'",
@@ -1424,6 +1617,10 @@ def _prune() -> str:
         parts.append(f"{prune_problem_reports()} problem row(s)")
     except Exception:
         logger.debug("Could not prune problem reports", exc_info=True)
+    try:
+        parts.append(f"{prune_feedback()} feedback row(s)")
+    except Exception:
+        logger.debug("Could not prune feedback", exc_info=True)
     own = getattr(db, "prune_old_data", None)
     if own is not None:
         parts.append(f"{own()} activity row(s)")
@@ -1531,7 +1728,12 @@ def _try_lease(bot_id: str) -> bool:
     import psycopg
 
     if _lease_conn is None or _lease_conn.closed:
-        _lease_conn = psycopg.connect(db.DATABASE_URL, autocommit=True)
+
+        _lease_conn = psycopg.connect(
+            db.DATABASE_URL, autocommit=True, connect_timeout=15,
+            keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
+            tcp_user_timeout=30000,
+        )
     cur = _lease_conn.execute("SELECT pg_try_advisory_lock(%s)", (_lease_key(bot_id),))
     return bool(cur.fetchone()[0])
 
@@ -1791,8 +1993,9 @@ class PostgresPersistence(BasePersistence):
         return None
 
     async def flush(self) -> None:
-        writes, deletes = [], [("user", str(u)) for u in self._dropped_users]
-        for user_id in self._dirty_users:
+        dirty, dropped = set(self._dirty_users), set(self._dropped_users)
+        writes, deletes = [], [("user", str(u)) for u in dropped]
+        for user_id in dirty:
             kept = _clean(self._user_data.get(user_id) or {})
             if kept:
                 writes.append(("user", str(user_id), kept))
@@ -1808,6 +2011,9 @@ class PostgresPersistence(BasePersistence):
             await asyncio.to_thread(_delete_state, deletes)
         except Exception:
             logger.warning("Could not save in-progress state.", exc_info=True)
+
+            self._dirty_users |= dirty - self._dropped_users
+            self._dropped_users |= dropped - self._dirty_users
 
 _in_flight: dict[int, tuple[int, str]] = {}
 _next_ticket = 0
@@ -2367,6 +2573,19 @@ PROBLEMS = {
         "A slash command this bot does not have.",
         "A typo, a command from an older version, or one that belongs to another bot.",
         "Nothing, unless an old command should be kept working as an alias."),
+    "FM-FEEDBACK-LIMIT": Problem(
+        EVERY_PUBLIC_BOT, "Too much feedback from one person today",
+        "The person had already sent FEEDBACK_PER_DAY messages with /feedback in the last 24 hours, so "
+        "this one was not taken.",
+        "Several thoughts sent one at a time, or somebody using /feedback to message the owner over and "
+        "over.",
+        "Nothing; raise FEEDBACK_PER_DAY if ordinary people reach it."),
+    "FM-FEEDBACK-FAILED": Problem(
+        EVERY_PUBLIC_BOT, "Feedback could not be saved",
+        "Writing what the person sent with /feedback to the database failed, so it did not reach the "
+        "owner; they were asked to send it again.",
+        "The shared database unreachable or timing out.",
+        "The traceback beside the incident in the log; /status for the database."),
 
     "CV-NO-EXTENSION": Problem(
         "ConvertBot", "File name without a usable extension",
@@ -2509,6 +2728,15 @@ PROBLEMS = {
         "balance and the owner was alerted.",
         "An out-of-memory kill on a very large image, or a crash inside a native decoder.",
         "The log line beside the incident id has the exit code (-9 or 137 means killed); /usage shows memory."),
+    "CV-NO-MEMORY": Problem(
+        "ConvertBot", "Ran out of memory",
+        "ffmpeg was killed for memory while converting (SIGKILL: exit -9 or 137), or the worker hit a "
+        "MemoryError. The file is not at fault. Its ⚡ went back to the balance, and the person was told "
+        "that a lower resolution will convert.",
+        "A 4K or HDR video on a host with 1 GB a container: tone-mapping one 4K frame to SDR takes about "
+        "100 MB, and the encoder holds several. Measured on Railway, 2026-09-29.",
+        "Nothing, if it is rare. If it is common, the host needs more memory a service -- or such video "
+        "converted at 1080p (CHANGES_v2.0.0.md, Railway, measured)."),
     "CV-OUTPUT-TOO-BIG": Problem(
         "ConvertBot", "The result was over its send limit",
         "The conversion finished, but the file is larger than this job may send back: 50 MB, or where results "
@@ -2888,6 +3116,13 @@ PROBLEMS = {
         "A message from somebody with no inbox and no open conversation.",
         "Writing to the bot without having tapped a link.",
         "Nothing."),
+    "AN-REACTION-NOT-PASSED": Problem(
+        "AnonBot", "Reaction not passed on",
+        "A reaction on a message in a conversation could not be shown to the other person: a Telegram "
+        "Premium custom-emoji reaction, an emoji Telegram does not let bots use, or a second or third "
+        "reaction on one message (a bot shows one). The person saw a note for a few seconds.",
+        "A Premium user reacting with a custom emoji, or with more than one reaction.",
+        "Nothing; it is Telegram's limit on what a bot may react with (setMessageReaction)."),
 }
 
 KEYS = {
@@ -2905,6 +3140,8 @@ KEYS = {
         "update_soon_try_later": "FM-UPDATING",
         "update_soon_try_later_soon": "FM-UPDATING",
         "unknown_command": "FM-UNKNOWN-COMMAND",
+        "feedback_limit": "FM-FEEDBACK-LIMIT",
+        "feedback_failed": "FM-FEEDBACK-FAILED",
     },
     "convert_bot": {
         "unknown_extension": "CV-NO-EXTENSION",
@@ -2996,11 +3233,15 @@ KEYS = {
         "export_gone": "AN-EXPORT-GONE",
         "export_nothing_to_export": "AN-EXPORT-NOTHING",
         "generic_nudge": "AN-UNADDRESSED",
+
+        "reaction_not_passed": "AN-REACTION-NOT-PASSED",
+        "reaction_one_only": "AN-REACTION-NOT-PASSED",
     },
 }
 
 JOB_ENDINGS = {
     "refused": "CV-REFUSED", "timeout": "CV-TIMEOUT", "too_slow": "CV-TOO-SLOW", "crash": "CV-CRASH",
+    "no_memory": "CV-NO-MEMORY",
     "too_large": "CV-OUTPUT-TOO-BIG", "send_failed": "CV-SEND-FAILED", "interrupted": "CV-RESTARTED",
 }
 STICKER_ERRORS = {
@@ -3020,10 +3261,10 @@ ALERT_KEYS = {
 
 SIMPLE = frozenset({
     "FM-FLOOD", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE",
-    "FM-UPDATING", "FM-UNKNOWN-COMMAND",
+    "FM-UPDATING", "FM-UNKNOWN-COMMAND", "FM-FEEDBACK-LIMIT",
     "CV-NO-EXTENSION", "CV-TG-LIMIT", "CV-GROUP-LIMIT", "CV-UNSUPPORTED", "CV-TOO-BIG", "CV-NOTHING-SENDABLE",
     "CV-MEGAPIXELS", "CV-FORMAT-TOO-BIG", "CV-STORAGE-USER", "CV-QUEUE-FULL", "CV-EXPIRED",
-    "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW",
+    "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW", "CV-NO-MEMORY",
     "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-UNRECOGNIZED",
     "DL-LARGE-OFF", "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
     "DL-BUTTON-EXPIRED",
@@ -3034,7 +3275,7 @@ SIMPLE = frozenset({
     "AN-NOT-STARTED", "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-BLOCKED",
     "AN-REPLY-STALE", "AN-TOO-FAST", "AN-EDIT-NOT-RELAYED", "AN-CONV-GONE", "AN-NOT-YOURS",
     "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-GONE",
-    "AN-EXPORT-NOTHING", "AN-UNADDRESSED",
+    "AN-EXPORT-NOTHING", "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
 })
 
 URGENT, FAULT, REFUSED = 1, 2, 3
@@ -3062,8 +3303,76 @@ def level(code) -> int:
         return REFUSED
     return FAULT
 
-LEVEL_NAMES = {URGENT: "urgent", FAULT: "fault", REFUSED: "refused"}
+LEVEL_NAMES = {URGENT: "urgent", FAULT: "fault", REFUSED: "explained"}
 LEVEL_ICONS = {URGENT: "🚨", FAULT: "⚠️", REFUSED: "•"}
+
+GUIDED, LIMIT, GONE, OTHER_SIDE, PAUSED = "guided", "limit", "gone", "other_side", "paused"
+
+KINDS = {
+    GUIDED: frozenset({
+        "FM-UNKNOWN-COMMAND", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT",
+        "CV-NO-EXTENSION", "CV-MIXED-BATCH", "CV-UNRECOGNIZED",
+        "DL-UNRECOGNIZED",
+        "ST-WHOMADE-UNKNOWN", "ST-TITLE-EMPTY", "ST-IMPORT-SOURCE", "ST-UNRECOGNIZED",
+        "ST-NOTHING-ADDED", "ST-NO-STICKER",
+        "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-STALE",
+        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-NOTHING",
+        "AN-UNADDRESSED",
+    }),
+    LIMIT: frozenset({
+        "FM-FLOOD", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE", "FM-FEEDBACK-LIMIT",
+        "CV-TG-LIMIT", "CV-GROUP-LIMIT", "CV-UNSUPPORTED", "CV-TOO-BIG", "CV-NOTHING-SENDABLE",
+        "CV-MEGAPIXELS", "CV-FORMAT-TOO-BIG", "CV-STORAGE-USER", "CV-QUEUE-FULL", "CV-NO-CREDIT",
+        "CV-TOO-SLOW", "CV-NO-MEMORY",
+        "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-LARGE-OFF",
+        "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
+        "ST-ANIMATED", "ST-TG-PACK-FULL",
+        "AN-TOO-FAST", "AN-REACTION-NOT-PASSED",
+    }),
+    GONE: frozenset({
+        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED",
+        "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
+        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
+    }),
+    OTHER_SIDE: frozenset({
+        "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",
+        "AN-NOT-STARTED", "AN-REPLY-BLOCKED",
+    }),
+    PAUSED: frozenset({"FM-UPDATING"}),
+}
+
+KIND_ORDER = (GUIDED, LIMIT, GONE, OTHER_SIDE, PAUSED)
+
+KIND_LABELS = {
+    GUIDED: ("💡", "Shown how to use it",
+             "sent something the bot couldn't take, and were told what to do instead"),
+    LIMIT: ("📏", "Hit a limit",
+            "too big, too many, too fast, not enough ⚡, or something not offered — each by design"),
+    GONE: ("⌛", "Out of date, or not theirs",
+           "an old button or link, a record that had gone, or somebody else's button"),
+    OTHER_SIDE: ("🚫", "Blocked or unavailable",
+                 "the other person blocked them, paused or deleted their inbox, or never "
+                 "started the bot"),
+    PAUSED: ("⏸", "Turned away during an update",
+             "came while /pause was on, and were written down for /resume"),
+}
+
+def kind(code) -> "str | None":
+    """Which KIND a level-3 code is, or None for anything that is not level 3."""
+    if level(code) != REFUSED:
+        return None
+    for name, codes in KINDS.items():
+        if code in codes:
+            return name
+    return GUIDED
+
+def kind_label(code) -> str:
+    """"💡 shown how to use it" -- what /reports and /report say for a level-3 code, in place of the level's bare name."""
+    found = kind(code)
+    if found is None:
+        return f"{LEVEL_ICONS.get(level(code), '•')} {LEVEL_NAMES.get(level(code), '?')}"
+    icon, heading, _ = KIND_LABELS[found]
+    return f"{icon} {heading[0].lower()}{heading[1:]}"
 
 def urgent(code) -> bool:
     """Whether this one is worth interrupting the owner for."""
@@ -3135,7 +3444,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, NetworkError, RetryAfter
+from telegram.error import BadRequest, Conflict, NetworkError, RetryAfter
 from telegram.ext import ApplicationHandlerStop, ConversationHandler, TypeHandler
 
 import db
@@ -3185,6 +3494,32 @@ def language_keyboard(current: str | None = None) -> InlineKeyboardMarkup:
                              callback_data=f"setlang:{code}")
         for code, label in i18n.LANGUAGE_LABELS.items()
     ]])
+
+HELP_TOGGLE_PATTERN = r"^help:(full|brief)$"
+
+def wants_full_help(context) -> bool:
+    """/help full -- or all, or more."""
+    args = getattr(context, "args", None) or []
+    return bool(args) and str(args[0]).lower() in ("full", "all", "more")
+
+def help_keyboard(lang: str, full: bool, rows=()) -> InlineKeyboardMarkup:
+    """The button to the other version, then the bot's own rows."""
+    toggle = (InlineKeyboardButton(i18n.t(lang, "help_brief_button"), callback_data="help:brief")
+              if full else
+              InlineKeyboardButton(i18n.t(lang, "help_full_button"), callback_data="help:full"))
+    return InlineKeyboardMarkup([[toggle]] + [list(row) for row in rows if row])
+
+def help_toggle(build_text, rows=None):
+    """The toggle's handler, for one bot: `build_text(lang, full=...)` is the bot's own build_help_text, and `rows(lang)` the button rows it keeps under its help, if any."""
+    async def toggle(update, context) -> None:
+        query = update.callback_query
+        await query.answer()
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        full = query.data == "help:full"
+        await live_message.edit_in_place(
+            query.message, context.bot, build_text(lang, full=full),
+            reply_markup=help_keyboard(lang, full, rows(lang) if rows else ()))
+    return toggle
 
 WORKER_THREADS = int(os.environ.get("WORKER_THREADS", "4"))
 
@@ -3391,7 +3726,11 @@ async def _credit_topup(update_or_chat, context, user, amount: int, lang: str,
     """Turn a completed payment into credit, and say what it bought."""
     await asyncio.to_thread(db.update_star_transaction, payload, "paid", charge_id)
     result = await asyncio.to_thread(family_link.topup, user.id, amount,
-                                     "sandbox top-up" if sandbox else "stars top-up")
+                                     "sandbox top-up" if sandbox else "stars top-up", charge_id)
+    if result is None:
+
+        emit_event("warning", "payment", "A Stars payment was delivered twice and credited once.")
+        return None
 
     text = i18n.t(lang, "topup_thanks", stars=result["stars"],
                   credited=result["credited"], balance=result["balance"],
@@ -3615,6 +3954,8 @@ async def donation_payment_received(update, context) -> None:
     if sp.currency == "XTR":
         text = await _credit_topup(update, context, user, sp.total_amount, lang,
                                    sp.invoice_payload, sp.telegram_payment_charge_id)
+        if text is None:
+            return
         await update.message.reply_text(text)
     else:
         await asyncio.to_thread(
@@ -3857,6 +4198,8 @@ def privacy_text(lang: str) -> str:
         + collapsed(i18n.t(lang, "privacy_stored")),
         heading(i18n.t(lang, "privacy_problems_heading")) + "\n"
         + collapsed(i18n.t(lang, "privacy_problems")),
+        heading(i18n.t(lang, "privacy_feedback_heading")) + "\n"
+        + body(i18n.t(lang, "privacy_feedback")),
         heading(i18n.t(lang, "privacy_seen_by_heading")) + "\n"
         + body(i18n.t(lang, "privacy_seen_by")) + "\n"
         + body(i18n.t(lang, "privacy_others")),
@@ -4008,12 +4351,18 @@ def cancel_items(context, lang: str) -> list[CancelItem]:
         items.append(CancelItem("donation",
                                 i18n.t(lang, "cancel_item_donation"),
                                 i18n.t(lang, "cancel_button_donation")))
+    if context.user_data.get(FEEDBACK_PROMPT_KEY):
+        items.append(CancelItem("feedback",
+                                i18n.t(lang, "cancel_item_feedback"),
+                                i18n.t(lang, "cancel_button_feedback")))
     return items
 
 def cancel_shared_item(context, lang: str, key: str) -> str | None:
     """Stop one of this file's states by key."""
     if key == "donation" and context.user_data.pop("donate_custom_currency", None):
         return i18n.t(lang, "cancel_item_donation")
+    if key == "feedback" and context.user_data.pop(FEEDBACK_PROMPT_KEY, None):
+        return i18n.t(lang, "cancel_item_feedback")
     return None
 
 def cancel_question(lang: str, items: list[CancelItem]):
@@ -4087,6 +4436,92 @@ async def keep_going(update, context, lang: str) -> None:
     await live_message.edit_in_place(
         update.callback_query.message, context.bot, i18n.t(lang, "cancel_kept")
     )
+
+FEEDBACK_PROMPT_KEY = "feedback_prompt"
+FEEDBACK_PER_DAY = int(os.environ.get("FEEDBACK_PER_DAY", "5"))
+
+FEEDBACK_MAX_CHARS = 4096
+_COMMAND_WORD = re.compile(r"^/\S*\s*")
+
+_feedback_sent: "OrderedDict[int, deque]" = OrderedDict()
+
+def _feedback_room(user_id: int) -> bool:
+    """Whether this person may send another one today."""
+    if FEEDBACK_PER_DAY <= 0:
+        return True
+    window = _feedback_sent.get(user_id)
+    if not window:
+        return True
+    now = time.monotonic()
+    while window and now - window[0] > 86400:
+        window.popleft()
+    return len(window) < FEEDBACK_PER_DAY
+
+def _feedback_used(user_id: int) -> None:
+    window = _feedback_sent.setdefault(user_id, deque())
+    _feedback_sent.move_to_end(user_id)
+    window.append(time.monotonic())
+    _flood_trim(_feedback_sent)
+
+async def _ask_for_feedback(message, context, lang: str, key: str = "feedback_ask") -> None:
+    prompt = await message.reply_text(
+        i18n.t(lang, key),
+        reply_markup=ForceReply(selective=True,
+                                input_field_placeholder=i18n.t(lang, "feedback_placeholder")),
+    )
+    context.user_data[FEEDBACK_PROMPT_KEY] = prompt.message_id
+    remember_force_reply(context, prompt)
+
+async def _take_feedback(update, context, lang: str, text: str) -> None:
+    """Keep it for the owner and say so -- or say exactly why not."""
+    message = update.effective_message
+    user_id = update.effective_user.id
+    if not _feedback_room(user_id):
+        await message.reply_text(i18n.t(lang, "feedback_limit", per_day=FEEDBACK_PER_DAY))
+        return
+    try:
+        await asyncio.to_thread(family_link.save_feedback, lang, text[:FEEDBACK_MAX_CHARS])
+    except Exception:
+        logging.getLogger(__name__).warning("Could not keep a piece of feedback", exc_info=True)
+        await message.reply_text(i18n.t(lang, "feedback_failed"))
+        return
+    _feedback_used(user_id)
+    await message.reply_text(i18n.t(lang, "feedback_thanks"))
+
+async def feedback_command(update, context) -> None:
+    """/feedback [text] -- send it now, or be asked for it."""
+    message = update.effective_message
+    lang = await i18n.get_lang(update.effective_user.id, context)
+
+    text = _COMMAND_WORD.sub("", message.text or "", count=1).strip()
+    if text:
+        await _take_feedback(update, context, lang, text)
+        return
+    await _ask_for_feedback(message, context, lang)
+
+def _answers_feedback_prompt(update, context) -> bool:
+    prompt = context.user_data.get(FEEDBACK_PROMPT_KEY)
+    replied = getattr(update.effective_message, "reply_to_message", None)
+    return bool(prompt) and replied is not None and replied.message_id == prompt
+
+async def awaited_text_received(update, context) -> None:
+    """Register in a group before your bot's own message handling, with `(filters.TEXT | filters.REPLY) & ~filters.COMMAND` -- see track_activity for why it needs a group of its own."""
+    message = update.effective_message
+    if message is None:
+        return
+    if _answers_feedback_prompt(update, context):
+        context.user_data.pop(FEEDBACK_PROMPT_KEY, None)
+        context.user_data.pop(FORCE_REPLY_KEY, None)
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        text = (message.text or "").strip()
+        if text:
+            await _take_feedback(update, context, lang, text)
+        else:
+
+            await _ask_for_feedback(message, context, lang, "feedback_text_only")
+        raise ApplicationHandlerStop
+    if message.text is not None:
+        await donate_custom_amount_received(update, context)
 
 _LOG_FORMAT = "%(asctime)s %(name)s %(levelname)s %(message)s"
 
@@ -4187,6 +4622,39 @@ def note_network_ok() -> None:
         emit_event("info", "network", "Telegram is reachable again.")
     _network_blips = 0
     _network_alerted = False
+
+CONFLICT_ALERT_COUNT = 3
+CONFLICT_ALERT_WINDOW_S = 120
+CONFLICT_QUIET_RESET_S = 600
+
+_conflict_times: "deque[float]" = deque(maxlen=CONFLICT_ALERT_COUNT)
+_conflict_last: "float | None" = None
+_conflict_alerted = False
+
+def note_conflict(exc: BaseException) -> None:
+    """A Conflict from the long poll (no update behind it)."""
+    global _conflict_last, _conflict_alerted
+    now = time.monotonic()
+    if _conflict_last is not None and now - _conflict_last >= CONFLICT_QUIET_RESET_S:
+        _conflict_times.clear()
+        _conflict_alerted = False
+    _conflict_last = now
+    _conflict_times.append(now)
+    in_window = sum(1 for seen in _conflict_times if now - seen <= CONFLICT_ALERT_WINDOW_S)
+    logging.getLogger(__name__).warning(
+        "Conflict on getUpdates: %s within the last %s s (a report needs %s)",
+        in_window, CONFLICT_ALERT_WINDOW_S, CONFLICT_ALERT_COUNT,
+    )
+    if in_window >= CONFLICT_ALERT_COUNT and not _conflict_alerted:
+        _conflict_alerted = True
+        message = (
+            "Another copy of this bot seems to be polling with the same token: "
+            f"{in_window} conflicts within {CONFLICT_ALERT_WINDOW_S} seconds"
+        )
+        logging.getLogger(__name__).error(message)
+        report = Conflict(message)
+        report.__cause__ = exc
+        record_error(report)
 
 def record_error(exc: BaseException) -> None:
     global _error_count
@@ -4573,6 +5041,10 @@ async def error_handler(update, context) -> None:
 
     if update is None and is_transient_network_error(context.error):
         note_network_blip(context.error)
+        return
+
+    if update is None and isinstance(context.error, Conflict):
+        note_conflict(context.error)
         return
     incident = problems.new_incident()
     logging.getLogger(__name__).error(
@@ -5224,12 +5696,10 @@ def _emit(line: dict) -> None:
 
 def _save_session(text: str) -> None:
     """Written whole and then renamed, so a reader never sees half a file."""
-    partial = SESSION_FILE.with_suffix(".partial")
-    partial.write_text(text, encoding="utf-8")
-    try:
-        os.chmod(partial, 0o600)
-    except OSError:
-        pass
+    partial = SESSION_FILE.with_suffix(f".{os.getpid()}.partial")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
     os.replace(partial, SESSION_FILE)
 
 async def _connect():
@@ -5247,7 +5717,12 @@ async def _connect():
         await asyncio.wait_for(client.connect(), CONNECT_TIMEOUT_S)
         if not await client.is_user_authorized():
             await asyncio.wait_for(client.sign_in(bot_token=BOT_TOKEN), CONNECT_TIMEOUT_S)
-            _save_session(client.session.save())
+            try:
+                _save_session(client.session.save())
+            except OSError:
+
+                logger.warning("Could not keep the MTProto login in %s; the next transfer logs in again.",
+                               SESSION_FILE, exc_info=True)
     except Exception as exc:
         try:
             await client.disconnect()

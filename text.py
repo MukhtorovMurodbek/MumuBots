@@ -182,6 +182,41 @@ STRINGS = {
         "cancel_button_donation": "💸 Donation amount",
         "cancel_item_donation": "the donation amount I asked you for",
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• /newpack makes a sticker pack: send pictures, GIFs, videos or stickers, an emoji after each if you like, then /done.\n"
+            "• /addsticker adds to a pack you have; /mypacks lists them, with buttons to rename, share or delete one.\n"
+            "• /import copies stickers in from another Telegram pack or a WhatsApp export.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /newpack · /addsticker · /mypacks · /cancel\n"
+            "Every command: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
         "cancel_item_new_pack": "the new pack you were naming",
         "cancel_button_new_pack": "🆕 Naming a new pack",
         "cancel_item_rename": "renaming \"{title}\"",
@@ -190,10 +225,10 @@ STRINGS = {
         "cancel_button_editing": "📦 Editing a pack",
 
         "start_intro": (
-            "Hey! I turn your images/GIFs/videos/stickers into Telegram sticker "
-            "packs, and I can grab videos from Instagram/TikTok links.\n\n"
+            "Hey! I turn your images, GIFs, videos and stickers into Telegram sticker "
+            "packs.\n\n"
         ),
-        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/done - finish editing a pack\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/done - finish editing a pack\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
         "whomade_usage": "Usage: /whomade <pack name or t.me/addstickers link>",
         "whomade_not_found": (
             "I don't have a record of that pack — either it wasn't created "
@@ -471,14 +506,49 @@ STRINGS = {
         "cancel_button_donation": "💸 Xayriya miqdori",
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• /newpack stiker to'plami yaratadi: rasm, GIF, video yoki stiker yuboring, xohlasangiz har biridan keyin emoji ham, so'ng /done.\n"
+            "• /addsticker mavjud to'plamga qo'shadi; /mypacks to'plamlaringiz ro'yxati — nomini o'zgartirish, ulashish yoki o'chirish tugmalari bilan.\n"
+            "• /import boshqa Telegram to'plamidan yoki WhatsApp eksportidan stikerlarni ko'chiradi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /newpack · /addsticker · /mypacks · /cancel\n"
+            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "cancel_item_new_pack": "siz nom qo'yayotgan yangi to'plam",
         "cancel_button_new_pack": "🆕 Yangi to'plamga nom berish",
         "cancel_item_rename": "\"{title}\" nomini o'zgartirish",
         "cancel_button_rename": "✏️ To'plam nomini o'zgartirish",
         "cancel_item_editing": "\"{title}\" ni tahrirlash",
         "cancel_button_editing": "📦 To'plamni tahrirlash",
-        "start_intro": "Salom! Rasm, GIF, video va stikerlaringizdan Telegram stiker to'plamlari yasayman, Instagram/TikTok havolalaridan video ham olib bera olaman.\n\n",
-        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/done - to'plamni tahrirlashni yakunlash\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "start_intro": "Salom! Rasm, GIF, video va stikerlaringizdan Telegram stiker to'plamlari yasayman.\n\n",
+        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/done - to'plamni tahrirlashni yakunlash\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
         "whomade_usage": "Qanday ishlatiladi: /whomade <to'plam nomi yoki t.me/addstickers havolasi>",
         "whomade_not_found": (
             "Bu to'plam haqida ma'lumotim yo'q — u shu bot orqali yaratilmagan "
@@ -627,8 +697,8 @@ STRINGS = {
         "import_zip_no_images": "Bu zip ichida ishlatsa bo'ladigan rasm topilmadi.",
     },
     "ru": {
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
             "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
             "кто его запустил, а /donate — это совершенно необязательный способ помочь "
@@ -683,26 +753,26 @@ STRINGS = {
             "Делает стикерпаки из картинок, GIF и видео."
         ),
         "bot_description": (
-            "Пришли картинку, GIF или видео — бот соберёт из этого стикерпак, который принадлежит "
-            "тебе.\n"
+            "Пришлите картинку, GIF или видео — бот соберёт из этого стикерпак, который принадлежит "
+            "вам.\n"
             "\n"
-            "Дай ссылку, чтобы паком мог пополнять кто-то ещё, или перенеси стикеры из другого "
+            "Дайте ссылку, чтобы паком мог пополнять кто-то ещё, или перенесите стикеры из другого "
             "пака Telegram либо из архива WhatsApp.\n"
             "\n"
-            "Английский, узбекский и русский. /privacy — что бот о тебе хранит."
+            "Английский, узбекский и русский. /privacy — что бот о вас хранит."
         ),
 
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• твой числовой id в Telegram и выбранный язык\n"
-            "• паки, которые ты здесь собрал: имя и название каждого, а также имя и username, "
-            "которые были у тебя в тот момент\n"
-            "• кому ты дал доступ на добавление в пак и какие ссылки создал\n"
+            "• ваш числовой id в Telegram и выбранный язык\n"
+            "• паки, которые вы здесь собрали: имя и название каждого, а также имя и username, "
+            "которые были у вас в тот момент\n"
+            "• кому вы дали доступ на добавление в пак и какие ссылки создали\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
-            "• то, что бот в этот момент для тебя делает — пока не закончит"
+            "• то, что бот в этот момент для вас делает — пока не закончит"
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
@@ -717,46 +787,46 @@ STRINGS = {
             "внешние сервисы не вызываются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
         "terms_specific": (
-            "О стикерах: загружай то, что можешь загружать. Не собирай паки из чужих работ без "
-            "разрешения и не делай паков из того, что запрещено правилами самого Telegram. "
+            "О стикерах: загружайте то, что можете загружать. Не собирайте паки из чужих работ без "
+            "разрешения и не делайте паков из того, что запрещено правилами самого Telegram. "
             "Созданный пак живёт в Telegram — бот может о нём забыть, но удалить его может "
             "только владелец и только через Telegram."
         ),
-        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Бот забудет паки, которые ты через него собрал: перестанет их показывать и не сможет в них ничего добавить. Сами паки продолжат работать у всех, кто их установил — по- настоящему удалить пак можно только самому, через Telegram. Язык, твои ссылки и чужой доступ на добавление в твои паки тоже пропадут.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он твой, если вернёшься.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Бот забудет паки, которые вы через него собрали: перестанет их показывать и не сможет в них ничего добавить. Сами паки продолжат работать у всех, кто их установил — по- настоящему удалить пак можно только самому, через Telegram. Язык, ваши ссылки и чужой доступ на добавление в ваши паки тоже пропадут.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start, когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -770,6 +840,40 @@ STRINGS = {
         "cancel_button_donation": "💸 Сумма пожертвования",
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
+        ),
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• /newpack создаёт набор стикеров: присылайте картинки, GIF, видео или стикеры, после каждого можно эмодзи, в конце /done.\n"
+            "• /addsticker добавляет в уже готовый набор; /mypacks — список наборов с кнопками: переименовать, поделиться, удалить.\n"
+            "• /import копирует стикеры из другого набора Telegram или из экспорта WhatsApp.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /newpack · /addsticker · /mypacks · /cancel\n"
+            "Все команды — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
         "cancel_item_new_pack": "\u043d\u043e\u0432\u044b\u0439 \u043d\u0430\u0431\u043e\u0440, \u043a\u043e\u0442\u043e\u0440\u043e\u043c\u0443 \u0432\u044b \u0434\u0430\u0432\u0430\u043b\u0438 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
         "cancel_button_new_pack": "🆕 Название нового набора",
         "cancel_item_rename": "\u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u00ab{title}\u00bb",
@@ -777,11 +881,10 @@ STRINGS = {
         "cancel_item_editing": "\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u00ab{title}\u00bb",
         "cancel_button_editing": "📦 Редактирование набора",
         "start_intro": (
-            "Привет! Я превращаю ваши изображения/GIF/видео/стикеры в наборы "
-            "стикеров Telegram, а также могу скачать видео по ссылке из "
-            "Instagram/TikTok.\n\n"
+            "Здравствуйте! Я превращаю ваши изображения, GIF, видео и стикеры в наборы "
+            "стикеров Telegram.\n\n"
         ),
-        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/done - закончить редактирование набора\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/done - закончить редактирование набора\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "whomade_usage": "Использование: /whomade <имя набора или ссылка t.me/addstickers>",
         "whomade_not_found": (
             "У меня нет записи об этом наборе — либо он не был создан через этого "
@@ -931,7 +1034,7 @@ STRINGS = {
         ),
         "cancelled_status_note": "❌ Отменено.",
         "unrecognized": "Не понял, для чего это — попробуйте /newpack, /mypacks или /help.",
-        "unknown_command": "Я не знаю такую команду. Отправь /help, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
         "err_invalid_name": (
             "⚠️ Telegram отклонил внутреннее имя набора — обычно это происходит, "
             "когда название начинается с цифры или символа. Отправьте /cancel, затем "
@@ -1005,6 +1108,7 @@ COMMAND_MENU = {
         "whomade": "To'plamni kim yaratgan — stikerini yuboring",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz",
         "donate": "Server xarajatlariga hissa qo'shish",
         "paysupport": "To'lov bilan muammo",
@@ -1022,6 +1126,7 @@ COMMAND_MENU = {
         "whomade": "Кто сделал пак — пришлите его стикер",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит",
         "donate": "Помочь с расходами на хостинг",
         "paysupport": "Проблема с оплатой",
@@ -1094,10 +1199,10 @@ STRINGS = {
         "balance_recent": "Recent:",
         "balance_empty_hint": '/recharge adds credit whenever you want some.',
         "bot_short_description": (
-            "Converts pictures, video, audio, documents, spreadsheets and subtitles "
-            "between about 75 formats."
+            "Converts pictures, raw photos, video, audio, documents, spreadsheets, subtitles and archives "
+            "— about 90 formats."
         ),
-        "bot_description": 'Send a file and pick what to turn it into. Pictures, video, audio, documents, spreadsheets, subtitles — 75 formats in, 40 out.\n\nA HEIC from an iPhone becomes a JPG. Several pictures become one PDF. A PDF becomes pictures or text. /formats has the rest.\n\nAnything under 3 MB is free. Above that it is priced by size in ⚡ credit, bought with Stars and shown before you choose. A conversion the bot fails gives its credit back.\n\nEnglish, Uzbek and Russian. /privacy says what it keeps about you.',
+        "bot_description": 'Send a file and pick what to turn it into. Pictures, raw, video, audio, documents, spreadsheets, subtitles, archives — 90 formats in, 50 out.\n\nA HEIC from an iPhone becomes a JPG. Several pictures become one PDF. A PDF becomes pictures or text. /formats has the rest.\n\nAnything under 3 MB is free. Above that it is priced by size in ⚡ credit, bought with Stars and shown before you choose. A conversion the bot fails gives its credit back.\n\nEnglish, Uzbek and Russian. /privacy says what it keeps about you.',
 
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
@@ -1177,11 +1282,45 @@ STRINGS = {
         "cancel_button_donation": '💸 Top-up amount',
         "cancel_item_donation": 'the top-up amount I asked you for',
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• Send me a file — a picture, camera raw photo, video, audio, document, spreadsheet, subtitles or archive — and choose what it should become. /formats lists everything.\n"
+            "• A conversion costs ⚡ credit, and its price is shown before anything is taken. /recharge tops it up; /balance shows what you have and where it went.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Every command, and the prices: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
         "cancel_item_conversion": "the .{ext} file you were converting",
         "cancel_button_conversion": "🔄 The file waiting to convert",
 
         "start_greeting": "Hey! Send me a file and I'll convert it to another format.\n\n",
-        "help_text": "Send me a file and I'll convert it to another format — pictures, video, audio, documents, spreadsheets and subtitles.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
+        "help_text": "Send me a file and I'll convert it to another format — pictures, camera raw photos, video, audio, documents, spreadsheets, subtitles and archives.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
         "convert_start_prompt": (
             "Send me a file to convert, up to {max_mb} MB — a picture, a video, a "
             "sound, a document, a spreadsheet or a subtitle file. Send several "
@@ -1242,6 +1381,11 @@ STRINGS = {
         "send_limit_note": "📤 The converted file can be up to {mb} MB. If it comes out bigger, it won't be sent — and its ⚡ goes straight back to your balance.",
         "too_many_megapixels": 'That picture is {mp} megapixels — over the {max} MP I can convert safely. Nothing was charged.',
         "too_big_to_send_note": "📐 {formats} aren't offered: at {mp} MP they would come out over the {limit} MB a bot can send. JPG, WEBP or AVIF keep it sendable.",
+        "raw_too_big": "That raw photo is {mp} megapixels. This server converts camera raw photos up to {max}: past that even the half-size decode needs more memory than it has. Nothing was charged.",
+        "raw_half_note": "⚠️ NOTE: this raw photo is {mp} MP. It is converted at half size ({out} MP): the full picture needs more memory than this server has.",
+        "video_fit_hdr_note": "⚠️ NOTE: this video is {w}×{h} HDR. This server converts it at {fw}×{fh} — the full picture needs more memory than it has. The colours are kept.",
+        "video_fit_big_note": "⚠️ NOTE: this video is {w}×{h}. WEBM is made at {fw}×{fh} here; MP4, MKV and MOV keep the full size.",
+        "video_fit_huge_note": "⚠️ NOTE: this video is {w}×{h}. This server converts it at {fw}×{fh} — the full picture needs more memory than it has.",
         "nothing_sendable": 'Every format I could offer would come out over the {limit} MB a bot can send for a picture this size. Nothing was charged.',
         "too_big_to_send_alert": 'That format would come out over the {limit} MB a bot can send for this picture.',
         "keep_toggle_off": '📌 Keep file for more formats: off',
@@ -1273,6 +1417,7 @@ STRINGS = {
         "job_reason_timeout": 'That conversion ran past its {minutes}-minute limit, so I stopped it. The owner has been told.',
         "job_reason_too_slow": "This one would take about {minutes} minutes to convert, and a conversion here can run for {limit}, so I stopped it now rather than make you wait for the limit. A shorter clip, or a lower resolution, will fit.",
         "job_reason_crash": 'The conversion failed on my side. The owner has been told.',
+        "job_reason_no_memory": "This one needs more memory to convert than this server has — that happens with 4K and HDR video. Your file is fine: a version at 1080p or lower will convert.",
         "job_reason_too_large": 'The {target} came out at {mb} MB, more than the {limit} MB I can send back for this conversion — JPG, WEBP or AVIF will be far smaller. The owner has been told.',
         "job_reason_send_failed": 'The file converted, but sending it to you failed. The owner has been told.',
         "job_reason_interrupted": 'I was restarted in the middle of that conversion. Send it again in a minute.',
@@ -1287,6 +1432,7 @@ STRINGS = {
         "category_document": "document",
         "category_data": "data",
         "category_subtitle": "subtitle",
+        "category_archive": "archive",
         "formats_title": "📁 What I convert",
         "formats_intro": (
             "{sources} formats in, {targets} out — {pairs} combinations in all. "
@@ -1300,6 +1446,8 @@ STRINGS = {
             "• PDF or EPUB → PNG, JPG or plain text\n"
             "• Word document → PDF, HTML or Markdown\n"
             "• CSV, JSON or XML → an XLSX spreadsheet\n"
+            "• Camera raw (CR3, NEF, ARW, DNG…) → JPG, PNG or a 16-bit TIFF\n"
+            "• A RAR or 7z your phone cannot open → ZIP\n"
             "• Subtitles: SRT, VTT and ASS between each other, or just the transcript"
         ),
         "formats_reads": "Reads",
@@ -1393,10 +1541,10 @@ STRINGS = {
         "balance_recent": 'Oxirgi amallar:',
         "balance_empty_hint": "/recharge orqali istalgan paytda balansni to'ldirishingiz mumkin.",
         "bot_short_description": (
-            "Rasm, video, audio, hujjat, jadval va subtitrlarni 75 ga yaqin format "
+            "Rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlarni 90 ga yaqin format "
             "orasida o'giradi."
         ),
-        "bot_description": "Fayl yuboring va qaysi formatga o'girishni tanlang. Rasm, video, audio, hujjat, jadval, subtitr — 75 formatdan 40 formatga.\n\niPhone'dagi HEIC rasm — JPG ga. Bir nechta rasm — bitta PDF ga. PDF — rasm yoki matnga. Hammasi: /formats\n\n3 MB gacha bepul. Kattaroq fayl hajmiga qarab Stars bilan sotib olinadigan ⚡ kreditda to'lanadi, narx oldindan ko'rsatiladi. Bot xato qilsa, ⚡ balansga qaytadi.\n\nIngliz, o'zbek va rus tillarida. Nima saqlanishi: /privacy",
+        "bot_description": "Fayl yuboring va qaysi formatga o'girishni tanlang. Rasm, kamera raw, video, audio, hujjat, jadval, subtitr, arxiv — 90 formatdan 50 formatga.\n\niPhone'dagi HEIC rasm — JPG ga. Bir nechta rasm — bitta PDF ga. PDF — rasm yoki matnga. Hammasi: /formats\n\n3 MB gacha bepul. Kattaroq fayl hajmiga qarab Stars bilan sotib olinadigan ⚡ kreditda to'lanadi, narx oldindan ko'rsatiladi. Bot xato qilsa, ⚡ balansga qaytadi.\n\nIngliz, o'zbek va rus tillarida. Nima saqlanishi: /privacy",
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
@@ -1434,11 +1582,45 @@ STRINGS = {
         "cancel_button_donation": "💸 To'ldirish miqdori",
         "cancel_item_donation": "kiritilishi kutilayotgan to'ldirish miqdori",
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• Menga fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv — va u nimaga aylanishini tanlang. Barcha formatlar: /formats\n"
+            "• Har bir konvertatsiya ⚡ kredit turadi, narxi esa hech narsa yechilishidan oldin ko'rsatiladi. Kreditni /recharge bilan to'ldirasiz; /balance qancha qolgani va nimaga sarflanganini ko'rsatadi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Barcha buyruqlar va narxlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "cancel_item_conversion": "o'girilishi kutilayotgan .{ext} fayli",
         "cancel_button_conversion": "🔄 Konvertatsiyani kutayotgan fayl",
         "start_greeting": "Salom! Menga faylni yuboring va men uni boshqa formatga o'giraman.\n\n",
-        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, video, audio, hujjat, jadval va subtitrlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
-        "convert_start_prompt": "O'girish uchun {max_mb} MB gacha fayl yuboring — rasm, video, audio, hujjat, jadval yoki subtitr. Bir nechta rasmni birga yuborsangiz, ularni bitta PDF qilib beraman.\n\nBarcha formatlar: /formats\n\nNarxlar ⚡ kreditda:\n{pricing}\n\nBekor qilish uchun: /cancel",
+        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
+        "convert_start_prompt": "O'girish uchun {max_mb} MB gacha fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv. Bir nechta rasmni birga yuborsangiz, ularni bitta PDF qilib beraman.\n\nBarcha formatlar: /formats\n\nNarxlar ⚡ kreditda:\n{pricing}\n\nBekor qilish uchun: /cancel",
         "cancelled": "Bekor qilindi.",
         "btn_cancel_conversion": "✖️ Bekor qilish",
         "unknown_extension": "Fayl nomidan formatini aniqlab bo'lmadi — faylni kengaytmasi bilan (masalan, rasm.png) hujjat sifatida yuboring.",
@@ -1488,6 +1670,11 @@ STRINGS = {
         "send_limit_note": "📤 Tayyor fayl {mb} MB gacha bo'lishi mumkin. Bundan katta chiqsa, u yuborilmaydi — bunday holda ⚡ darhol balansingizga qaytib tushadi.",
         "too_many_megapixels": "Bu rasm {mp} megapiksel — xavfsiz o'girish chegarasi {max} MP. Balansdan hech narsa yechilmadi.",
         "too_big_to_send_note": "📐 {formats} formatlari ko'rsatilmadi: {mp} MP rasmda ular bot yubora oladigan {limit} MB dan katta chiqadi. JPG, WEBP yoki AVIF esa yuborsa bo'ladigan hajmda bo'ladi.",
+        "raw_too_big": "Bu raw suratning o'lchami {mp} megapiksel. Server raw suratlarni {max} megapikselgacha o'giradi: undan kattasiga yarim o'lchamda ochish uchun ham xotira yetmaydi. Balansdan hech narsa yechilmadi.",
+        "raw_half_note": "⚠️ ESLATMA: bu raw surat {mp} MP. U yarim o'lchamda ({out} MP) o'giriladi: to'liq tasvir uchun serverda xotira yetmaydi.",
+        "video_fit_hdr_note": "⚠️ ESLATMA: bu video {w}×{h} HDR. Server uni {fw}×{fh} o'lchamda o'giradi — to'liq tasvir uchun serverda xotira yetmaydi. Ranglar saqlanadi.",
+        "video_fit_big_note": "⚠️ ESLATMA: bu video {w}×{h}. WEBM bu yerda {fw}×{fh} o'lchamda tayyorlanadi; MP4, MKV va MOV to'liq o'lchamda qoladi.",
+        "video_fit_huge_note": "⚠️ ESLATMA: bu video {w}×{h}. Server uni {fw}×{fh} o'lchamda o'giradi — to'liq tasvir uchun serverda xotira yetmaydi.",
         "nothing_sendable": "Bu o'lchamdagi rasm istalgan formatda bot yubora oladigan {limit} MB dan katta chiqadi. Balansdan hech narsa yechilmadi.",
         "too_big_to_send_alert": 'Bu rasm shu formatda bot yubora oladigan {limit} MB dan katta chiqadi.',
         "keep_toggle_off": "📌 Faylni boshqa formatlar uchun saqlash: o'chirilgan",
@@ -1519,6 +1706,7 @@ STRINGS = {
         "job_reason_timeout": "Konvertatsiya {minutes} daqiqalik vaqt chegarasidan oshib ketgani uchun to'xtatildi. Bot egasiga xabar berildi.",
         "job_reason_too_slow": "Bu faylni o'girish taxminan {minutes} daqiqa olardi, bu yerda esa bitta konvertatsiya ko'pi bilan {limit} daqiqa ishlaydi. Shuning uchun chegaragacha kuttirib o'tirmay, hozir to'xtatdim. Qisqaroq video yoki pastroq sifat bemalol sig'adi.",
         "job_reason_crash": 'Konvertatsiya bot tomonidagi xatolik tufayli bajarilmadi. Bot egasiga xabar berildi.',
+        "job_reason_no_memory": "Bu faylni o'girishga serverning xotirasi yetmadi — 4K va HDR videolarda shunday bo'ladi. Faylingizda muammo yo'q: uning 1080p yoki undan past sifatdagi nusxasi bemalol o'giriladi.",
         "job_reason_too_large": "{target} fayli {mb} MB chiqdi, bu konvertatsiya natijasini esa faqat {limit} MB gacha yubora olaman. JPG, WEBP yoki AVIF ancha kichik bo'ladi. Bot egasiga xabar berildi.",
         "job_reason_send_failed": "Fayl o'girildi, lekin uni sizga yuborib bo'lmadi. Bot egasiga xabar berildi.",
         "job_reason_interrupted": 'Konvertatsiya vaqtida bot qayta ishga tushdi. Bir daqiqadan keyin faylni qaytadan yuboring.',
@@ -1529,9 +1717,10 @@ STRINGS = {
         "category_document": "hujjat",
         "category_data": "ma'lumot",
         "category_subtitle": "subtitr",
+        "category_archive": "arxiv",
         "formats_title": "📁 Qaysi formatlarni o'giraman",
         "formats_intro": "{sources} ta formatdan {targets} ta formatga — jami {pairs} xil yo'nalish. Fayl yuborsangiz, uni nimaga o'girish mumkinligini ko'rsataman; to'liq ro'yxat uchun quyidan turkumni tanlang.",
-        "formats_highlights": "Ko'pchilik bilmaydigan imkoniyatlar:\n• iPhone rasmi (HEIC) → JPG yoki PNG\n• Istalgan rasm — yoki butun albom — bitta PDF\n• PDF yoki EPUB → PNG, JPG yoki oddiy matn\n• Word hujjati → PDF, HTML yoki Markdown\n• CSV, JSON yoki XML → XLSX jadval\n• Subtitrlar: SRT, VTT va ASS bir-biriga, yoki faqat matn",
+        "formats_highlights": "Ko'pchilik bilmaydigan imkoniyatlar:\n• iPhone rasmi (HEIC) → JPG yoki PNG\n• Istalgan rasm — yoki butun albom — bitta PDF\n• PDF yoki EPUB → PNG, JPG yoki oddiy matn\n• Word hujjati → PDF, HTML yoki Markdown\n• CSV, JSON yoki XML → XLSX jadval\n• Kamera raw (CR3, NEF, ARW, DNG…) → JPG, PNG yoki 16 bitli TIFF\n• Telefon ocha olmaydigan RAR yoki 7z → ZIP\n• Subtitrlar: SRT, VTT va ASS bir-biriga, yoki faqat matn",
         "formats_reads": "O'qiydi",
         "formats_writes": "Yozadi",
         "formats_category_title": "📁 {category} fayllari",
@@ -1558,8 +1747,8 @@ STRINGS = {
         "price_quoted_first": "Aniq narx pul yechilishidan oldin ko'rsatiladi — to'laydiganingiz aynan shu.",
     },
     "ru": {
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": '⚡ Часто конвертируете большие файлы? /recharge пополнит кредит заранее.',
         "donate_unknown_currency": 'Неизвестная валюта "{currency}" — попробуйте xtr или usd.',
         "donate_currency_not_configured": 'Оплата в {currency} на этом боте пока не настроена — используйте Stars.',
@@ -1603,14 +1792,14 @@ STRINGS = {
         "balance_recent": "Последние операции:",
         "balance_empty_hint": '/recharge пополнит кредит в любой момент.',
         "bot_short_description": (
-            "Конвертирует картинки, видео, аудио, документы, таблицы и субтитры "
-            "— около 75 форматов."
+            "Конвертирует картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы "
+            "— около 90 форматов."
         ),
-        "bot_description": 'Пришли файл и выбери, во что его превратить. Картинки, видео, аудио, документы, таблицы и субтитры — около 75 форматов на вход, 40 на выход.\n\nHEIC с iPhone становится JPG. Набор картинок — одним PDF. PDF — картинками или текстом. Весь список — /formats\n\nВсё меньше 3 МБ — бесплатно. Дороже — цена по размеру файла в ⚡ кредите, купленном за Stars, и видна до выбора. Если конвертация сорвётся по вине бота, кредит вернётся.\n\nАнглийский, узбекский и русский. /privacy — что бот о тебе хранит.',
+        "bot_description": 'Пришлите файл и выберите, во что его превратить. Картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы — около 90 форматов на вход, 50 на выход.\n\nHEIC с iPhone становится JPG. Набор картинок — одним PDF. PDF — картинками или текстом. Весь список — /formats\n\nВсё меньше 3 МБ — бесплатно. Дороже — цена по размеру файла в ⚡ кредите, купленном за Stars, и видна до выбора. Если конвертация сорвётся по вине бота, кредит вернётся.\n\nАнглийский, узбекский и русский. /privacy — что бот о вас хранит.',
 
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
-        "privacy_stored": '• твой числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• твой баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для тебя делает — пока не закончит',
+        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
@@ -1624,41 +1813,41 @@ STRINGS = {
             "наружу не передаются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
-        "terms_specific": 'Файлы и оплата: конвертируй то, что имеешь право конвертировать. Всё меньше 3 МБ бесплатно; дороже — цена в ⚡ кредите, который покупается за Telegram Stars, и показывается до выбора формата. ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Если остановишь идущую конвертацию сам, ⚡ НЕ вернётся; если сбой на стороне бота — ⚡ автоматически вернётся на баланс. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.',
-        "terms_money": 'О деньгах: /recharge покупает ⚡ кредит на конвертации: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_specific": 'Файлы и оплата: конвертируйте то, что имеете право конвертировать. Всё меньше 3 МБ бесплатно; дороже — цена в ⚡ кредите, который покупается за Telegram Stars, и показывается до выбора формата. ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Если остановите идущую конвертацию сами, ⚡ НЕ вернётся; если сбой на стороне бота — ⚡ автоматически вернётся на баланс. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.',
+        "terms_money": 'О деньгах: /recharge покупает ⚡ кредит на конвертации: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Язык, место в напоминании о пополнении и все отметки о том, когда ты пользовался ботом, будут стёрты. Файлы тут ни при чём: то, что ты конвертировал, удалилось сразу после конвертации.\n\nОплаты останутся, без username, потому что по ним разбираются споры о платежах, — и баланс ⚡ тоже: /balance по-прежнему его покажет.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Язык, место в напоминании о пополнении и все отметки о том, когда вы пользовались ботом, будут стёрты. Файлы тут ни при чём: то, что вы конвертировали, удалилось сразу после конвертации.\n\nОплаты останутся, без username, потому что по ним разбираются споры о платежах, — и баланс ⚡ тоже: /balance по-прежнему его покажет.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -1672,13 +1861,46 @@ STRINGS = {
         "cancel_button_donation": '💸 Сумма пополнения',
         "cancel_item_donation": 'сумма пополнения, которую я запросил',
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
+        ),
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• Пришлите файл — картинку, raw-фото, видео, аудио, документ, таблицу, субтитры или архив — и выберите, во что его превратить. Все форматы: /formats\n"
+            "• Конвертация стоит ⚡ кредит, и цена видна до того, как что-то списано. Пополнить — /recharge; /balance покажет остаток и на что он ушёл.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Все команды и цены — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
         "cancel_item_conversion": "\u0444\u0430\u0439\u043b .{ext}, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0432\u044b \u043a\u043e\u043d\u0432\u0435\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043b\u0438",
         "cancel_button_conversion": "🔄 Файл, ждущий конвертации",
-        "start_greeting": "Привет! Пришли мне файл, и я преобразую его в другой формат.\n\n",
-        "help_text": 'Пришли мне файл, и я преобразую его в другой формат — картинки, видео, аудио, документы, таблицы и субтитры.\n\nКоманды:\n/convert - начать конвертацию (или просто отправь файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
+        "start_greeting": "Здравствуйте! Пришлите мне файл, и я преобразую его в другой формат.\n\n",
+        "help_text": 'Пришлите мне файл, и я преобразую его в другой формат — картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы.\n\nКоманды:\n/convert - начать конвертацию (или просто отправьте файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
         "convert_start_prompt": (
-            "Пришли файл для конвертации, до {max_mb} МБ — картинку, видео, звук, "
-            "документ, таблицу или файл субтитров. Пришли несколько картинок "
+            "Пришлите файл для конвертации, до {max_mb} МБ — картинку, видео, звук, "
+            "документ, таблицу или файл субтитров. Пришлите несколько картинок "
             "сразу — соберу их в один PDF.\n\n"
             "/formats покажет все форматы, которые я знаю.\n\n"
             "Цена в ⚡ кредите:\n{pricing}\n\n"
@@ -1687,13 +1909,13 @@ STRINGS = {
         "cancelled": "Отменено.",
         "btn_cancel_conversion": "✖️ Отмена",
         "unknown_extension": (
-            "Не удалось определить формат файла по названию — попробуй отправить "
+            "Не удалось определить формат файла по названию — попробуйте отправить "
             "его как документ с обычным расширением (например, photo.png)."
         ),
         "file_too_large_download": "Этот файл больше {max_mb} МБ — боты Telegram не могут скачать ничего крупнее, увы.",
-        "file_too_large_in_group": "Файлы больше {limit} МБ я принимаю только в личном чате. Пришли этот файл мне напрямую — там можно до {max_mb} МБ.",
-        "big_download_unavailable": "Файл не скачан: файлы больше {limit} МБ приходят ко мне через отдельное подключение к Telegram, а оно сейчас не отвечает. Попробуй через несколько минут или пришли файл меньше {limit} МБ.",
-        "card_downloading": "📥 Скачиваю твой файл…",
+        "file_too_large_in_group": "Файлы больше {limit} МБ я принимаю только в личном чате. Пришлите этот файл мне напрямую — там можно до {max_mb} МБ.",
+        "big_download_unavailable": "Файл не скачан: файлы больше {limit} МБ приходят ко мне через отдельное подключение к Telegram, а оно сейчас не отвечает. Попробуйте через несколько минут или пришлите файл меньше {limit} МБ.",
+        "card_downloading": "📥 Скачиваю ваш файл…",
         "card_download_sizes": "{done} из {total}",
         "card_converting": "Конвертирую…",
         "card_sending": "Отправляю результат…",
@@ -1725,33 +1947,38 @@ STRINGS = {
         "btn_quote_go": "✅ Конвертировать · {price} ⚡",
         "btn_quote_free": "✅ Конвертировать",
         "btn_quote_back": "↩️ Другой формат",
-        "converted_file_caption": "Вот твой сконвертированный файл!",
-        "converted_file_caption_free": 'Вот твой сконвертированный файл! (бесплатно)',
-        "conversion_expired": "Срок этой сессии конвертации истёк — отправь файл заново.",
+        "converted_file_caption": "Вот ваш сконвертированный файл!",
+        "converted_file_caption_free": 'Вот ваш сконвертированный файл! (бесплатно)',
+        "conversion_expired": "Срок этой сессии конвертации истёк — отправьте файл заново.",
         "convert_invoice_title": "Конвертировать {src} в {target}",
-        "convert_invoice_description": "Разовая конвертация твоего файла на {size_kb} КБ.",
+        "convert_invoice_description": "Разовая конвертация вашего файла на {size_kb} КБ.",
         "convert_invoice_label": "{src}→{target} конвертация",
         "topup_needed": 'Это стоит {price} ⚡, а у вас {balance} ⚡.\n\nОтправлен счёт на {stars} ⭐ — он добавит {credited} ⚡: хватит на эту конвертацию, остаток останется на балансе. /cancel, чтобы отменить.',
-        "credit_policy_note": '⚠️ ВНИМАНИЕ: ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Остановишь её сам — ⚡ НЕ вернётся; если сбой на стороне бота, ⚡ сразу вернётся на баланс. Платежи окончательные — Stars не возвращаются.',
+        "credit_policy_note": '⚠️ ВНИМАНИЕ: ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Остановите её сами — ⚡ НЕ вернётся; если сбой на стороне бота, ⚡ сразу вернётся на баланс. Платежи окончательные — Stars не возвращаются.',
         "send_limit_note": '📤 Готовый файл может весить до {mb} МБ. Если он получится больше, отправлен он не будет — тогда ⚡ сразу вернётся на баланс.',
         "too_many_megapixels": 'В этой картинке {mp} мегапикселей — больше {max} МП, которые я могу безопасно конвертировать. Ничего не списано.',
         "too_big_to_send_note": '📐 {formats} не предлагаются: при {mp} МП они выйдут больше {limit} МБ, которые бот может отправить. JPG, WEBP или AVIF поместятся.',
+        "raw_too_big": "Это raw-фото — {mp} мегапикселей. Сервер конвертирует raw-фото до {max} МП: для больших не хватает памяти даже на половинный размер. Ничего не списано.",
+        "raw_half_note": "⚠️ ВАЖНО: это raw-фото — {mp} МП. Оно конвертируется в половинном размере ({out} МП): для полного кадра серверу не хватает памяти.",
+        "video_fit_hdr_note": "⚠️ ВАЖНО: это видео {w}×{h} HDR. Сервер конвертирует его в {fw}×{fh} — для полного кадра ему не хватает памяти. Цвета сохраняются.",
+        "video_fit_big_note": "⚠️ ВАЖНО: это видео {w}×{h}. WEBM здесь делается в {fw}×{fh}; MP4, MKV и MOV остаются в полном размере.",
+        "video_fit_huge_note": "⚠️ ВАЖНО: это видео {w}×{h}. Сервер конвертирует его в {fw}×{fh} — для полного кадра ему не хватает памяти.",
         "nothing_sendable": 'Любой формат, который я могу предложить, для картинки такого размера выйдет больше {limit} МБ, которые бот может отправить. Ничего не списано.',
         "too_big_to_send_alert": 'Этот формат для такой картинки выйдет больше {limit} МБ, которые бот может отправить.',
         "keep_toggle_off": '📌 Хранить файл для других форматов: выкл',
         "keep_toggle_on": '📌 Хранить файл для других форматов: вкл',
-        "keep_explained_on": 'После каждой конвертации я буду хранить файл {minutes} минут, чтобы ты мог конвертировать его и в другие форматы. /cancel удалит его раньше.',
+        "keep_explained_on": 'После каждой конвертации я буду хранить файл {minutes} минут, чтобы вы могли конвертировать его и в другие форматы. /cancel удалит его раньше.',
         "keep_explained_off": 'Файл удалится сразу после конвертации.',
-        "storage_full_user": 'У меня уже {used} МБ твоих файлов, а на одного человека я храню до {limit} МБ. Дождись окончания конвертации или отмени её через /cancel и пришли снова.',
-        "storage_full_global": 'Сейчас не хватает временного места — пришли это снова через пару минут.',
+        "storage_full_user": 'У меня уже {used} МБ ваших файлов, а на одного человека я храню до {limit} МБ. Дождитесь окончания конвертации или отмените её через /cancel и пришлите снова.',
+        "storage_full_global": 'Сейчас не хватает временного места — пришлите это снова через пару минут.',
         "cancel_item_job_running": 'конвертацию {size} МБ {src} в {target} — идёт',
         "cancel_item_job_queued": 'конвертацию {size} МБ {src} в {target} — в очереди, пока ничего не списано',
         "cancel_button_job": '⏹ Конвертация в {target}',
-        "queue_full": 'У тебя уже {count} конвертаций в очереди или в работе. Пришли ещё, когда какие-то закончатся.',
+        "queue_full": 'У вас уже {count} конвертаций в очереди или в работе. Пришлите ещё, когда какие-то закончатся.',
         "job_queued": '⏳ {src} → {target} в очереди, перед ней {ahead}. Ничего не списывается, пока она не начнётся.',
         "job_starting": '⏳ {src} → {target}: начинаю…',
         "job_not_running": 'Эта конвертация уже закончилась.',
-        "payment_kept_as_credit": 'Оплата получена — +{credited} ⚡, на балансе {balance} ⚡. Файл уже устарел, поэтому ничего не конвертировано; пришли его снова — оплата пойдёт с баланса.',
+        "payment_kept_as_credit": 'Оплата получена — +{credited} ⚡, на балансе {balance} ⚡. Файл уже устарел, поэтому ничего не конвертировано; пришлите его снова — оплата пойдёт с баланса.',
         "job_progress": '⏳ Конвертация ещё идёт — прошло {elapsed} мин. Напишу снова через {next} мин., а не позже чем через {last} мин. сообщу, чем всё закончилось.',
         "job_progress_last": '⏳ Конвертация всё ещё идёт — прошло {elapsed} мин. Последнее сообщение — через {last} мин.: к тому времени она закончится или будет остановлена, а ⚡ вернётся на баланс.',
         "job_stop_button": '⏹ Остановить',
@@ -1767,25 +1994,27 @@ STRINGS = {
         "job_reason_timeout": 'Конвертация не уложилась в {minutes} мин., и я её остановил. Владелец в курсе.',
         "job_reason_too_slow": "На этот файл ушло бы около {minutes} мин., а конвертация здесь может идти не дольше {limit} мин., поэтому я остановил её сразу, а не заставил вас ждать до конца лимита. Подойдёт ролик покороче или в меньшем разрешении.",
         "job_reason_crash": 'Конвертация сломалась на моей стороне. Владелец в курсе.',
+        "job_reason_no_memory": "Для этого файла не хватило памяти сервера — так бывает с видео в 4K и HDR. С самим файлом всё в порядке: версия в 1080p или ниже сконвертируется.",
         "job_reason_too_large": '{target} получился на {mb} МБ, а по этой конвертации я могу отправить не больше {limit} МБ. JPG, WEBP или AVIF будут намного меньше. Владелец в курсе.',
-        "job_reason_send_failed": 'Файл сконвертирован, но отправить его тебе не вышло. Владелец в курсе.',
-        "job_reason_interrupted": 'Меня перезапустили посреди конвертации. Пришли файл снова через минуту.',
+        "job_reason_send_failed": 'Файл сконвертирован, но отправить его вам не вышло. Владелец в курсе.',
+        "job_reason_interrupted": 'Меня перезапустили посреди конвертации. Пришлите файл снова через минуту.',
         "unknown_order": "Неизвестный заказ.",
         "unrecognized_message": (
-            "Это не файл, который я могу конвертировать — пришли файл или "
-            "/formats, чтобы увидеть, что я принимаю. Назовёшь формат («heic», "
+            "Это не файл, который я могу конвертировать — пришлите файл или "
+            "/formats, чтобы увидеть, что я принимаю. Назовёте формат («heic», "
             "«epub») — скажу, во что он превращается."
         ),
-        "unknown_command": "Я не знаю такую команду. Отправь /start, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /start, чтобы увидеть, что я умею.",
 
         "category_document": "документ",
         "category_data": "данные",
         "category_subtitle": "субтитры",
+        "category_archive": "архив",
         "formats_title": "📁 Что я конвертирую",
         "formats_intro": (
             "{sources} форматов на вход, {targets} на выход — всего {pairs} "
-            "комбинаций. Пришли файл, и я покажу, во что его можно превратить; "
-            "нажми на категорию ниже, чтобы увидеть весь список."
+            "комбинаций. Пришлите файл, и я покажу, во что его можно превратить; "
+            "нажмите на категорию ниже, чтобы увидеть весь список."
         ),
         "formats_highlights": (
             "Из менее очевидного:\n"
@@ -1808,7 +2037,7 @@ STRINGS = {
         ),
         "btn_more_formats": "⋯ Ещё форматы",
         "btn_fewer_formats": "‹ Меньше",
-        "btn_what_formats": "📁 Что ты умеешь конвертировать?",
+        "btn_what_formats": "📁 Что вы умеете конвертировать?",
         "btn_formats_back": "‹ Все категории",
         "convert_options_prompt_batch": (
             "Принято — {count} файлов, всего {size}. Во что конвертировать:"
@@ -1830,7 +2059,7 @@ STRINGS = {
             "сервере нет."
         ),
         "batch_mixed_formats": (
-            "Эти файлы разных форматов, так что отправляй их по одному — или "
+            "Эти файлы разных форматов, так что отправляйте их по одному — или "
             "набор картинок, который я соберу в один PDF."
         ),
         "price_free": "Бесплатно",
@@ -1869,6 +2098,7 @@ COMMAND_MENU = {
         "formats": "Men o'qiydigan va yozadigan barcha formatlar",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz va u qayerga sarflangani",
         "recharge": "⚡ kredit to'ldirish",
         "paysupport": "To'lov bilan muammo",
@@ -1882,6 +2112,7 @@ COMMAND_MENU = {
         "formats": "Все форматы, которые я читаю и пишу",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит и куда он ушёл",
         "recharge": "Пополнить ⚡ кредит",
         "paysupport": "Проблема с оплатой",
@@ -2085,12 +2316,46 @@ STRINGS = {
         "cancel_button_donation": "💸 Donation amount",
         "cancel_item_donation": "the donation amount I asked you for",
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• Paste a link and I send back what's behind it — no command needed. Instagram, TikTok, X, Pinterest and Reddit.\n"
+            "• /settings: the credit caption, the file quality, and large files over 48 MB, which cost ⚡ credit and only once you switch them on.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /settings · /balance · /cancel\n"
+            "Every command: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
 
         "start_greeting": (
             "Hey! Send me a link (Instagram, TikTok, Pinterest, Reddit, or "
             "Twitter/X) and I'll grab it for you.\n\n"
         ),
-        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
+        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
         "caption_state_on": "ON",
         "caption_state_off": "OFF",
         "settings_heading": "⚙️ Your settings. Tap to change any of them.",
@@ -2238,11 +2503,45 @@ STRINGS = {
         "cancel_button_donation": "💸 Xayriya miqdori",
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• Havola yuboring — ortidagi faylni yuboraman, buyruq kerak emas. Instagram, TikTok, X, Pinterest va Reddit.\n"
+            "• /settings: «via» izohi, fayl sifati va 48 MB dan katta fayllar — ular ⚡ kredit turadi va faqat o'zingiz yoqsangiz ishlaydi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /settings · /balance · /cancel\n"
+            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "start_greeting": (
             "Salom! Menga havola yuboring (Instagram, TikTok, Pinterest, Reddit "
             "yoki Twitter/X) va men uni siz uchun yuklab beraman.\n\n"
         ),
-        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
+        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o\'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
         "caption_state_on": "YONIQ",
         "caption_state_off": "O'CHIQ",
         "settings_heading": "⚙️ Sozlamalaringiz. O'zgartirish uchun bosing.",
@@ -2296,12 +2595,12 @@ STRINGS = {
     },
     "ru": {
         "quota_hour": (
-            "За последний час ты скачал {used} — это предел этого бота ({limit} в час). "
+            "За последний час вы скачали {used} — это предел этого бота ({limit} в час). "
             "Он нужен, чтобы на маленьком сервере хватало всем. Следующая попытка "
             "освободится примерно через {minutes} минут(ы)."
         ),
         "quota_day": (
-            "Сегодня ты скачал {used} — это дневной предел бота ({limit}). Он нужен, "
+            "Сегодня вы скачали {used} — это дневной предел бота ({limit}). Он нужен, "
             "чтобы на маленьком сервере хватало всем. Снова откроется примерно через "
             "{minutes} минут(ы)."
         ),
@@ -2309,8 +2608,8 @@ STRINGS = {
             "Если нужно больше: у всех, кто хоть раз поддержал бота через /donate, "
             "предел заметно выше и навсегда. Сумма значения не имеет."
         ),
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
             "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
             "кто его запустил, а /donate — это совершенно необязательный способ помочь "
@@ -2362,10 +2661,10 @@ STRINGS = {
         "balance_recent": "Последние операции:",
         "balance_empty_hint": "/donate добавит кредит в любой момент.",
         "bot_short_description": (
-            "Пришли ссылку на пост в Instagram, TikTok, Pinterest, Reddit или X."
+            "Пришлите ссылку на пост в Instagram, TikTok, Pinterest, Reddit или X."
         ),
         "bot_description": (
-            "Пришли ссылку на открытый пост — вернётся сам файл. Команда не нужна.\n"
+            "Пришлите ссылку на открытый пост — вернётся сам файл. Команда не нужна.\n"
             "\n"
             "Instagram, TikTok, Pinterest, Reddit и X. Карусель приходит целиком, а текстовый "
             "пост возвращается аккуратной карточкой.\n"
@@ -2377,16 +2676,16 @@ STRINGS = {
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• твой числовой id в Telegram, язык и настройки подписи и качества\n"
+            "• ваш числовой id в Telegram, язык и настройки подписи и качества\n"
             "• присланную ссылку — на то время, пока бот достаёт то, что за ней\n"
             "• по одной записи на скачивание: с какой площадки и когда — по ним считается "
             "дневной лимит\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
-            "• то, что бот в этот момент для тебя делает — пока не закончит\n"
+            "• то, что бот в этот момент для вас делает — пока не закончит\n"
             "\n"
-            "Само видео или фото не хранится: бот его достаёт, отправляет тебе и удаляет."
+            "Само видео или фото не хранится: бот его достаёт, отправляет вам и удаляет."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
@@ -2399,50 +2698,50 @@ STRINGS = {
         "privacy_others": (
             "• сайт, на который ведёт ссылка, и сервисы скачивания, к которым бот обращается, "
             "когда сайт не отвечает ему напрямую. Они получают ссылку и видят запрос с сервера "
-            "бота, а не от тебя; что они у себя пишут в логи — их дело и их правила, а не эти."
+            "бота, а не от вас; что они у себя пишут в логи — их дело и их правила, а не эти."
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
         "terms_specific": (
-            "О скачивании: бот достаёт то, что и так открыто, и отдаёт тебе. Это не обход "
-            "закрытого аккаунта, и он даже не пытается им быть. Что ты потом сделаешь с чужим "
-            "фото, видео или постом — это между тобой, автором и законом: скачать не значит "
+            "О скачивании: бот достаёт то, что и так открыто, и отдаёт вам. Это не обход "
+            "закрытого аккаунта, и он даже не пытается им быть. Что вы потом сделаете с чужим "
+            "фото, видео или постом — это между вами, автором и законом: скачать не значит "
             "присвоить. На каждого есть дневной лимит, чтобы один человек не сделал бота "
             "бесполезным для всех остальных."
         ),
-        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда ты скачивал, будут стёрты. Дневной лимит вместе с ними обнулится. На уже скачанное это никак не влияет — здесь оно и не хранилось.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он твой, если вернёшься.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда вы скачивали, будут стёрты. Дневной лимит вместе с ними обнулится. На уже скачанное это никак не влияет — здесь оно и не хранилось.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -2456,11 +2755,44 @@ STRINGS = {
         "cancel_button_donation": "💸 Сумма пожертвования",
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
-        "start_greeting": (
-            "Привет! Пришли мне ссылку (Instagram, TikTok, Pinterest, Reddit "
-            "или Twitter/X), и я скачаю это для тебя.\n\n"
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
         ),
-        "help_text": 'Просто пришли ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• Пришлите ссылку — пришлю то, что по ней лежит, без всяких команд. Instagram, TikTok, X, Pinterest и Reddit.\n"
+            "• /settings: подпись «via», качество файлов и большие файлы больше 48 МБ — они стоят ⚡ кредит и работают, только если их включить.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /settings · /balance · /cancel\n"
+            "Все команды — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
+        "start_greeting": (
+            "Здравствуйте! Пришлите мне ссылку (Instagram, TikTok, Pinterest, Reddit "
+            "или Twitter/X), и я скачаю это для вас.\n\n"
+        ),
+        "help_text": 'Просто пришлите ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "caption_state_on": "ВКЛ",
         "caption_state_off": "ВЫКЛ",
         "settings_heading": "⚙️ Ваши настройки. Нажмите, чтобы изменить.",
@@ -2507,17 +2839,17 @@ STRINGS = {
         "twitter_fetch_failed_link": "Не удалось получить содержимое поста прямо сейчас — вот ссылка: {url}",
         "unrecognized_message": (
             "Это не похоже на ссылку, которую я узнаю — Instagram, TikTok, "
-            "Pinterest, Reddit или Twitter/X — пришли одну из них, чтобы скачать, "
+            "Pinterest, Reddit или Twitter/X — пришлите одну из них, чтобы скачать, "
             "или /help для списка команд."
         ),
         "redeliver_as_file": "📄 Получить несжатым файлом",
         "redeliver_as_compressed": "🖼 Получить сжатым",
         "redeliver_expired": (
-            "Для кнопки это уже слишком старая загрузка — пришли ссылку заново или "
-            "поменяй способ доставки через /lossless."
+            "Для кнопки это уже слишком старая загрузка — пришлите ссылку заново или "
+            "поменяйте способ доставки через /lossless."
         ),
         "album_delivered": "Выше {count} файл(ов).",
-        "unknown_command": "Я не знаю такую команду. Отправь /help, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
     },
 }
 
@@ -2546,6 +2878,7 @@ COMMAND_MENU = {
         "settings": "Izoh va fayl sifati sozlamalari",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz",
         "donate": "Server xarajatlariga hissa qo'shish",
         "paysupport": "To'lov bilan muammo",
@@ -2558,6 +2891,7 @@ COMMAND_MENU = {
         "settings": "Подпись и качество файлов",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит",
         "donate": "Помочь с расходами на хостинг",
         "paysupport": "Проблема с оплатой",
@@ -2667,8 +3001,10 @@ STRINGS = {
             "\n"
             "What is not kept is what anybody writes. Messages pass straight through and are "
             "never stored here: they live in the two Telegram chats, and each side can delete "
-            "their own copy. A document made with /export is assembled in memory, sent to you "
-            "and dropped; nothing it reads is written down.\n"
+            "their own copy. Reactions pass through the same way — the bot puts the same one on "
+            "the other person's copy and keeps no record of it. A document made with /export is "
+            "assembled in memory, sent to you and dropped; nothing it reads is written down. The "
+            "one exception is what you choose to send with /feedback, below.\n"
             "\n"
             "Anonymous means anonymous to the person you are writing to. They are never shown "
             "your name, your username or your id. It is not anonymity from the bot itself — the "
@@ -2756,9 +3092,54 @@ STRINGS = {
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
         "cancel_item_anon_session": "the anonymous chat you had open — tap the link again to start a new one",
         "cancel_button_anon_session": "💬 The anonymous chat you're in",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
 
         "start_greeting": "Hey! This bot runs anonymous-question inboxes.\n\n",
-        "help_text": "Two ways to use this bot:\n\nGet your own inbox — /link gives you a permanent link. Post it anywhere public (bio, channel, story, wherever). Anyone who taps it can send you an anonymous message right here in this chat — you won't see who they are.\nAnswer by replying to the message — swipe it, or press and hold it and choose Reply. That is how I know which conversation your answer belongs to, so it is required rather than optional: one public link means several people can be mid-conversation with you at once, and a message that doesn't say which thread it answers could reach the wrong one. Your answer shows up on their end as a real reply too.\n\nGot sent someone else's link? Tap it and write — your first message goes straight through, with your identity hidden. After that, reply to the message you're answering, exactly as the other side does. Tapping the same link again later starts a brand-new conversation, it won't continue the old one.\n\nCommands:\n/link - get your inbox link\n/conversations - your conversations, open and archived\n/which - send it as a reply to any message: which conversation is that?\n/newlink, /pause, /resume - also buttons on the /link screen\n/blocked - review who you've blocked\n/stats - the counts, which are on the /link screen too\n/export - get a conversation back, copied here or as a document\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/archive - send it as a reply to a message to archive that conversation (every row in /conversations has the button too)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• Your own inbox: /link gives you a permanent link to post anywhere. Whoever taps it "
+            "can write to you right here, and you never see who they are.\n"
+            "• Answering: reply to the message you're answering — swipe it, or press and hold it "
+            "and choose Reply. Every answer has to be a reply; it's how I know which conversation "
+            "it belongs to.\n"
+            "• Someone else's link: tap it and write. Your first message goes straight through, "
+            "and your name stays hidden.\n"
+            "• Reactions: react to a message in a conversation and the other person sees the same "
+            "reaction, shown as mine. Standard emoji only — Telegram Premium ones don't go "
+            "through.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /link · /conversations · /cancel\n"
+            "Every command and every reaction: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "reactions_update_note": "🆕 You can now react to messages here — the other person sees your reaction, shown as mine. Send /help to see more.",
+        "reaction_not_passed": "⚠️ The other person won't see that reaction — only standard emoji are passed on.",
+        "reaction_one_only": "⚠️ The other person sees only your newest reaction — one per message is passed on.",
+        "help_text": "Two ways to use this bot:\n\nGet your own inbox — /link gives you a permanent link. Post it anywhere public (bio, channel, story, wherever). Anyone who taps it can send you an anonymous message right here in this chat — you won't see who they are.\nAnswer by replying to the message — swipe it, or press and hold it and choose Reply. That is how I know which conversation your answer belongs to, so it is required rather than optional: one public link means several people can be mid-conversation with you at once, and a message that doesn't say which thread it answers could reach the wrong one. Your answer shows up on their end as a real reply too.\n\nGot sent someone else's link? Tap it and write — your first message goes straight through, with your identity hidden. After that, reply to the message you're answering, exactly as the other side does. Tapping the same link again later starts a brand-new conversation, it won't continue the old one.\n\nReactions: react to a message in a conversation and the other person sees the same reaction on their copy. It shows beside my picture, not yours, so it gives nothing away. Change it or take it off and that carries over too. One reaction per message gets through, and only these:\n{reactions}\n⚠️ NOTE: Telegram Premium reactions (custom emoji) can NOT be passed on — the other person won't see them.\n\nCommands:\n/link - get your inbox link\n/conversations - your conversations, open and archived\n/which - send it as a reply to any message: which conversation is that?\n/newlink, /pause, /resume - also buttons on the /link screen\n/blocked - review who you've blocked\n/stats - the counts, which are on the /link screen too\n/export - get a conversation back, copied here or as a document\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/archive - send it as a reply to a message to archive that conversation (every row in /conversations has the button too)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
         "follow_link_invalid": "That link isn't valid — it may have been reset by whoever shared it. Ask them for a fresh one.",
         "follow_link_own": "That's your own inbox link — messaging yourself would just be a note to self! Share it with other people instead: /link",
         "follow_link_blocked": "You're not able to message this person.",
@@ -3049,7 +3430,7 @@ STRINGS = {
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. /export bilan tayyorlangan hujjat faqat xotirada yig'iladi, sizga yuboriladi va keyin yo'q qilinadi; o'qilgan narsalarning hech biri yozib olinmaydi.\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. /export bilan tayyorlangan hujjat faqat xotirada yig'iladi, sizga yuboriladi va keyin yo'q qilinadi; o'qilgan narsalarning hech biri yozib olinmaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -3083,10 +3464,56 @@ STRINGS = {
         "cancel_button_donation": "💸 Xayriya miqdori",
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "cancel_item_anon_session": "ochiq turgan anonim suhbat — yangisini boshlash uchun havolani qayta bosing",
         "cancel_button_anon_session": "💬 Siz turgan anonim suhbat",
         "start_greeting": "Salom! Bu bot anonim savol-javob qutilarini boshqaradi.\n\n",
-        "help_text": "Bu botdan ikki xil foydalanish mumkin:\n\nO'z qutingizni oching — /link sizga doimiy havola beradi. Uni istalgan ochiq joyga joylang (bio, kanal, story — qayerda bo'lsa ham). Havolani ochgan har kim sizga shu chatning o'zida anonim xabar yubora oladi — kimligi sizga ko'rinmaydi.\nJavob berish uchun xabarni o'ngga suring yoki uni bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman, shuning uchun bu shart: havola ochiq joyda turgani uchun bir vaqtda bir nechta odam sizga yozayotgan bo'lishi mumkin, qaysi suhbatga javob ekani ko'rsatilmagan xabar esa boshqa odamga borib qolishi mumkin. Javobingiz ularga ham haqiqiy javob sifatida ko'rinadi.\n\nSizga boshqa birovning havolasini yuborishdimi? Uni bosing va yozing — birinchi xabaringiz kimligingiz yashirilgan holda darhol yetib boradi. Undan keyin xuddi qarshi tomon kabi, javob berayotgan xabaringizga javob tarzida yozing. Keyinroq havolani yana bossangiz, eski suhbat davom etmaydi — yangisi boshlanadi.\n\nBuyruqlar:\n/link - qutingiz havolasini olish\n/conversations - suhbatlaringiz: ochiqlari va arxivdagilari\n/which - istalgan xabarga javob qilib yuboring: u qaysi suhbatdan ekanini aytaman\n/newlink, /pause, /resume - bular /link ekranida tugma sifatida ham bor\n/blocked - bloklanganlar ro'yxati\n/stats - qisqa statistika; u /link ekranida ham bor\n/export - suhbatni qaytarib olish: shu yerga nusxalab yoki hujjat qilib\n/donate - server xarajatlariga hissa qo'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivga o'tadi (/conversations ichidagi har bir suhbatda ham shu tugma bor)\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• O'z qutingiz: /link sizga doimiy havola beradi — uni istalgan joyga joylang. "
+            "Havolani ochgan har kim sizga shu yerda yoza oladi, kimligi esa sizga ko'rinmaydi.\n"
+            "• Javob berish: javob berayotgan xabaringizni o'ngga suring yoki uni bosib turib "
+            "«Javob berish»ni tanlang. Har bir javob shunday yozilishi shart — javob qaysi "
+            "suhbatga tegishli ekanini shundan bilaman.\n"
+            "• Birovning havolasi: uni oching va yozing. Birinchi xabaringiz darhol yetib boradi, "
+            "kimligingiz esa yashirin qoladi.\n"
+            "• Reaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz ham xuddi "
+            "shuni ko'radi — u mening nomimdan chiqadi. Faqat oddiy emojilar o'tadi, Telegram "
+            "Premium reaksiyalari o'tmaydi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /link · /conversations · /cancel\n"
+            "Barcha buyruqlar va reaksiyalar: to'liq qo'llanmada — pastdagi tugma yoki "
+            "/help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "reactions_update_note": "🆕 Endi bu yerda xabarlarga reaksiya qo'yishingiz mumkin — suhbatdoshingiz uni mening nomimdan ko'radi. Batafsil: /help",
+        "reaction_not_passed": "⚠️ Suhbatdoshingiz bu reaksiyani ko'rmaydi — faqat oddiy emojilar yetkaziladi.",
+        "reaction_one_only": "⚠️ Suhbatdoshingiz faqat oxirgi reaksiyangizni ko'radi — har bir xabarga bittasi yetkaziladi.",
+        "help_text": "Bu botdan ikki xil foydalanish mumkin:\n\nO'z qutingizni oching — /link sizga doimiy havola beradi. Uni istalgan ochiq joyga joylang (bio, kanal, story — qayerda bo'lsa ham). Havolani ochgan har kim sizga shu chatning o'zida anonim xabar yubora oladi — kimligi sizga ko'rinmaydi.\nJavob berish uchun xabarni o'ngga suring yoki uni bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman, shuning uchun bu shart: havola ochiq joyda turgani uchun bir vaqtda bir nechta odam sizga yozayotgan bo'lishi mumkin, qaysi suhbatga javob ekani ko'rsatilmagan xabar esa boshqa odamga borib qolishi mumkin. Javobingiz ularga ham haqiqiy javob sifatida ko'rinadi.\n\nSizga boshqa birovning havolasini yuborishdimi? Uni bosing va yozing — birinchi xabaringiz kimligingiz yashirilgan holda darhol yetib boradi. Undan keyin xuddi qarshi tomon kabi, javob berayotgan xabaringizga javob tarzida yozing. Keyinroq havolani yana bossangiz, eski suhbat davom etmaydi — yangisi boshlanadi.\n\nReaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz o'zidagi nusxada xuddi shu reaksiyani ko'radi. U sizning emas, mening rasmim yonida chiqadi, shuning uchun hech narsani oshkor qilmaydi. Reaksiyani almashtirsangiz yoki olib tashlasangiz, u tomonda ham shunday bo'ladi. Har bir xabarga bitta reaksiya o'tadi va faqat quyidagilar:\n{reactions}\n⚠️ DIQQAT: Telegram Premium reaksiyalari (maxsus emojilar) suhbatdoshingizga O'TMAYDI — u ularni ko'rmaydi.\n\nBuyruqlar:\n/link - qutingiz havolasini olish\n/conversations - suhbatlaringiz: ochiqlari va arxivdagilari\n/which - istalgan xabarga javob qilib yuboring: u qaysi suhbatdan ekanini aytaman\n/newlink, /pause, /resume - bular /link ekranida tugma sifatida ham bor\n/blocked - bloklanganlar ro'yxati\n/stats - qisqa statistika; u /link ekranida ham bor\n/export - suhbatni qaytarib olish: shu yerga nusxalab yoki hujjat qilib\n/donate - server xarajatlariga hissa qo'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivga o'tadi (/conversations ichidagi har bir suhbatda ham shu tugma bor)\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
         "follow_link_invalid": "Bu havola yaroqsiz — uni ulashgan kishi qayta tiklagan bo'lishi mumkin. Ulardan yangisini so'rang.",
         "follow_link_own": "Bu o'zingizning havolangiz — o'zingizga yozsangiz, shunchaki eslatma bo'lib qoladi! Havolani boshqalarga ulashing: /link",
         "follow_link_blocked": 'Bu odamga xabar yubora olmaysiz.',
@@ -3221,8 +3648,8 @@ STRINGS = {
             "aytilmaydi."
         ),
         "export_left_out": "{count} ta eski xabar kirmadi: bot ularning qaysi tomondan ekanini yozib olmagan, yoki bitta eksportga sig'adiganidan ko'p.",
-        "export_button_copy": "📋 Shu yerga nusxalab ber",
-        "export_button_doc": "📝 Hujjat qilib yoz",
+        "export_button_copy": "📋 Shu yerga nusxalab bering",
+        "export_button_doc": "📝 Hujjat qilib yozing",
         "export_copy_progress": "📋 Nusxalanmoqda… {total} tadan {done} tasi.",
         "export_copy_header": "— {what}, {count} ta xabar —",
         "export_copy_done": "— nusxa tugadi —\n\n{count} ta xabar qaytarib nusxalandi. Bot ulardan birortasini ham o'qimadi. Belgilab, xohlagan joyingizga yuboring yoki kerak bo'lmasa o'chirib tashlang.",
@@ -3270,8 +3697,8 @@ STRINGS = {
         "unknown_command": "Bunday buyruq yo'q. Bot nimalar qila olishini bilish uchun /help yuboring.",
     },
     "ru": {
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
             "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
             "кто его запустил, а /donate — это совершенно необязательный способ помочь "
@@ -3323,14 +3750,14 @@ STRINGS = {
         "balance_recent": "Последние операции:",
         "balance_empty_hint": "/donate добавит кредит в любой момент.",
         "bot_short_description": (
-            "Постоянная ссылка, по которой тебе пишут анонимно."
+            "Постоянная ссылка, по которой вам пишут анонимно."
         ),
         "bot_description": (
-            "Получи ссылку и выложи где угодно. Любой, кто её откроет, напишет тебе, не показав, "
-            "кто он, а ты сможешь ответить — настоящей веткой, и таких веток может идти сразу "
+            "Получите ссылку и выложите где угодно. Любой, кто её откроет, напишет вам, не показав, "
+            "кто он, а вы сможете ответить — настоящей веткой, и таких веток может идти сразу "
             "несколько.\n"
             "\n"
-            "Они анонимны для тебя, но не для бота: чтобы ответ попал в нужную ветку, бот хранит, "
+            "Они анонимны для вас, но не для бота: чтобы ответ попал в нужную ветку, бот хранит, "
             "какие два аккаунта переписываются, и никогда не хранит то, что вы пишете. "
             "Подробности — /privacy.\n"
             "\n"
@@ -3340,21 +3767,23 @@ STRINGS = {
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• твой числовой id в Telegram и выбранный язык\n"
-            "• твою ссылку-инбокс, если ты её сделал\n"
+            "• ваш числовой id в Telegram и выбранный язык\n"
+            "• вашу ссылку-инбокс, если вы её сделали\n"
             "• кто с кем говорит: разговор хранится как пара id и номер — именно поэтому ответ "
             "попадает в нужную ветку\n"
             "• какое сообщение к какому разговору относится, по id сообщения, и когда оно было доставлено\n"
-            "• кого ты заблокировал\n"
+            "• кого вы заблокировали\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "\n"
             "Чего здесь нет — самих сообщений. Они проходят насквозь и тут не сохраняются: они "
-            "лежат в двух чатах Telegram, и каждый может удалить свою копию. Документ, собранный через /export, существует только в памяти: он отправляется вам и удаляется, и ничего из прочитанного не записывается.\n"
+            "лежат в двух чатах Telegram, и каждый может удалить свою копию. Реакции проходят так "
+            "же: бот ставит такую же на копию собеседника и нигде её не записывает. Документ, собранный через /export, существует только в памяти: он отправляется вам и удаляется, и ничего из прочитанного не записывается. "
+            "Единственное исключение — то, что вы отправите через /feedback (ниже).\n"
             "\n"
-            "Анонимность — это анонимность от того, кому ты пишешь. Ему никогда не показывают ни "
-            "твоё имя, ни username, ни id. От самого бота это не анонимность: без той самой пары "
+            "Анонимность — это анонимность от того, кому вы пишете. Ему никогда не показывают ни "
+            "ваше имя, ни username, ни id. От самого бота это не анонимность: без той самой пары "
             "id ответ просто некуда было бы доставить."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
@@ -3370,19 +3799,19 @@ STRINGS = {
             "сервисы не вызываются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
         "terms_specific": (
@@ -3391,25 +3820,25 @@ STRINGS = {
             "заблокировать отправителя навсегда. Кто открыл инбокс, тот и отвечает за то, что он "
             "предлагает ему присылать."
         ),
-        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Твоя ссылка перестанет работать — каждая её копия, которую кто-либо выложил, навсегда. Открытые разговоры перестанут маршрутизироваться: ответить в них не сможет ни одна из сторон, и список заблокированных уйдёт вместе с ними.\n\nУже отправленные сообщения это не затронет. Здесь они и не хранились — они в чатах Telegram, и каждый удаляет свою копию сам.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он твой, если вернёшься.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Ваша ссылка перестанет работать — каждая её копия, которую кто-либо выложил, навсегда. Открытые разговоры перестанут маршрутизироваться: ответить в них не сможет ни одна из сторон, и список заблокированных уйдёт вместе с ними.\n\nУже отправленные сообщения это не затронет. Здесь они и не хранились — они в чатах Telegram, и каждый удаляет свою копию сам.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start, когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -3423,10 +3852,53 @@ STRINGS = {
         "cancel_button_donation": "💸 Сумма пожертвования",
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
+        ),
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
         "cancel_item_anon_session": "\u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u0430\u043d\u043e\u043d\u0438\u043c\u043d\u044b\u0439 \u0447\u0430\u0442 — \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u0441\u0441\u044b\u043b\u043a\u0443 \u0441\u043d\u043e\u0432\u0430, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0447\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439",
         "cancel_button_anon_session": "💬 Анонимный чат, в котором вы",
-        "start_greeting": "Привет! Этот бот управляет анонимными почтовыми ящиками для вопросов.\n\n",
-        "help_text": 'Есть два способа пользоваться этим ботом:\n\nЗаведите свой ящик — /link даёт вам постоянную ссылку. Разместите её где угодно на виду (в био, канале, истории — где хотите). Любой, кто по ней перейдёт, сможет отправить вам анонимное сообщение прямо в этот чат — вы не увидите, кто это.\nОтвечайте, смахнув сообщение вправо или нажав и удерживая его и выбрав «Ответить» — ваш ответ уйдёт именно этому человеку и появится у него как настоящий ответ, поэтому легко не путать несколько бесед, даже если они приходят в один и тот же чат.\n\nВам прислали чужую ссылку? Перейдите по ней, затем просто напишите — ваше сообщение уйдёт адресату, а личность останется скрытой. Если позже перейти по той же ссылке снова, начнётся новая беседа, а не продолжение старой.\n\nКоманды:\n/link - получить ссылку на свой ящик\n/conversations - ваши разговоры: открытые и в архиве\n/which - отправьте ответом на любое сообщение: скажу, из какого оно разговора\n/newlink, /pause, /resume - они же кнопки на экране /link\n/blocked - посмотреть, кого вы заблокировали\n/stats - краткая статистика, она же на экране /link\n/export - получить разговор обратно: копией сюда или документом\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/archive - отправьте ответом на сообщение, и этот разговор уйдёт в архив (в /conversations такая кнопка есть у каждого разговора)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "start_greeting": "Здравствуйте! Этот бот управляет анонимными почтовыми ящиками для вопросов.\n\n",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• Свой ящик: /link даёт постоянную ссылку — разместите её где угодно. Любой, кто по "
+            "ней перейдёт, сможет написать вам сюда, а вы не увидите, кто это.\n"
+            "• Ответы: отвечайте на конкретное сообщение — смахните его вправо или нажмите и "
+            "удерживайте, затем «Ответить». Так нужно отвечать всегда: по ответу я понимаю, к "
+            "какой беседе он относится.\n"
+            "• Чужая ссылка: перейдите по ней и напишите. Первое сообщение уйдёт сразу, а ваше "
+            "имя останется скрытым.\n"
+            "• Реакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же, от "
+            "моего имени. Только обычные эмодзи: реакции Telegram Premium не передаются.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /link · /conversations · /cancel\n"
+            "Все команды и все реакции — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "reactions_update_note": "🆕 Теперь здесь можно ставить реакции на сообщения — собеседник увидит их от моего имени. Подробнее: /help",
+        "reaction_not_passed": "⚠️ Собеседник не увидит эту реакцию — передаются только обычные эмодзи.",
+        "reaction_one_only": "⚠️ Собеседник видит только вашу последнюю реакцию — на сообщение передаётся одна.",
+        "help_text": 'Есть два способа пользоваться этим ботом:\n\nЗаведите свой ящик — /link даёт вам постоянную ссылку. Разместите её где угодно на виду (в био, канале, истории — где хотите). Любой, кто по ней перейдёт, сможет отправить вам анонимное сообщение прямо в этот чат — вы не увидите, кто это.\nОтвечайте ответом на сообщение — смахните его вправо или нажмите и удерживайте и выберите «Ответить». Так я понимаю, к какой беседе относится ваш ответ, поэтому это обязательно, а не по желанию: ссылка открытая, с вами могут говорить сразу несколько человек, и сообщение, которое не говорит, на что отвечает, может уйти не туда. У собеседника ваш ответ тоже появится как настоящий ответ.\n\nВам прислали чужую ссылку? Перейдите по ней и напишите — первое сообщение уйдёт сразу, а ваша личность останется скрытой. Дальше отвечайте ответом на сообщение, точно так же, как другая сторона. Если позже перейти по той же ссылке снова, начнётся новая беседа, а не продолжение старой.\n\nРеакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же на своей копии. Она стоит рядом с моей картинкой, а не с вашей, так что ничего не выдаёт. Поменяете или уберёте её — у собеседника будет так же. На одно сообщение передаётся одна реакция, и только из этого списка:\n{reactions}\n⚠️ ВНИМАНИЕ: реакции Telegram Premium (особые эмодзи) НЕ передаются — собеседник их не увидит.\n\nКоманды:\n/link - получить ссылку на свой ящик\n/conversations - ваши разговоры: открытые и в архиве\n/which - отправьте ответом на любое сообщение: скажу, из какого оно разговора\n/newlink, /pause, /resume - они же кнопки на экране /link\n/blocked - посмотреть, кого вы заблокировали\n/stats - краткая статистика, она же на экране /link\n/export - получить разговор обратно: копией сюда или документом\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/archive - отправьте ответом на сообщение, и этот разговор уйдёт в архив (в /conversations такая кнопка есть у каждого разговора)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "follow_link_invalid": "Эта ссылка недействительна — возможно, тот, кто ею поделился, сбросил её. Попросите у него новую.",
         "follow_link_own": "Это ссылка на ваш собственный ящик — писать самому себе было бы просто заметкой для себя! Поделитесь ею с другими: /link",
         "follow_link_blocked": "Вы не можете написать этому человеку.",
@@ -3504,7 +3976,7 @@ STRINGS = {
             "Проведите по сообщению или нажмите и удерживайте его и выберите \u00abОтветить\u00bb."
         ),
         "which_unknown": (
-            "Это сообщение не относится ни к одной открытой здесь беседе. Возможно, оно твоё "
+            "Это сообщение не относится ни к одной открытой здесь беседе. Возможно, оно ваше "
             "собственное или его беседа уже в архиве."
         ),
         "which_owner": "Это сообщение относится к беседе #{conv_number}.",
@@ -3542,7 +4014,7 @@ STRINGS = {
         ),
         "delivery_failed": "Не удалось доставить это сообщение: {error}",
         "sent_confirmation": "Отправлено ✅",
-        "reply_no_match": "Твоё сообщение не отправлено — не удалось сопоставить этот ответ с какой-либо беседой.",
+        "reply_no_match": "Ваше сообщение не отправлено — не удалось сопоставить этот ответ с какой-либо беседой.",
         "must_reply": (
             "Ничего не отправлено — сообщение не сказало, какой беседе оно отвечает.\n"
             "\n"
@@ -3645,12 +4117,12 @@ STRINGS = {
         "export_kind_dice": 'Кубик',
         "export_kind_other": 'Сообщение',
         "archive_needs_reply": (
-            "Ответь на сообщение из той беседы, которую хочешь убрать в архив, и отправь "
-            "/archive ещё раз — смахни сообщение или нажми и удержи его и выбери «Ответить». "
-            "Либо открой /conversations и выбери беседу из списка."
+            "Ответьте на сообщение из той беседы, которую хотите убрать в архив, и отправьте "
+            "/archive ещё раз — смахните сообщение или нажмите и удержите его и выберите «Ответить». "
+            "Либо откройте /conversations и выберите беседу из списка."
         ),
         "archive_not_owner": (
-            "Архив — это дело владельца ящика: он убирает беседу из своего списка, а у тебя "
+            "Архив — это дело владельца ящика: он убирает беседу из своего списка, а у вас "
             "такого списка нет."
         ),
         "archive_already": "Беседа #{conv_number} уже в архиве.",
@@ -3664,7 +4136,7 @@ STRINGS = {
         "archive_button_no": "Оставить открытой",
         "archive_done": "🗂 Беседа #{conv_number} в архиве. Посмотреть — /conversations.",
         "archive_kept": "Оставил открытой.",
-        "unknown_command": "Я не знаю такую команду. Отправь /help, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
     },
 }
 
@@ -3697,6 +4169,7 @@ COMMAND_MENU = {
         "export": "Suhbatni qaytarib olish",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz",
         "donate": "Server xarajatlariga hissa qo'shish",
         "paysupport": "To'lov bilan muammo",
@@ -3713,6 +4186,7 @@ COMMAND_MENU = {
         "export": "Вернуть разговор",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит",
         "donate": "Помочь с расходами на хостинг",
         "paysupport": "Проблема с оплатой",

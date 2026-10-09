@@ -55,11 +55,27 @@ STICKER_SIDE = 512
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
+def _upright(img):
+    """The picture the way up it was taken, from its EXIF Orientation tag -- 2 to 8 are the seven ways a camera can be held that are not the way it is stored."""
+    try:
+        orientation = img.getexif().get(0x0112, 1)
+    except Exception:
+        return img
+    if orientation not in (2, 3, 4, 5, 6, 7, 8):
+        return img
+    from PIL import ImageOps
+    turned = ImageOps.exif_transpose(img)
+    if turned is not img:
+        img.close()
+    return turned
+
 def to_sticker_png(image_bytes: bytes) -> BytesIO:
     """Blocking (Pillow decodes and resamples in-process) -- call it through asyncio.to_thread so a large image doesn't stall every other user."""
     img = Image.open(BytesIO(image_bytes))
 
     img.draft("RGB", (STICKER_SIDE, STICKER_SIDE))
+
+    img = _upright(img)
 
     w, h = img.size
     if w >= h:
@@ -219,6 +235,8 @@ def _next_crf(crf: int, size: int, fps: int) -> tuple[int, int]:
 def _encode(in_path: str, out_path: str, crf: int, fps: int) -> subprocess.CompletedProcess:
     cmd = [
         "ffmpeg", "-nostdin", "-y",
+
+        "-threads", _THREADS, "-filter_threads", _THREADS, "-filter_complex_threads", _THREADS,
         "-i", in_path,
         "-t", str(MAX_DURATION_S),
         "-an",

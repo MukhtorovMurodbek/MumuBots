@@ -86,6 +86,56 @@ def new_conversation_allowed(user_id: int) -> int:
     _trim(_recent_opens)
     return 0
 
+RELAYABLE_REACTIONS = (
+    "❤", "👍", "👎", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩", "🤮", "💩",
+    "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡", "🍌", "🏆",
+    "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈", "😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🙈",
+    "😇", "😨", "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿", "🆒", "💘", "🙉", "🦄",
+    "😘", "💊", "🙊", "😎", "👾", "🤷‍♂", "🤷", "🤷‍♀", "😡",
+)
+
+REACTION_NOTE_SECONDS = float(os.environ.get("ABOT_REACTION_NOTE_SECONDS", "8"))
+
+REACTION_NOTE_EVERY_SECONDS = int(os.environ.get("ABOT_REACTION_NOTE_EVERY_SECONDS", "30"))
+_reaction_notes: "OrderedDict[int, float]" = OrderedDict()
+
+def _reaction_id(reaction) -> "tuple[str, str]":
+    kind = getattr(reaction, "type", None) or "emoji"
+    if kind == "emoji":
+        return kind, getattr(reaction, "emoji", "") or ""
+    if kind == "custom_emoji":
+        return kind, getattr(reaction, "custom_emoji_id", "") or ""
+    return kind, ""
+
+def pick_reaction(old, new) -> "tuple[list[str], str | None]":
+    """What to put on the twin, and which note the reactor needs, if any."""
+    before = {_reaction_id(r) for r in old or ()}
+    after = [_reaction_id(r) for r in new or ()]
+    standard = [value for kind, value in after if kind == "emoji" and value]
+    added = [(kind, value) for kind, value in after if (kind, value) not in before]
+    added_standard = [value for kind, value in added if kind == "emoji" and value]
+    if added_standard:
+        chosen = [added_standard[-1]]
+    else:
+        chosen = standard[:1]
+    note = None
+    if any(kind != "emoji" for kind, _ in added):
+        note = "reaction_not_passed"
+    elif added_standard and len(standard) > 1:
+        note = "reaction_one_only"
+    return chosen, note
+
+def reaction_note_allowed(user_id: int) -> bool:
+    """True at most once per REACTION_NOTE_EVERY_SECONDS for one person."""
+    now = time.monotonic()
+    last = _reaction_notes.get(user_id)
+    if last is not None and now - last < REACTION_NOTE_EVERY_SECONDS:
+        return False
+    _reaction_notes[user_id] = now
+    _reaction_notes.move_to_end(user_id)
+    _trim(_reaction_notes)
+    return True
+
 async def relay_content(
     bot, message, to_chat_id,
     reply_to_message_id=None, reply_markup=None, header=None, italic=True,

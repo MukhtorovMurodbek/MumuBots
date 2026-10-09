@@ -7,7 +7,7 @@ sections apply to all four; a bot's own section adds what is particular to it.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 26 September 2026._
+_Last reviewed: 3 October 2026._
 
 **Privacy:** [every bot](#privacy-every-bot) ·
 [StickerBot](#stickerbot-privacy) · [ConvertBot](#convertbot-privacy) ·
@@ -57,6 +57,13 @@ _Last reviewed: 26 September 2026._
   details; those have to be looked up deliberately.
 - **Work in progress**, so it survives a restart — what each bot means by that
   is in its own section.
+- **Feedback, if you send it** — what you write with `/feedback`, which bot it
+  was sent from, the language you use, and when. Not your user id, your name
+  or your username. The operator receives it as a Telegram message — straight
+  away, or with the nightly summary, as they choose — and the copy in the
+  database is **deleted after 30 days**. Because nothing in it says who sent
+  it, `/deletemydata` cannot find it to erase it sooner. For the same reason it
+  is **one-way**: only the operator reads it, and they cannot reply.
 
 ### What is not held
 
@@ -95,6 +102,7 @@ collected speculatively, and nothing is collected to be sold later.
 | problem records | 180 days |
 | payments and donations | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the payments |
+| feedback sent with `/feedback` | 30 days |
 
 ### Erasing it
 
@@ -156,11 +164,13 @@ owner, from Telegram.
 ## ConvertBot privacy
 
 ConvertBot converts files between formats: pictures, video, audio, documents,
-e-books, spreadsheets and subtitles. Everything under
+e-books, spreadsheets, subtitles, camera raw photos and archives. Everything under
 [Privacy, every bot](#privacy-every-bot) applies. Also held:
 
 - **The file being converted, while it is being converted.** It is written to a
-  staging directory, converted, sent back, and deleted. Anything a crash leaves
+  staging directory, converted, sent back, and deleted. An archive is opened into a
+  folder of its own, packed again and deleted with it; the bot never asks for a
+  password and cannot use one. Anything a crash leaves
   behind is removed by a sweeper that runs every five minutes and again at
   startup, and nothing survives longer than 15 minutes. **With "keep file for
   more formats" turned on** under the format menu, the file is kept until 15
@@ -239,7 +249,11 @@ applies. Also held:
 
 Not held: **what anybody writes.** Messages are relayed and never stored. They
 exist in the two Telegram chats, where each side can delete their own copy, and
-in no database belonging to this bot. Nor are the names, usernames or profile
+in no database belonging to this bot. The one exception is what you choose to
+send the operator yourself, with `/feedback`. Nor are **reactions**: a reaction
+on a message in a conversation is put on the other side's copy by the bot,
+beside the bot's own picture, so the other person sees the reaction and not
+who made it, and nothing about it is written down. Nor are the names, usernames or profile
 photos of the people writing anonymously. Messages travel over Telegram and no
 further; no outside service is called.
 

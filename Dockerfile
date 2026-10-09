@@ -2,9 +2,11 @@
 # Render, Fly.io or a plain `docker build`.
 FROM python:3.11-slim-bookworm
 
-# StickerBot, ConvertBot and DownloaderBot shell out to ffmpeg.
+# StickerBot, ConvertBot and DownloaderBot shell out to ffmpeg; ConvertBot also to bsdtar
+# (libarchive's tar: it reads 7z and RAR and writes 7z -- without it those two are
+# simply not offered).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg libarchive-tools \
  && rm -rf /var/lib/apt/lists/*
 
 # MALLOC_ARENA_MAX keeps glibc from holding freed memory in one arena per

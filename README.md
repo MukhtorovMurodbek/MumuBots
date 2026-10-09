@@ -5,7 +5,7 @@ Five Telegram bots in one process.
 | bot | what it does |
 |---|---|
 | **StickerBot** | Turns images, GIFs, videos and stickers into Telegram sticker packs, with co-editing by share link and bulk import from another pack or a WhatsApp export. |
-| **ConvertBot** | Converts files between about 75 formats: pictures, video, audio, documents, e-books, spreadsheets and subtitles, up to 2000 MB. |
+| **ConvertBot** | Converts files between about 90 formats: pictures, camera raw photos, video, audio, documents, e-books, spreadsheets, subtitles and archives, up to 2000 MB. |
 | **DownloaderBot** | Returns the media behind an Instagram, TikTok, Pinterest, Reddit or X link -- over 50 MB too, for ⚡ credit, for somebody who switched that on. |
 | **AnonBot** | A permanent personal link for receiving anonymous messages, with two-way replies threaded per conversation. |
 | **ManagerBot** | Private. Watches the other four, forwards their crashes and payments, and runs their owner-only commands from one chat. |
@@ -46,8 +46,12 @@ and log.
 Every public bot answers `/start` (asking for a language once, on first use),
 `/help`, `/language` with `/en`, `/uz` and `/rus`, `/cancel` (which asks what
 to stop, one button each, and stops nothing until one is chosen), `/balance`,
-`/paysupport`, `/privacy`, `/terms` and `/deletemydata`, in English, Uzbek and
-Russian. Owner-only commands answer anybody else exactly as a misspelt command
+`/paysupport`, `/privacy`, `/terms`, `/deletemydata` and `/feedback` (a
+suggestion or a report about anything, for whoever runs the bots: the words,
+the bot and the language reach them, never who wrote it, so it is one-way —
+read, never answered — and it is deleted after 30 days), in English, Uzbek and
+Russian. `/help` is the short version in every bot, with a button for the full
+guide (`/help full`). Owner-only commands answer anybody else exactly as a misspelt command
 does, so their existence is not disclosed.
 
 ### StickerBot
@@ -177,6 +181,8 @@ datacenter.
 
 Owner-only: `/dbdump`, `/messageas`, `/status`.
 
+Its full guide lists every reaction that can be passed on.
+
 One inbox link is often posted publicly, so one chat holds many conversations
 at once. Every message is therefore a Telegram reply, and the bot maps each
 delivered message to its conversation and to its counterpart in the other
@@ -186,6 +192,14 @@ no conversation is refused, not sent and not stored. No message content is
 stored at all — only which accounts are talking and which message belongs to
 which conversation.
 
+A reaction on a message in a conversation reaches the other side: the bot
+puts the same reaction on that message's copy in the other chat, beside the
+bot's own picture, so it reveals no more than the messages do. Changing or
+removing it carries over. A bot may set one reaction per message, from
+Telegram's standard set; a Premium custom-emoji reaction, or a second one, is
+not passed on, and a short note that removes itself says so. Nothing about a
+reaction is stored.
+
 ### ManagerBot
 
 Answers only `ADMIN_ID`; without it, it does not start.
@@ -193,9 +207,15 @@ Answers only `ADMIN_ID`; without it, it does not start.
 - **On its own:** checks every bot's heartbeat once a minute and reports when
   one goes down or comes back, telling a redeploy from a crash; forwards
   crashes with the end of the traceback, and payments; says when its own
-  database connection fails; sends one roll-call after it starts.
+  database connection fails; sends one roll-call after it starts; sends a
+  nightly report at 22:00 Korean time (`MBOT_NIGHTLY_UTC`, 13:00 UTC) —
+  urgent problems listed, faults grouped, and what the bots handled correctly
+  by kind (shown how to use it, hit a limit, out of date, blocked or
+  unavailable, turned away during an update); passes on `/feedback`, each
+  piece as it comes or all of them with the nightly report.
 - **Watching:** `/status`, `/events`, `/problems`, `/report`, `/errors`,
-  `/usage`, `/idle`, `/users`, `/alerts on|off`.
+  `/usage`, `/idle`, `/users`, `/alerts on|off`, `/feedback` (what people sent,
+  and the switch between as-it-comes and nightly).
 - **Reaching into a bot:** `/run <bot> <command>`, `/ping [bot]` (the round
   trip leg by leg, timed on the database's clock), `/logs <bot>`, `/restart`,
   `/whois`, `/say`, `/dbdump`.

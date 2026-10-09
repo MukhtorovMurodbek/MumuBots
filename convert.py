@@ -25,8 +25,9 @@ AUDIO = "audio"
 DOCUMENT = "document"
 DATA = "data"
 SUBTITLE = "subtitle"
+ARCHIVE = "archive"
 
-CATEGORIES = (IMAGE, VIDEO, AUDIO, DOCUMENT, DATA, SUBTITLE)
+CATEGORIES = (IMAGE, VIDEO, AUDIO, DOCUMENT, DATA, SUBTITLE, ARCHIVE)
 
 ALIASES = {
     "jpeg": "jpg", "jpe": "jpg", "jfif": "jpg",
@@ -43,13 +44,27 @@ ALIASES = {
     "mts": "m2ts",
     "aif": "aiff", "aifc": "aiff",
     "text": "txt",
+    "tbz": "tbz2", "tb2": "tbz2", "taz": "tgz",
 }
+
+COMPOUND_EXTENSIONS = (("tar.gz", "tgz"), ("tar.bz2", "tbz2"), ("tar.xz", "txz"))
+
+def compound_extension(filename: "str | None") -> "str | None":
+    """`photos.TAR.GZ` -> `tgz`; None when the name does not end in one."""
+    lowered = (filename or "").lower()
+    for ending, name in COMPOUND_EXTENSIONS:
+        if lowered.endswith("." + ending):
+            return name
+    return None
+
+RAW_FORMATS = ("dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2")
 
 SOURCES = {
     IMAGE: (
         "png", "jpg", "webp", "bmp", "tiff", "ico", "cur",
         "heic", "heif", "avif", "jp2", "psd", "tga", "pcx", "dds",
         "ppm", "sgi", "xbm", "xpm", "icns", "qoi", "blp", "im", "svg",
+        *RAW_FORMATS,
     ),
     VIDEO: (
         "mp4", "mov", "m4v", "avi", "webm", "mkv", "flv", "wmv",
@@ -65,6 +80,8 @@ SOURCES = {
     ),
     DATA: ("csv", "tsv", "json", "yaml", "xlsx", "xml"),
     SUBTITLE: ("srt", "vtt", "ass"),
+
+    ARCHIVE: ("zip", "tar", "tgz", "tbz2", "txz", "7z", "rar"),
 }
 
 CATEGORY_OF: dict[str, str] = {}
@@ -96,6 +113,8 @@ TARGETS_BY_CATEGORY = {
     ),
     SUBTITLE: ("srt", "vtt", "ass", "txt"),
 
+    ARCHIVE: ("zip", "7z", "tgz", "tar", "txz", "tbz2"),
+
 }
 
 TARGETS_BY_FORMAT = {
@@ -111,6 +130,8 @@ TARGETS_BY_FORMAT = {
     "txt": ("pdf", "docx", "html"),
 
     "svg": ("png", "pdf", "jpg", "webp"),
+
+    **{raw: ("jpg", "png", "webp", "avif", "heic", "tiff") for raw in RAW_FORMATS},
 
     "gif": ("mp4", "webm", "webp", "apng", "png", "jpg"),
     "apng": ("gif", "mp4", "webm", "webp", "png"),
@@ -135,6 +156,8 @@ FORMAT_NEEDS = {
     "xlsx": ("openpyxl",),
     "yaml": ("yaml",),
     "xml": ("xml",),
+    "7z": ("bsdtar",), "rar": ("bsdtar",),
+    **{raw: ("rawpy",) for raw in RAW_FORMATS},
 }
 
 TARGET_NEEDS = {
@@ -172,6 +195,20 @@ def _pillow_feature(name: str) -> bool:
     except Exception:
         return False
 
+def bsdtar_path() -> "str | None":
+    """libarchive's tar, which reads 7z and RAR and writes 7z: `bsdtar` where it is installed as that (Debian's libarchive-tools), and on Windows the system's own tar.exe, which is the same program."""
+    explicit = os.environ.get("CBOT_BSDTAR")
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    found = shutil.which("bsdtar")
+    if found:
+        return found
+    if os.name == "nt":
+        candidate = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tar.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
 def _ffmpeg_encoders() -> set[str]:
     """The encoder names this ffmpeg was built with."""
     if not shutil.which("ffmpeg"):
@@ -205,10 +242,12 @@ def probe() -> set[str]:
     for requirement, module in (
         ("mupdf", "pymupdf"), ("mammoth", "mammoth"), ("markdown", "markdown"),
         ("openpyxl", "openpyxl"), ("yaml", "yaml"), ("xml", "defusedxml"),
-        ("pydocx", "docx"),
+        ("pydocx", "docx"), ("rawpy", "rawpy"),
     ):
         if _module(module):
             found.add(requirement)
+    if bsdtar_path():
+        found.add("bsdtar")
     _ENCODERS_PRESENT = _ffmpeg_encoders()
     if _ENCODERS_PRESENT:
         found.add("ffmpeg")
@@ -219,7 +258,7 @@ def probe() -> set[str]:
         ", ".join(sorted(found)) or "Pillow only", len(_ENCODERS_PRESENT),
     )
     absent = [name for name in ("mupdf", "heif", "openpyxl", "yaml", "markdown", "mammoth",
-                                "pydocx")
+                                "pydocx", "bsdtar", "rawpy")
               if name not in found]
     if absent:
         logger.warning(
@@ -343,15 +382,22 @@ MAX_PAGES = int(os.environ.get("CONVERT_MAX_PAGES") or 200)
 MAX_ROWS = int(os.environ.get("CONVERT_MAX_ROWS") or 100_000)
 MAX_CELLS = int(os.environ.get("CONVERT_MAX_CELLS") or 2_000_000)
 
+MAX_PAGE_MEGAPIXELS = int(os.environ.get("CONVERT_MAX_PAGE_MEGAPIXELS") or 100)
+
 MAX_BATCH = int(os.environ.get("CONVERT_MAX_BATCH") or 20)
 
 # ─── module: convert_bot.convert_utils ───────────────────────────────────────
 """The conversions themselves, and the Telegram Stars pricing table."""
 from __future__ import annotations
 
+import json
+import logging
+import math
 import os
 import shutil
+import stat
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
@@ -361,6 +407,8 @@ from PIL import Image
 import big_files
 import formats
 
+logger = logging.getLogger(__name__)
+
 class Result(NamedTuple):
     """One file to send, and enough about it to caption it honestly."""
     path: Path
@@ -369,6 +417,73 @@ class Result(NamedTuple):
 
 class ConversionError(Exception):
     pass
+
+class OutOfMemory(ConversionError):
+    """The converter was killed for memory: the file is fine, the machine is too small for it."""
+
+def _killed(returncode) -> bool:
+    """Killed by SIGKILL -- the kernel's out-of-memory killer, when this process did not do it itself (its own time limits raise before this is asked)."""
+    return returncode in (-9, 137)
+
+def remove_tree(path) -> None:
+    """Remove a folder and everything in it, whatever the modes inside say."""
+    path = str(path)
+    tried: set = set()
+
+    def make_writable(target: str) -> None:
+        try:
+            mode = os.lstat(target).st_mode
+            if stat.S_ISLNK(mode):
+                return
+            os.chmod(target, (mode | (stat.S_IRWXU if stat.S_ISDIR(mode) else stat.S_IRUSR | stat.S_IWUSR)) & 0o777)
+        except OSError:
+            pass
+
+    def retry(function, target, _error) -> None:
+
+        target = str(target)
+        if target in tried:
+            return
+        tried.add(target)
+        if target != path:
+            make_writable(os.path.dirname(target))
+        make_writable(target)
+        try:
+            if function in (os.scandir, os.listdir, os.open):
+
+                shutil.rmtree(target, **{_ON_ERROR: retry})
+            elif function is os.path.islink:
+                return
+            else:
+                function(target)
+        except OSError:
+            pass
+
+    try:
+        if os.path.islink(path):
+            os.unlink(path)
+            return
+        if not os.path.lexists(path):
+            return
+
+        waiting = [path]
+        while waiting:
+            folder = waiting.pop()
+            make_writable(folder)
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if entry.is_dir(follow_symlinks=False):
+                            waiting.append(entry.path)
+                        elif os.name == "nt" and entry.is_file(follow_symlinks=False):
+                            make_writable(entry.path)
+            except OSError:
+                continue
+        shutil.rmtree(path, **{_ON_ERROR: retry})
+    except (OSError, RecursionError):
+        logger.debug("Could not remove %s", path, exc_info=True)
+
+_ON_ERROR = "onexc" if sys.version_info >= (3, 12) else "onerror"
 
 PROGRESS = None
 
@@ -448,7 +563,13 @@ _RATIO_BY_PAIR = {
     ("jpg", "png"): 3.5, ("jpg", "bmp"): 12.0, ("jpg", "tiff"): 10.0,
     ("svg", "png"): 20.0, ("svg", "jpg"): 8.0, ("svg", "pdf"): 1.5,
     ("heic", "jpg"): 2.0, ("heic", "png"): 6.0,
+
+    ("7z", "zip"): 1.6, ("rar", "zip"): 1.15, ("txz", "zip"): 1.25, ("tbz2", "zip"): 1.1,
+    ("tgz", "zip"): 1.02, ("tar", "zip"): 0.5,
+    ("zip", "7z"): 0.8, ("zip", "txz"): 0.85, ("zip", "tgz"): 1.0, ("zip", "tbz2"): 0.95, ("zip", "tar"): 1.5,
 }
+
+_RAW_RATIO = {"jpg": 0.25, "png": 3.0, "webp": 0.2, "avif": 0.15, "heic": 0.2, "tiff": 4.0}
 
 _RATIO_BY_CATEGORY = {
     (formats.VIDEO, "gif"): 6.0, (formats.VIDEO, "apng"): 9.0, (formats.VIDEO, "webp"): 2.0,
@@ -463,6 +584,9 @@ _RATIO_BY_CATEGORY = {
     (formats.DATA, "xlsx"): 0.6, (formats.DATA, "pdf"): 2.0, (formats.DATA, "html"): 1.4,
     (formats.DATA, "md"): 1.1, (formats.DATA, "json"): 1.3, (formats.DATA, "yaml"): 1.1,
     (formats.SUBTITLE, "txt"): 0.7,
+
+    (formats.ARCHIVE, "zip"): 1.1, (formats.ARCHIVE, "tgz"): 1.1, (formats.ARCHIVE, "tbz2"): 1.05,
+    (formats.ARCHIVE, "txz"): 0.95, (formats.ARCHIVE, "7z"): 0.9, (formats.ARCHIVE, "tar"): 1.5,
 }
 
 _RATIO_BY_TARGET = {
@@ -491,12 +615,20 @@ _WORK_BY_CATEGORY = {
 
     (formats.VIDEO, "png"): 1.0, (formats.VIDEO, "jpg"): 1.0,
     (formats.VIDEO, "mp3"): 1.1, (formats.VIDEO, "m4a"): 1.1,
+
+    (formats.ARCHIVE, "zip"): 1.4, (formats.ARCHIVE, "tgz"): 1.5, (formats.ARCHIVE, "tbz2"): 2.2,
+    (formats.ARCHIVE, "txz"): 2.6, (formats.ARCHIVE, "7z"): 2.6, (formats.ARCHIVE, "tar"): 1.1,
 }
+
+RAW_WORK_FACTOR = 2.0
 
 def work_factor(src_ext: str, target_ext: str) -> float:
     """How much hardware this pair costs for its size, as a multiplier."""
     src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
     category = formats.CATEGORY_OF.get(src_ext)
+    if src_ext in formats.RAW_FORMATS:
+
+        return RAW_WORK_FACTOR * _WORK_BY_TARGET.get(target_ext, 1.0)
     if (category, target_ext) in _WORK_BY_CATEGORY:
         return _WORK_BY_CATEGORY[(category, target_ext)]
     return _WORK_BY_TARGET.get(target_ext, 1.0)
@@ -509,7 +641,9 @@ def estimate_output_bytes(src_ext: str, target_ext: str, in_bytes: int,
             formats.CATEGORY_OF.get(src_ext) == formats.DOCUMENT:
         return max(1, int(pages * _BYTES_PER_PAGE[target_ext]))
     category = formats.CATEGORY_OF.get(src_ext)
-    ratio = _RATIO_BY_PAIR.get((src_ext, target_ext))
+    ratio = _RAW_RATIO.get(target_ext) if src_ext in formats.RAW_FORMATS else None
+    if ratio is None:
+        ratio = _RATIO_BY_PAIR.get((src_ext, target_ext))
     if ratio is None:
         ratio = _RATIO_BY_CATEGORY.get((category, target_ext))
     if ratio is None:
@@ -589,12 +723,32 @@ def register_openers() -> None:
         pass
     _OPENERS_REGISTERED = True
 
+_EXIF_ORIENTATION = 0x0112
+
+_ORIENTED_BY_CONTAINER = {"HEIF", "AVIF"}
+
+def upright(img: Image.Image) -> Image.Image:
+    """The picture the way up it was taken."""
+    if img.format in _ORIENTED_BY_CONTAINER:
+        return img
+    try:
+        orientation = img.getexif().get(_EXIF_ORIENTATION, 1)
+    except Exception:
+        return img
+    if orientation not in (2, 3, 4, 5, 6, 7, 8):
+        return img
+    from PIL import ImageOps
+    turned = ImageOps.exif_transpose(img)
+    if turned is not img:
+        img.close()
+    return turned
+
 def _open_image(path) -> Image.Image:
     register_openers()
     try:
         img = Image.open(path)
         img.load()
-        return img
+        return upright(img)
     except Exception as exc:
         raise ConversionError(f"Couldn't read that as an image: {exc}") from exc
 
@@ -634,12 +788,20 @@ def _flatten_onto_white(img: Image.Image) -> Image.Image:
 
 def convert_image(in_path, target_ext: str, out_path) -> None:
     target_ext = formats.normalise(target_ext)
+    if target_ext not in _IMAGE_TARGETS:
+        raise ConversionError(f"Unsupported image target format: {target_ext}")
+    save_image(_open_image(in_path), target_ext, out_path)
+
+def save_image(img: Image.Image, target_ext: str, out_path) -> None:
+    """Write a picture that is already open as `target_ext`, by the table above, and close it."""
+    target_ext = formats.normalise(target_ext)
     spec = _IMAGE_TARGETS.get(target_ext)
     if spec is None:
+        img.close()
         raise ConversionError(f"Unsupported image target format: {target_ext}")
     mode, pillow_format, kwargs = spec
+    register_openers()
 
-    img = _open_image(in_path)
     try:
         if mode == "RGB" and img.mode in ("RGBA", "LA", "P"):
             img = _flatten_onto_white(img)
@@ -787,6 +949,82 @@ def _tonemapped(args: list, target_ext: str) -> list:
         args += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
     return args
 
+FIT_PIXELS = int(os.environ.get("CONVERT_VIDEO_FIT_PIXELS") or 2_900_000)
+HUGE_PIXELS = 3840 * 2160
+FIT_BOX = 1920
+_FIT_FILTER = (f"scale={FIT_BOX}:{FIT_BOX}:force_original_aspect_ratio=decrease:"
+               "force_divisible_by=2:flags=bicubic")
+
+def _quarter_turn(stream: dict) -> bool:
+    """Whether the player turns this stream a quarter (90 or 270 degrees) before showing it, which swaps its width and its height."""
+    turn = None
+    for data in stream.get("side_data_list") or ():
+        if isinstance(data, dict) and "rotation" in data:
+            turn = data["rotation"]
+            break
+    if turn is None:
+        turn = (stream.get("tags") or {}).get("rotate")
+    try:
+        turn = float(turn)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(turn):
+        return False
+    return round(turn / 90) % 2 == 1
+
+def video_geometry(in_path) -> "tuple[int, int, bool] | None":
+    """(width, height, is HDR) of the first video stream, from one ffprobe call -- or None for no video stream, no ffprobe, or an answer that makes no sense."""
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_streams", "-of", "json", str(in_path)],
+            capture_output=True, text=True, timeout=20)
+        stream = json.loads(probe.stdout or "{}")["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    if _quarter_turn(stream):
+        width, height = height, width
+    return width, height, str(stream.get("color_transfer") or "").lower() in _HDR_TRANSFERS
+
+def video_needs_fit(width: int, height: int, hdr: bool, target_ext: str) -> bool:
+    """Whether this video is brought down to the 1920x1920 box for this target. Pure."""
+    if not FIT_PIXELS or width * height <= FIT_PIXELS:
+        return False
+    target_ext = formats.normalise(target_ext)
+    if target_ext not in _SDR_VIDEO:
+        return False
+    return hdr or target_ext == "webm" or width * height > HUGE_PIXELS
+
+def fitted_size(width: int, height: int) -> "tuple[int, int]":
+    """What the box makes of this size: never larger, even numbers, same shape."""
+    scale = min(1.0, FIT_BOX / width, FIT_BOX / height)
+    return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
+
+def _fitted(args: list) -> list:
+    """The same arguments with the fit in front of whatever video filter they already have -- before the tonemap, because that is the expensive part."""
+    args = list(args)
+    if "-vf" in args:
+        at = args.index("-vf") + 1
+        args[at] = _FIT_FILTER + "," + args[at]
+        return args
+    return ["-vf", _FIT_FILTER] + args
+
+def video_fit_note(in_path) -> "tuple[str, int, int, int, int] | None":
+    """What to tell somebody about a video before they pay: None, or (which, width, height, fitted width, fitted height) with `which` being "hdr" (HDR: every video target is brought down), "huge" (not HDR, but bigger than 4K: every video target is brought down) or "big" (only WEBM is)."""
+    geometry = video_geometry(in_path)
+    if geometry is None:
+        return None
+    width, height, hdr = geometry
+    if not FIT_PIXELS or width * height <= FIT_PIXELS:
+        return None
+    fw, fh = fitted_size(width, height)
+    which = "hdr" if hdr else ("huge" if width * height > HUGE_PIXELS else "big")
+    return (which, width, height, fw, fh)
+
 def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
     target_ext = formats.normalise(target_ext)
     args = _FFMPEG_ARGS.get(target_ext)
@@ -799,8 +1037,13 @@ def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
         )
     if not os.path.getsize(in_path):
         raise ConversionError("That file came through empty -- try sending it again.")
-    if target_ext in _SDR_TARGETS and _is_hdr(in_path) and _ffmpeg_has_filters("zscale", "tonemap"):
+    hdr = target_ext in _SDR_TARGETS and _is_hdr(in_path)
+    if hdr and _ffmpeg_has_filters("zscale", "tonemap"):
         args = _tonemapped(args, target_ext)
+    if target_ext in _SDR_VIDEO and FIT_PIXELS:
+        geometry = video_geometry(in_path)
+        if geometry and video_needs_fit(geometry[0], geometry[1], hdr or geometry[2], target_ext):
+            args = _fitted(args)
 
     duration = _media_duration(in_path) if PROGRESS is not None else None
     if duration:
@@ -818,6 +1061,9 @@ def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
             f"Conversion took longer than {FFMPEG_TIMEOUT_S}s and was stopped. "
             "Try a shorter or smaller file."
         ) from None
+    if _killed(proc.returncode):
+        raise OutOfMemory(f"ffmpeg was killed (exit {proc.returncode}), for memory: "
+                          f"{(proc.stderr or '').strip()[-300:]}")
     if proc.returncode != 0 or not os.path.exists(out_path):
         note = (proc.stderr or "").strip()[-500:] or "ffmpeg failed with no output"
         raise ConversionError(f"Conversion failed: {note}")
@@ -868,6 +1114,8 @@ def _ffmpeg_with_progress(in_path, args, out_path, duration: float) -> None:
         if proc.returncode != 0 or not os.path.exists(out_path):
             errors.seek(0)
             note = errors.read().decode("utf-8", "replace").strip()[-500:] or "ffmpeg failed with no output"
+            if _killed(proc.returncode):
+                raise OutOfMemory(f"ffmpeg was killed (exit {proc.returncode}), for memory: {note[-300:]}")
             raise ConversionError(f"Conversion failed: {note}")
 
 def _reject_overlong_animation(in_path, src_ext: str) -> None:
@@ -917,6 +1165,11 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     if src_ext in formats.ANIMATED_CAPABLE:
         category = formats.category_of(src_ext, gif_is_animated(in_path))
 
+    if category == formats.IMAGE and src_ext in formats.RAW_FORMATS:
+        import raw_convert
+        raw_convert.convert(in_path, src_ext, target_ext, out_path)
+        return Result(out_path)
+
     if category == formats.IMAGE and src_ext != "svg":
         if target_ext == "pdf":
             images_to_pdf([in_path], out_path)
@@ -943,6 +1196,10 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     if category == formats.DATA:
         import data_convert
         return data_convert.convert(in_path, src_ext, target_ext, work_dir, stem)
+
+    if category == formats.ARCHIVE:
+        import archive_convert
+        return archive_convert.convert(in_path, src_ext, target_ext, work_dir, stem)
 
     raise ConversionError(f"Nothing here converts a .{src_ext} file.")
 
@@ -1011,10 +1268,35 @@ def _check_size(rows: int, columns: int) -> None:
             f"{formats.MAX_CELLS:,}-cell limit for one conversion."
         )
 
+class _Budget:
+    """What has been read so far, checked as it is read."""
+
+    def __init__(self):
+        self.rows = 0
+        self.cells = 0
+
+    def add(self, row) -> None:
+        self.rows += 1
+        self.cells += len(row)
+        if self.rows > formats.MAX_ROWS + 1:
+            raise ConversionError(
+                f"That is over the {formats.MAX_ROWS:,}-row limit for one conversion.")
+        if self.cells > formats.MAX_CELLS:
+            raise ConversionError(
+                f"That is over the {formats.MAX_CELLS:,}-cell limit for one conversion.")
+
 def _read_delimited(in_path, src_ext: str) -> Table:
     text = _read_text(in_path)
     reader = csv.reader(io.StringIO(text), delimiter=_DELIMITERS[src_ext])
-    rows = [row for row in reader]
+    rows = []
+    budget = _Budget()
+    try:
+        for row in reader:
+            budget.add(row)
+            rows.append(row)
+    except csv.Error as exc:
+
+        raise ConversionError(f"That isn't a CSV this can read: {exc}.") from exc
     if not rows:
         raise ConversionError("That file is empty.")
     headers = [str(cell) for cell in rows[0]]
@@ -1035,8 +1317,13 @@ def _read_xlsx(in_path) -> list[tuple[str, Table]]:
     sheets = []
     try:
         for sheet in book.worksheets:
-            rows = [list(row) for row in sheet.iter_rows(values_only=True)]
-            rows = [row for row in rows if any(cell is not None for cell in row)]
+
+            rows = []
+            budget = _Budget()
+            for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):
+                    budget.add(row)
+                    rows.append(list(row))
             if not rows:
                 continue
             headers = ["" if cell is None else str(cell) for cell in rows[0]]
@@ -1053,6 +1340,25 @@ def _read_json(in_path):
         return json.loads(_read_text(in_path))
     except json.JSONDecodeError as exc:
         raise ConversionError(f"That isn't valid JSON: line {exc.lineno}, {exc.msg}.") from exc
+    except RecursionError as exc:
+        raise ConversionError("That JSON is nested too deeply to convert.") from exc
+
+def _refuse_expansion(obj) -> None:
+    """Refuse a YAML document that is small on disk and enormous once read."""
+    seen = 0
+    stack = [obj]
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > formats.MAX_CELLS:
+            raise ConversionError(
+                "That YAML repeats itself through anchors and aliases until it "
+                f"would come to more than {formats.MAX_CELLS:,} values, which is "
+                "over the limit for one conversion.")
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
 
 def _read_yaml(in_path):
     try:
@@ -1061,9 +1367,11 @@ def _read_yaml(in_path):
         raise ConversionError("YAML isn't supported on this host.") from exc
     try:
 
-        return yaml.safe_load(_read_text(in_path))
+        obj = yaml.safe_load(_read_text(in_path))
     except Exception as exc:
         raise ConversionError(f"That isn't valid YAML: {exc}") from exc
+    _refuse_expansion(obj)
+    return obj
 
 def _element_to_object(element):
     """An XML element as dicts and lists, attributes prefixed with `@`."""
@@ -1095,7 +1403,10 @@ def _read_xml(in_path):
         root = parse(str(in_path)).getroot()
     except Exception as exc:
         raise ConversionError(f"That isn't XML this can read: {exc}") from exc
-    return {root.tag: _element_to_object(root)}
+    try:
+        return {root.tag: _element_to_object(root)}
+    except RecursionError as exc:
+        raise ConversionError("That XML is nested too deeply to convert.") from exc
 
 def _load(in_path, src_ext: str):
     """(object, sheets) -- one of the two is always None."""
@@ -1223,6 +1534,13 @@ def _write_yaml(obj, out_path) -> None:
         yaml.safe_dump(obj, handle, allow_unicode=True, sort_keys=False, default_flow_style=False)
 
 def convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str = "converted") -> Result:
+    try:
+        return _convert(in_path, src_ext, target_ext, work_dir, stem)
+    except RecursionError as exc:
+
+        raise ConversionError("That file is nested too deeply to convert.") from exc
+
+def _convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str) -> Result:
     src_ext = formats.normalise(src_ext)
     target_ext = formats.normalise(target_ext)
     work_dir = Path(work_dir)
@@ -1367,6 +1685,18 @@ def _page_count(doc) -> int:
         )
     return count
 
+def _check_page_sizes(doc, pages: int) -> None:
+    """Refuse a document with a page too big to draw, before drawing any."""
+    for index in range(pages):
+        rect = doc[index].rect
+        megapixels = (rect.width * PAGE_DPI / 72) * (rect.height * PAGE_DPI / 72) / 1_000_000
+        if megapixels > formats.MAX_PAGE_MEGAPIXELS:
+            raise ConversionError(
+                f"Page {index + 1} is {rect.width / 72:.0f} by {rect.height / 72:.0f} inches, "
+                f"which would be {megapixels:,.0f} megapixels as a picture -- over the "
+                f"{formats.MAX_PAGE_MEGAPIXELS}-megapixel limit for one page."
+            )
+
 def _docx_to_html(in_path) -> str:
     try:
         import mammoth
@@ -1473,6 +1803,7 @@ def _render_pages(in_path, src_ext: str, target_ext: str, work_dir, stem: str) -
     produced: list[Path] = []
     try:
         pages = _page_count(doc)
+        _check_page_sizes(doc, pages)
         for index in range(pages):
             report(index, pages)
             pixmap = doc[index].get_pixmap(dpi=PAGE_DPI)
@@ -1563,6 +1894,8 @@ _HEADING_RATIO = 1.25
 _HEADING_2_RATIO = 1.6
 
 _MIN_IMAGE_PIXELS = 64 * 64
+
+_MAX_IMAGE_PIXELS = 50_000_000
 _DOCX_PAGE_WIDTH_INCHES = 6.0
 
 def _docx():
@@ -1648,7 +1981,7 @@ def _add_page_images(document, doc, page, pymupdf, work_dir) -> None:
         try:
             data = doc.extract_image(info[0])
             raw, width, height = data["image"], data.get("width", 0), data.get("height", 0)
-            if width * height < _MIN_IMAGE_PIXELS:
+            if width * height < _MIN_IMAGE_PIXELS or width * height > _MAX_IMAGE_PIXELS:
                 continue
 
             picture = PILImage.open(io.BytesIO(raw))
@@ -1717,6 +2050,734 @@ def convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str = "conve
 
     raise ConversionError(f"Nothing here converts a .{src_ext} to .{target_ext}.")
 
+# ─── module: convert_bot.archive_convert ─────────────────────────────────────
+"""Archives: ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ and 7z -- and RAR, which is read and never written."""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import stat
+import subprocess
+import tarfile
+import tempfile
+import threading
+import zipfile
+from pathlib import Path
+
+import formats
+from convert_utils import ConversionError, Result, remove_tree, report
+from formats import bsdtar_path
+
+WRITES = frozenset({"zip", "tar", "tgz", "tbz2", "txz", "7z"})
+
+TAR_READ_MODES = {"tar": "r:", "tgz": "r:gz", "tbz2": "r:bz2", "txz": "r:xz"}
+TAR_WRITE_MODES = {"tar": "w:", "tgz": "w:gz", "tbz2": "w:bz2", "txz": "w:xz"}
+
+MAX_ENTRIES = int(os.environ.get("CONVERT_MAX_ARCHIVE_ENTRIES") or 10_000)
+
+MAX_EXPANDED_MB = int(os.environ.get("CONVERT_MAX_ARCHIVE_EXPANDED_MB") or 300)
+
+MAX_RATIO = int(os.environ.get("CONVERT_MAX_ARCHIVE_RATIO") or 200)
+MAX_NAME_BYTES = 1024
+MAX_PART_BYTES = 255
+
+MAX_HEADER_BYTES = 1024 * 1024
+BSDTAR_TIMEOUT_S = 900.0
+
+_STDERR_TAIL = 64 * 1024
+
+_WINDOWS_NAMES = os.name == "nt"
+
+WATCH_INTERVAL_S = 0.25
+_stats = {"watcher_killed": 0}
+
+_MB = 1024 * 1024
+_CHUNK = 1024 * 256
+_DEVICE_NAMES = frozenset({"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
+                           *(f"lpt{i}" for i in range(1, 10))})
+_DRIVE = re.compile(r"^[A-Za-z]:")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_NOT_FILES = frozenset({stat.S_IFLNK, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFIFO, stat.S_IFSOCK})
+_PASSWORD_WORDS = ("passphrase", "encrypted", "password", "incorrect pass")
+
+def _limit_bytes() -> int:
+    return MAX_EXPANDED_MB * _MB
+
+def _safe_name(raw: str) -> "str | None":
+    """The entry's path as a clean relative POSIX path, or None for an entry that is just the folder itself ("./", ".")."""
+    if raw is None or _CONTROL.search(raw):
+        raise ConversionError("That archive has a file name with control characters in it, "
+                              "so it was not opened.")
+    name = raw.replace("\\", "/")
+    if name.startswith("/") or _DRIVE.match(name):
+        raise ConversionError("That archive has a file whose path starts at the root of a disk "
+                              "instead of inside the archive, so it was not opened.")
+    parts = []
+    for part in name.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ConversionError("That archive has a file whose path climbs out of the archive "
+                                  "(a `..`), so it was not opened.")
+        if len(part.encode("utf-8", "replace")) > MAX_PART_BYTES:
+            raise ConversionError("That archive has a file name longer than a file system takes, "
+                                  "so it was not opened.")
+        if _WINDOWS_NAMES and part.split(".")[0].lower() in _DEVICE_NAMES:
+            raise ConversionError("That archive has a file named like a device (CON, NUL, ...), "
+                                  "so it was not opened.")
+        parts.append(part)
+    if not parts:
+        return None
+    clean = "/".join(parts)
+    if len(clean.encode("utf-8", "replace")) > MAX_NAME_BYTES:
+        raise ConversionError("That archive has a path longer than a file system takes, "
+                              "so it was not opened.")
+    return clean
+
+def _under(root: Path, relative: str) -> Path:
+    """root/relative, and proof it is still inside root once symlinks are resolved -- a belt for the braces above."""
+    target = (root / relative)
+    resolved = target.resolve()
+    if os.path.commonpath([str(root.resolve()), str(resolved)]) != str(root.resolve()):
+        raise ConversionError("That archive would write outside its own folder, so it was not opened.")
+    return target
+
+class _Budget:
+    """What may still be written. Counted on the bytes that are written, not on what an index says they will be."""
+
+    def __init__(self):
+        self.entries = 0
+        self.files = 0
+        self.bytes = 0
+        self.skipped = 0
+
+    def entry(self) -> None:
+        self.entries += 1
+        if self.entries > MAX_ENTRIES:
+            raise ConversionError(f"That archive has more than {MAX_ENTRIES:,} entries, "
+                                  "which is more than one conversion takes.")
+
+    def add(self, count: int) -> None:
+        self.bytes += count
+        if self.bytes > _limit_bytes():
+            raise ConversionError(f"That archive expands to more than {MAX_EXPANDED_MB:,} MB, "
+                                  "which is more than one conversion takes.")
+
+_CLASH = "That archive has a file and a folder with the same name, so it was not opened."
+
+def _make_folder(path: Path) -> None:
+    """mkdir -p, where a FILE already in the way is a refusal, not a crash."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError):
+        raise ConversionError(_CLASH) from None
+
+def _copy_capped(source, destination: Path, budget: _Budget) -> None:
+    _make_folder(destination.parent)
+    if destination.is_dir():
+        raise ConversionError(_CLASH)
+    with open(destination, "wb") as out:
+        while True:
+            chunk = source.read(_CHUNK)
+            if not chunk:
+                break
+            budget.add(len(chunk))
+            out.write(chunk)
+    budget.files += 1
+
+def _extract_zip(in_path: str, root: Path, budget: _Budget) -> None:
+    try:
+        archive = zipfile.ZipFile(in_path)
+    except UnicodeDecodeError:
+
+        raise ConversionError("That archive's file names aren't readable text, so it was not opened.") from None
+    except (zipfile.BadZipFile, OSError, NotImplementedError, EOFError) as exc:
+        raise ConversionError(f"Couldn't read that ZIP: {exc}") from exc
+    with archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_ENTRIES:
+            raise ConversionError(f"That archive has {len(infos):,} entries, over the "
+                                  f"{MAX_ENTRIES:,} one conversion takes.")
+        declared = 0
+        for info in infos:
+            if info.flag_bits & 0x1:
+                raise ConversionError("That ZIP is password-protected. Nothing was charged -- "
+                                      "this bot never asks for a password.")
+            declared += info.file_size
+            if info.file_size > _MB and (info.compress_size == 0
+                                         or info.file_size / max(1, info.compress_size) > MAX_RATIO):
+                raise ConversionError(f"That ZIP has a file that expands more than {MAX_RATIO}-fold, "
+                                      "which is how a zip bomb is built, so it was not opened.")
+        if declared > _limit_bytes():
+            raise ConversionError(f"That archive expands to {declared // _MB:,} MB, over the "
+                                  f"{MAX_EXPANDED_MB:,} MB one conversion takes.")
+        for info in infos:
+            budget.entry()
+            name = _safe_name(info.filename)
+            if name is None:
+                continue
+
+            if stat.S_IFMT(info.external_attr >> 16) in _NOT_FILES:
+                budget.skipped += 1
+                continue
+            if info.is_dir():
+                _make_folder(_under(root, name))
+                continue
+            try:
+                with archive.open(info) as source:
+                    _copy_capped(source, _under(root, name), budget)
+            except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError, OSError, ValueError) as exc:
+                raise ConversionError(f"Couldn't read '{name}' inside that ZIP: {exc}") from exc
+
+_HEADER_TOO_BIG = "a header in the archive is larger than the limit"
+
+class _HeaderReads:
+    """A tar file's byte stream for the length of one header, handing over no more than MAX_HEADER_BYTES in all."""
+
+    def __init__(self, fileobj):
+        self._fileobj = fileobj
+        self._left = MAX_HEADER_BYTES
+
+    def read(self, size=-1):
+        if size is None or size < 0 or size > self._left:
+            raise tarfile.HeaderError(_HEADER_TOO_BIG)
+        self._left -= size
+        return self._fileobj.read(size)
+
+    def __getattr__(self, name):
+        return getattr(self._fileobj, name)
+
+class _CappedTarInfo(tarfile.TarInfo):
+    """tarfile's header reader, refusing a header larger than any name needs."""
+
+    def _within_allowance(self, parent, tar, check_size):
+        if check_size and self.size > MAX_HEADER_BYTES:
+            raise tarfile.HeaderError(_HEADER_TOO_BIG)
+        if isinstance(tar.fileobj, _HeaderReads):
+            return parent(tar)
+        real = tar.fileobj
+        tar.fileobj = _HeaderReads(real)
+        try:
+            return parent(tar)
+        finally:
+            tar.fileobj = real
+
+    def _proc_gnulong(self, tar):
+        return self._within_allowance(super()._proc_gnulong, tar, True)
+
+    def _proc_pax(self, tar):
+        return self._within_allowance(super()._proc_pax, tar, True)
+
+    def _proc_sparse(self, tar):
+
+        return self._within_allowance(super()._proc_sparse, tar, False)
+
+def _tar_refusal(exc: Exception) -> ConversionError:
+    if _HEADER_TOO_BIG in str(exc):
+
+        return ConversionError("That archive has a header far larger than any file name, "
+                               "so it was not opened.")
+    return ConversionError(f"Couldn't read that archive: {exc}")
+
+def _extract_tar(in_path: str, src_ext: str, root: Path, budget: _Budget) -> None:
+    try:
+        archive = tarfile.open(in_path, mode=TAR_READ_MODES[src_ext], tarinfo=_CappedTarInfo)
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        raise _tar_refusal(exc) from exc
+    except MemoryError:
+        raise
+    except Exception as exc:
+        raise ConversionError(f"Couldn't read that archive: {type(exc).__name__}") from exc
+    try:
+        with archive:
+            for member in archive:
+                budget.entry()
+                name = _safe_name(member.name)
+                if name is None:
+                    continue
+                if member.isdir():
+                    _make_folder(_under(root, name))
+                    continue
+                if not member.isreg():
+                    budget.skipped += 1
+                    continue
+                source = archive.extractfile(member)
+                if source is None:
+                    budget.skipped += 1
+                    continue
+                with source:
+                    _copy_capped(source, _under(root, name), budget)
+    except ConversionError:
+        raise
+    except (tarfile.TarError, EOFError, OSError, ValueError) as exc:
+        raise _tar_refusal(exc) from exc
+    except MemoryError:
+        raise
+    except Exception as exc:
+        raise ConversionError(f"That archive is damaged ({type(exc).__name__}).") from exc
+
+_MAGIC = {"rar": b"Rar!\x1a\x07", "7z": b"7z\xbc\xaf\x27\x1c"}
+_PADDING = 20 * 1024
+
+def _padded_copy(in_path: str, src_ext: str, work_dir: Path, stem: str) -> Path:
+    with open(in_path, "rb") as source:
+        if not source.read(8).startswith(_MAGIC[src_ext]):
+            raise ConversionError(f"That file is not a {src_ext.upper()} archive, whatever it is called.")
+    copy = work_dir / f"{stem}-source.{src_ext}"
+    shutil.copyfile(in_path, copy)
+    with open(copy, "ab") as out:
+        out.write(b"\0" * _PADDING)
+    return copy
+
+def _walk_failed(exc: OSError):
+    """os.walk's onerror, for every walk over what an archive unpacked."""
+    raise ConversionError("Some of that archive's files couldn't be read, so it was not opened.") from exc
+
+def _tree_size(root: Path, strict: bool = False) -> int:
+    """Bytes under root."""
+    total = 0
+    for current, _dirs, files in os.walk(root, onerror=_walk_failed if strict else None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(current, name)).st_size
+            except OSError as exc:
+                if strict:
+                    _walk_failed(exc)
+    return total
+
+def _opened_mode(mode: int, is_dir: bool) -> int:
+    """A mode with the owner able to read and write (and, for a folder, to enter and list), the setuid, setgid and sticky bits gone, and everything else as it was."""
+    return (mode | (0o700 if is_dir else 0o600)) & 0o777
+
+def _open_up(root: Path) -> None:
+    """Make everything bsdtar unpacked readable and writable by us, top down."""
+    try:
+        os.chmod(root, _opened_mode(os.lstat(root).st_mode, True))
+        for current, dirs, files in os.walk(root, onerror=_walk_failed):
+            for name in dirs + files:
+                path = os.path.join(current, name)
+                mode = os.lstat(path).st_mode
+                if stat.S_ISDIR(mode):
+                    os.chmod(path, _opened_mode(mode, True))
+                elif stat.S_ISREG(mode):
+                    os.chmod(path, _opened_mode(mode, False))
+    except OSError as exc:
+        _walk_failed(exc)
+
+def _tail(handle, limit: int = _STDERR_TAIL) -> str:
+    """The last `limit` bytes of a file bsdtar wrote its complaints to."""
+    try:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - limit))
+        return handle.read(limit).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return ""
+
+def _too_big() -> ConversionError:
+    return ConversionError(f"That archive expands to more than {MAX_EXPANDED_MB:,} MB, "
+                           "which is more than one conversion takes.")
+
+def _extract_with_bsdtar(in_path: str, root: Path, budget: _Budget) -> None:
+    tar = bsdtar_path()
+    if tar is None:
+        raise ConversionError("7z and RAR archives aren't supported on this host.")
+
+    with tempfile.TemporaryFile() as listing_errors:
+        listing = subprocess.Popen([tar, "-tf", in_path], stdout=subprocess.PIPE, stderr=listing_errors)
+        names = []
+        try:
+            for line in listing.stdout:
+                names.append(line.decode("utf-8", "replace").rstrip("\r\n"))
+                if len(names) > MAX_ENTRIES:
+                    listing.kill()
+                    raise ConversionError(f"That archive has more than {MAX_ENTRIES:,} entries, "
+                                          "which is more than one conversion takes.")
+            listing.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            listing.kill()
+            raise ConversionError("Reading that archive's index took too long, so it was not opened.") from None
+        finally:
+            if listing.poll() is None:
+                listing.kill()
+            listing.wait()
+            listing.stdout.close()
+        errors = _tail(listing_errors)
+    if listing.returncode not in (0, None) and not names:
+        _refuse_bsdtar(errors)
+    for name in names:
+        _safe_name(name)
+
+    with tempfile.TemporaryFile() as extract_errors:
+        proc = subprocess.Popen(
+            [tar, "-xpf", in_path, "-C", str(root), "--no-same-owner",
+             "--no-acls", "--no-xattrs", "--no-fflags"],
+            stdout=subprocess.DEVNULL, stderr=extract_errors)
+        over = threading.Event()
+        done = threading.Event()
+
+        def watch():
+            while not done.wait(WATCH_INTERVAL_S):
+                if _tree_size(root) > _limit_bytes():
+                    over.set()
+                    _stats["watcher_killed"] += 1
+                    proc.kill()
+                    return
+
+        watcher = threading.Thread(target=watch, daemon=True)
+        watcher.start()
+        try:
+            proc.wait(timeout=BSDTAR_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise ConversionError("Opening that archive took too long, so it was stopped.") from None
+        finally:
+            done.set()
+            watcher.join(2)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        err = _tail(extract_errors)
+    if over.is_set():
+        raise _too_big()
+    if proc.returncode != 0:
+        if _tree_size(root) > _limit_bytes():
+            raise _too_big()
+        if proc.returncode < 0:
+            raise MemoryError("the archive reader was stopped by the system")
+        _refuse_bsdtar(err)
+
+    _open_up(root)
+
+    os.utime(root)
+    if _tree_size(root, strict=True) > _limit_bytes():
+        raise _too_big()
+    _drop_non_files(root, budget)
+    _count_files(root, budget)
+
+def _count_files(root: Path, budget: _Budget) -> None:
+    """What bsdtar wrote, counted against the same budget as the other readers."""
+    for current, _dirs, files in os.walk(root, onerror=_walk_failed):
+        for name in files:
+            budget.entry()
+            budget.add(os.lstat(os.path.join(current, name)).st_size)
+            budget.files += 1
+
+def _drop_non_files(root: Path, budget: _Budget) -> None:
+    """Whatever bsdtar made that is not a plain file or a folder goes: links (which it creates as links), devices, fifos."""
+    for current, dirs, files in os.walk(root, followlinks=False, onerror=_walk_failed):
+        for name in list(dirs) + list(files):
+            path = os.path.join(current, name)
+            mode = os.lstat(path).st_mode
+            if stat.S_ISLNK(mode) or not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                os.unlink(path)
+                budget.skipped += 1
+                if name in dirs:
+                    dirs.remove(name)
+
+def _refuse_bsdtar(message: str) -> None:
+    lowered = message.lower()
+    if any(word in lowered for word in _PASSWORD_WORDS):
+        raise ConversionError("That archive is password-protected. Nothing was charged -- "
+                              "this bot never asks for a password.")
+    raise ConversionError("Couldn't read that archive: " + (message.strip().splitlines() or ["unknown error"])[-1][:200])
+
+def _entries(root: Path):
+    """(relative path, absolute path, is a directory), directories first within each level, in a stable order -- so the same input is the same output."""
+    for current, dirs, files in os.walk(root, onerror=_walk_failed):
+        dirs.sort()
+        here = Path(current)
+        for name in sorted(files):
+            yield (here / name).relative_to(root).as_posix(), here / name, False
+        if not dirs and not files and here != root:
+            yield here.relative_to(root).as_posix(), here, True
+
+def _require_text_names(entries, label: str) -> None:
+    """A ZIP or a 7z stores names as text, so a name that is not text cannot go into one."""
+    for name, _path, _is_dir in entries:
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ConversionError("That archive's file names aren't readable text, so it can't be "
+                                  f"made into a {label}.") from None
+
+def _write_zip(root: Path, out_path: Path) -> int:
+    count = 0
+    entries = list(_entries(root))
+    _require_text_names(entries, "ZIP")
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6, strict_timestamps=False) as archive:
+        for index, (name, path, is_dir) in enumerate(entries):
+            report(index, len(entries))
+            if is_dir:
+                archive.writestr(name + "/", b"")
+            else:
+                archive.write(path, arcname=name)
+                count += 1
+    report(len(entries), len(entries))
+    return count
+
+def _normalised(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    """Nobody's user id, nobody's name, and permissions that mean the same on any machine: what was on the sender's disk is not the recipient's business."""
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.mode = 0o755 if info.isdir() else 0o644
+    return info
+
+def _write_tar(root: Path, target_ext: str, out_path: Path) -> int:
+    count = 0
+    entries = list(_entries(root))
+    with tarfile.open(out_path, mode=TAR_WRITE_MODES[target_ext]) as archive:
+        for index, (name, path, is_dir) in enumerate(entries):
+            report(index, len(entries))
+            archive.add(path, arcname=name, recursive=False, filter=_normalised)
+            count += 0 if is_dir else 1
+    report(len(entries), len(entries))
+    return count
+
+def _write_7z(root: Path, out_path: Path) -> int:
+    tar = bsdtar_path()
+    if tar is None:
+        raise ConversionError("7z archives can't be made on this host.")
+    entries = list(_entries(root))
+    _require_text_names(entries, "7Z")
+    count = sum(1 for _, _, is_dir in entries if not is_dir)
+    try:
+        proc = subprocess.run(
+            [tar, "--format", "7zip", "--options", "7zip:compression=lzma2", "-cf", str(out_path), "-C", str(root), "."],
+            capture_output=True, timeout=BSDTAR_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise ConversionError("Making that 7z took too long, so it was stopped.") from None
+    if proc.returncode != 0 or not out_path.exists():
+        out_path.unlink(missing_ok=True)
+        detail = (proc.stderr.decode("utf-8", "replace").strip().splitlines() or [""])[-1][:160]
+
+        raise ConversionError("Couldn't make a 7z out of this one" + (f" ({detail})" if detail else "")
+                              + ". A ZIP or TAR.XZ will work.")
+    return count
+
+def convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str = "converted") -> Result:
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if target_ext not in WRITES:
+        raise ConversionError(f"Nothing here makes a .{target_ext} archive.")
+    work_dir = Path(work_dir)
+    out_path = work_dir / f"{stem}.{target_ext}"
+    root = work_dir / f"{stem}-contents"
+    if root.exists():
+        remove_tree(root)
+    root.mkdir(parents=True)
+    budget = _Budget()
+    try:
+        if src_ext == "zip":
+            _extract_zip(str(in_path), root, budget)
+        elif src_ext in TAR_READ_MODES:
+            _extract_tar(str(in_path), src_ext, root, budget)
+        elif src_ext in ("7z", "rar"):
+            padded = _padded_copy(str(in_path), src_ext, work_dir, stem)
+            try:
+                _extract_with_bsdtar(str(padded), root, budget)
+            finally:
+                padded.unlink(missing_ok=True)
+        else:
+            raise ConversionError(f"Nothing here opens a .{src_ext} archive.")
+        if budget.files == 0:
+            raise ConversionError("That archive has no files in it." + (
+                " Links, devices and other things that are not plain files are never carried over."
+                if budget.skipped else ""))
+        if target_ext == "zip":
+            files = _write_zip(root, out_path)
+        elif target_ext in TAR_WRITE_MODES:
+            files = _write_tar(root, target_ext, out_path)
+        else:
+            files = _write_7z(root, out_path)
+    except BaseException:
+        out_path.unlink(missing_ok=True)
+        raise
+    finally:
+        remove_tree(root)
+    return Result(out_path, items=max(1, files))
+
+# ─── module: convert_bot.raw_convert ─────────────────────────────────────────
+"""Camera RAW: CR2, CR3, NEF, ARW, DNG, RAF, ORF and RW2 to JPG, PNG, WEBP, AVIF, HEIC or TIFF."""
+from __future__ import annotations
+
+import os
+import struct
+from pathlib import Path
+from typing import NamedTuple
+
+import formats
+from convert_utils import ConversionError, OutOfMemory, save_image
+
+FORMATS = formats.RAW_FORMATS
+FULL_MP = float(os.environ.get("CONVERT_RAW_FULL_MP") or 40)
+MAX_MP = float(os.environ.get("CONVERT_RAW_MAX_MP") or 110)
+
+WRITES = frozenset({"jpg", "png", "webp", "avif", "heic", "tiff"})
+
+class RawInfo(NamedTuple):
+    width: int
+    height: int
+    megapixels: float
+    half: bool
+    out_width: int
+    out_height: int
+    out_megapixels: float
+
+def _rawpy():
+    try:
+        import rawpy
+        return rawpy
+    except ImportError as exc:
+        raise ConversionError("Camera raw photos aren't supported on this host.") from exc
+
+def _open(path, src_ext: str, unpack: bool = True):
+    """The file opened by LibRaw."""
+    rawpy = _rawpy()
+    try:
+        if not unpack:
+            raw = rawpy.RawPy()
+            raw.open_file(str(path))
+            return raw
+        return rawpy.imread(str(path))
+    except MemoryError:
+        raise
+    except Exception as exc:
+        raise ConversionError(f"Couldn't read that {src_ext.upper()} as a camera raw photo: "
+                              f"{_tidy(exc)}") from exc
+
+def _mp(value: float) -> str:
+    """A megapixel count for a sentence: whole numbers for photos, two places for the small ones a test or a thumbnail can be."""
+    return f"{value:.0f}" if value >= 10 else f"{value:.2f}"
+
+def _tidy(exc: Exception) -> str:
+    text = " ".join(str(exc).split())
+    return text[:160] or type(exc).__name__
+
+def _sizes(raw) -> "tuple[int, int]":
+    """The picture's own width and height, after the camera's turn."""
+    width, height = int(raw.sizes.width), int(raw.sizes.height)
+    if int(getattr(raw.sizes, "flip", 0) or 0) in (5, 6):
+        width, height = height, width
+    return width, height
+
+def inspect(path, src_ext: str = "dng") -> RawInfo:
+    """Size and plan from the file's header, without decoding a pixel."""
+    with _open(path, src_ext, unpack=False) as raw:
+        width, height = _sizes(raw)
+    megapixels = width * height / 1_000_000
+    half = megapixels > FULL_MP
+    out_w, out_h = (width // 2, height // 2) if half else (width, height)
+    return RawInfo(width, height, megapixels, half, out_w, out_h, out_w * out_h / 1_000_000)
+
+def megapixels(path, src_ext: str) -> "float | None":
+    """The size the way jobs.describe_image gives it for a picture -- None for anything that cannot be read -- but the OUTPUT size, because that is what the estimates of what comes out are about."""
+    try:
+        return inspect(path, src_ext).out_megapixels
+    except ConversionError:
+        return None
+
+def convert(in_path, src_ext: str, target_ext: str, out_path) -> None:
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if target_ext not in WRITES:
+        raise ConversionError(f"A camera raw photo doesn't convert to .{target_ext}.")
+    rawpy = _rawpy()
+    with _open(in_path, src_ext) as raw:
+        width, height = _sizes(raw)
+        megapixels_ = width * height / 1_000_000
+        if megapixels_ > MAX_MP:
+            raise ConversionError(
+                f"That photo is {_mp(megapixels_)} megapixels. This server converts camera raw photos up to "
+                f"{_mp(MAX_MP)}: past that even the half-size decode needs more memory than it has.")
+        bits = 16 if target_ext == "tiff" else 8
+        try:
+            rgb = raw.postprocess(
+                use_camera_wb=True, no_auto_bright=True, output_bps=bits,
+                output_color=rawpy.ColorSpace.sRGB,
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+                half_size=megapixels_ > FULL_MP)
+        except MemoryError:
+            raise OutOfMemory("decoding that raw photo ran out of memory") from None
+        except Exception as exc:
+            raise ConversionError(f"Couldn't develop that raw photo: {_tidy(exc)}") from exc
+    if target_ext == "tiff":
+        _write_tiff16(rgb, out_path)
+        return
+    from PIL import Image
+    try:
+        picture = Image.fromarray(rgb)
+        del rgb
+        save_image(picture, target_ext, out_path)
+    except ConversionError:
+        raise
+    except MemoryError:
+        raise OutOfMemory("saving that raw photo ran out of memory") from None
+    except Exception as exc:
+        raise ConversionError(f"Image conversion failed: {exc}") from exc
+
+def _srgb_profile() -> "bytes | None":
+    """Pillow carries lcms; with it the TIFF says which colours its numbers are, which is what an editor asks about an untagged 16-bit file."""
+    try:
+        from PIL import ImageCms
+        return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    except Exception:
+        return None
+
+def _write_tiff16(rgb, out_path) -> None:
+    """An uncompressed baseline TIFF of an (height, width, 3) uint16 array: one strip, little-endian, written without making a second copy of the pixels."""
+    import numpy as np
+    height, width, channels = rgb.shape
+    if channels != 3 or rgb.dtype != np.uint16:
+        raise ConversionError("The developed picture was not 16-bit RGB, so no TIFF was made.")
+    data_bytes = width * height * 6
+    if data_bytes >= 2 ** 32 - 1024:
+        raise ConversionError("That picture is too big for one TIFF strip.")
+    profile = _srgb_profile()
+    rgb = np.ascontiguousarray(rgb.astype("<u2", copy=False))
+
+    SHORT, LONG, RATIONAL, UNDEFINED = 3, 4, 5, 7
+    tags = [
+        (256, LONG, 1, width), (257, LONG, 1, height),
+        (258, SHORT, 3, struct.pack("<3H", 16, 16, 16)),
+        (259, SHORT, 1, 1), (262, SHORT, 1, 2),
+        (273, LONG, 1, None),
+        (277, SHORT, 1, 3), (278, LONG, 1, height), (279, LONG, 1, data_bytes),
+        (282, RATIONAL, 1, struct.pack("<II", 72, 1)), (283, RATIONAL, 1, struct.pack("<II", 72, 1)),
+        (284, SHORT, 1, 1), (296, SHORT, 1, 2),
+    ]
+    if profile:
+        tags.append((34675, UNDEFINED, len(profile), profile))
+    tags.sort(key=lambda t: t[0])
+    ifd_size = 2 + len(tags) * 12 + 4
+    extra_at = 8 + ifd_size
+    extra = bytearray()
+    placed = []
+    for tag, typ, count, value in tags:
+        if isinstance(value, bytes) and len(value) > 4:
+            placed.append((tag, typ, count, extra_at + len(extra)))
+            extra += value + (b"\0" if len(value) % 2 else b"")
+        elif isinstance(value, bytes):
+            placed.append((tag, typ, count, int.from_bytes(value.ljust(4, b"\0"), "little")))
+        else:
+            placed.append((tag, typ, count, value))
+    data_at = extra_at + len(extra)
+    with open(out_path, "wb") as out:
+        out.write(b"II*\0" + struct.pack("<I", 8) + struct.pack("<H", len(tags)))
+        for tag, typ, count, value in placed:
+            if tag == 273:
+                value = data_at
+            out.write(struct.pack("<HHII", tag, typ, count, value))
+        out.write(struct.pack("<I", 0))
+        out.write(extra)
+        rgb.tofile(out)
+
+def describe(path, src_ext: str) -> "RawInfo | None":
+    """inspect(), or None for a file that cannot be read -- for the menu, which would rather say nothing than refuse a file the converter might still take."""
+    try:
+        return inspect(Path(path), src_ext)
+    except ConversionError:
+        return None
+
 # ─── module: convert_bot.convert_worker ──────────────────────────────────────
 """One conversion, in a process of its own."""
 import json
@@ -1745,6 +2806,48 @@ def _cap_memory(max_memory_mb: int) -> None:
     except Exception:
         pass
 
+def _describe_raw(job: dict) -> int:
+    """Read a camera raw photo's size without decoding it (raw_convert.inspect) and say it as JSON."""
+    try:
+        import convert_utils
+        import raw_convert
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"could not load the converters: {exc}")
+        return 1
+    try:
+        info = raw_convert.inspect(job["path"], job.get("src_ext") or "dng")
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the raw photo ran out of memory")
+        return 2
+    except convert_utils.ConversionError as exc:
+        _emit(False, kind="refused", message=str(exc))
+        return 2
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")
+        return 1
+    _emit(True, info=info._asdict())
+    return 0
+
+def _describe_image(job: dict) -> int:
+    """A picture's width and height from Pillow's header read, as JSON (jobs.describe_image)."""
+    try:
+        import convert_utils
+        from PIL import Image
+        convert_utils.register_openers()
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(job["path"]) as img:
+            width, height = img.size
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the picture's size ran out of memory")
+        return 2
+    except Exception as exc:
+        _emit(False, kind="refused", message=type(exc).__name__)
+        return 2
+    _emit(True, width=int(width), height=int(height))
+    return 0
+
 def main(argv) -> int:
     if len(argv) < 2:
         _emit(False, kind="crash", message="no job was given to the worker")
@@ -1758,6 +2861,11 @@ def main(argv) -> int:
     _cap_memory(job.get("max_memory_mb") or 0)
 
     warnings.simplefilter("ignore")
+
+    if job.get("kind") == "describe_raw":
+        return _describe_raw(job)
+    if job.get("kind") == "describe_image":
+        return _describe_image(job)
 
     try:
         import convert_utils
@@ -1790,12 +2898,15 @@ def main(argv) -> int:
             job["in_paths"], job["src_ext"], job["target_ext"],
             job["work_dir"], job.get("stem") or "converted",
         )
+    except convert_utils.OutOfMemory as exc:
+        _emit(False, kind="no_memory", message=str(exc))
+        return 2
     except convert_utils.ConversionError as exc:
         _emit(False, kind="refused", message=str(exc))
         return 2
     except MemoryError:
-        _emit(False, kind="crash", message="the conversion ran out of memory")
-        return 1
+        _emit(False, kind="no_memory", message="the conversion ran out of memory (MemoryError)")
+        return 2
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
         _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")
@@ -1822,6 +2933,7 @@ import asyncio
 import itertools
 import json
 import logging
+import math
 import os
 import shutil
 import signal
@@ -1923,6 +3035,8 @@ LOSSLESS_BYTES_PER_PIXEL = {
     "qoi": 0.5,
 }
 
+RAW_LOSSLESS_BYTES_PER_PIXEL = {"tiff": 6.0}
+
 TARGET_MAX_MEGAPIXELS = {
     "heic": 142.6,
 }
@@ -1934,13 +3048,15 @@ TIMEOUT = "timeout"
 
 TOO_SLOW = "too_slow"
 CRASH = "crash"
+
+NO_MEMORY = "no_memory"
 TOO_LARGE = "too_large"
 SEND_FAILED = "send_failed"
 INTERRUPTED = "interrupted"
 
 PAUSED = "paused"
 
-REFUNDED = frozenset({REFUSED, TIMEOUT, TOO_SLOW, CRASH, TOO_LARGE, SEND_FAILED, INTERRUPTED})
+REFUNDED = frozenset({REFUSED, TIMEOUT, TOO_SLOW, CRASH, NO_MEMORY, TOO_LARGE, SEND_FAILED, INTERRUPTED})
 
 ALERTED = frozenset({TIMEOUT, CRASH, TOO_LARGE, SEND_FAILED, INTERRUPTED})
 
@@ -2017,6 +3133,10 @@ def active_paths() -> set[str]:
     """Every staged file a queued or running job still needs."""
     return {str(path) for job in _jobs.values() for path in job.paths}
 
+def active_stems() -> set[str]:
+    """The stems (job_stem) of every queued or running job: what the files and folders a job makes for itself in the work directory are named after."""
+    return {job_stem(job) for job in _jobs.values()}
+
 def uncharged_total(user_id: int) -> int:
     """Credit this person's queued jobs will need when they start."""
     return sum(job.price for job in _jobs.values()
@@ -2051,34 +3171,14 @@ def storage_problem(user_id: int, incoming_bytes: int, upload_dir) -> tuple[str,
         return ("disk", free // mb, MIN_FREE_MB)
     return None
 
-def image_megapixels(path) -> float | None:
-    """The size of a picture, read from its header without decoding it."""
-    try:
-        from PIL import Image
-    except Exception:
-        return None
-    previous = getattr(Image, "MAX_IMAGE_PIXELS", None)
-    try:
-        Image.MAX_IMAGE_PIXELS = None
-        with Image.open(path) as img:
-            width, height = img.size
-        return (width * height) / 1_000_000
-    except Exception:
-        return None
-    finally:
-        try:
-            Image.MAX_IMAGE_PIXELS = previous
-        except Exception:
-            pass
-
-def estimate_output_bytes(megapixels: float | None, target_ext: str) -> int | None:
-    ratio = LOSSLESS_BYTES_PER_PIXEL.get(target_ext)
+def estimate_output_bytes(megapixels: float | None, target_ext: str, raw: bool = False) -> int | None:
+    ratio = (RAW_LOSSLESS_BYTES_PER_PIXEL.get(target_ext) if raw else None) or LOSSLESS_BYTES_PER_PIXEL.get(target_ext)
     if megapixels is None or ratio is None:
         return None
     return int(megapixels * 1_000_000 * ratio)
 
 def unsendable_targets(megapixels: float | None, targets, in_bytes: int = 0,
-                       chat_id: int = 0) -> list[str]:
+                       chat_id: int = 0, raw: bool = False) -> list[str]:
     """The formats that would certainly come out too big to send, or that the encoder itself cannot produce at this size."""
     out = []
     for target in targets:
@@ -2086,7 +3186,7 @@ def unsendable_targets(megapixels: float | None, targets, in_bytes: int = 0,
         if megapixels is not None and ceiling is not None and megapixels > ceiling:
             out.append(target)
             continue
-        estimate = estimate_output_bytes(megapixels, target)
+        estimate = estimate_output_bytes(megapixels, target, raw)
         if estimate is not None and estimate > send_limit_for(in_bytes, estimate, chat_id):
             out.append(target)
     return out
@@ -2138,6 +3238,17 @@ def _parse(returncode, out: bytes, err: bytes) -> Outcome:
                        f"the worker was killed (exit {returncode}), most likely for memory. {tail}".strip())
     return Outcome(False, CRASH, f"the worker exited {returncode} without a result. {tail}".strip())
 
+async def _start_worker(payload: dict):
+    """The one place a child process is started: convert_worker.py, handed its job as a single JSON argument."""
+    return await asyncio.create_subprocess_exec(
+        sys.executable, "-u", str(WORKER), *WORKER_ARGS, json.dumps(payload),
+        cwd=str(HERE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **_OWN_GROUP,
+    )
+
+def job_stem(job: Job) -> str:
+    """What a job's own files in the work directory are named after."""
+    return f"{job.user_id}-{job.id}-out"
+
 async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
     payload = {
         "in_paths": [str(path) for path in job.paths],
@@ -2148,10 +3259,7 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
         "max_pixels": MAX_MEGAPIXELS * 1_000_000,
         "max_memory_mb": WORKER_MAX_MEMORY_MB,
     }
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-u", str(WORKER), *WORKER_ARGS, json.dumps(payload),
-        cwd=str(HERE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **_OWN_GROUP,
-    )
+    proc = await _start_worker(payload)
     job.proc = proc
     kept: list[bytes] = []
     errors = bytearray()
@@ -2204,6 +3312,101 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
     finally:
         job.proc = None
     return _parse(proc.returncode, out, err)
+
+DESCRIBE_TIMEOUT_S = 30
+
+def _raw_info(answer: bytes):
+    """(the RawInfo in the child's last line of output, "") or (None, why) for anything that is not exactly that."""
+    import raw_convert
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    if not lines:
+        return None, "no answer"
+    try:
+        data = json.loads(lines[-1])
+    except ValueError:
+        return None, "an answer that is not JSON"
+    if not isinstance(data, dict):
+        return None, "an answer that is not an object"
+    if not data.get("ok"):
+        return None, str(data.get("kind") or "crash")
+    try:
+        fields = data["info"]
+        sizes = [fields[name] for name in ("width", "height", "out_width", "out_height")]
+        sizes_mp = [fields["megapixels"], fields["out_megapixels"]]
+        half = fields["half"]
+        if (not isinstance(half, bool) or any(isinstance(n, bool) or not isinstance(n, int) or n <= 0 for n in sizes)
+                or any(isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or n <= 0
+                       for n in sizes_mp)):
+            return None, "an answer that makes no sense"
+        width, height, out_width, out_height = sizes
+        megapixels, out_megapixels = (float(n) for n in sizes_mp)
+        if (not math.isclose(megapixels, width * height / 1_000_000, rel_tol=1e-9)
+                or not math.isclose(out_megapixels, out_width * out_height / 1_000_000, rel_tol=1e-9)):
+            return None, "an answer that makes no sense"
+    except (KeyError, TypeError):
+        return None, "an answer that makes no sense"
+    return raw_convert.RawInfo(width, height, megapixels, half, out_width, out_height, out_megapixels), ""
+
+async def describe_raw(path, src_ext: str, timeout: float = DESCRIBE_TIMEOUT_S):
+    """raw_convert.describe(), in a child process: the RawInfo of a camera raw photo, or None for one that cannot be read -- which includes a child that crashed, ran past `timeout` (it is killed) or answered nonsense."""
+    payload = {"kind": "describe_raw", "path": str(path), "src_ext": src_ext,
+               "max_memory_mb": WORKER_MAX_MEMORY_MB}
+    answered = await _ask_child(payload, timeout, "a raw photo's size")
+    if answered is None:
+        return None
+    out, returncode = answered
+    info, why = _raw_info(out)
+    if info is None:
+
+        if why != "refused":
+            logger.warning("Reading a raw photo's size failed (%s, exit %s)", why, returncode)
+        return None
+    return info
+
+async def _ask_child(payload: dict, timeout: float, what: str):
+    """Run one describe job in a child (see _start_worker): (its stdout, its exit code), or None -- logged -- when it could not be run or overran `timeout` and was killed."""
+    async with _describe_slots:
+        return await _ask_child_now(payload, timeout, what)
+
+DESCRIBE_AT_ONCE = 2
+_describe_slots = asyncio.Semaphore(DESCRIBE_AT_ONCE)
+
+async def _ask_child_now(payload: dict, timeout: float, what: str):
+    proc = None
+    try:
+        proc = await _start_worker(payload)
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        await _kill(proc)
+        logger.warning("Reading %s took over %.0f s and was stopped", what, timeout)
+        return None
+    except asyncio.CancelledError:
+        await asyncio.shield(_kill(proc))
+        raise
+    except Exception as exc:
+        await _kill(proc)
+        logger.warning("Reading %s failed to run (%s)", what, type(exc).__name__)
+        return None
+    return out, proc.returncode
+
+def _image_size(answer: bytes) -> "float | None":
+    """Megapixels from a describe_image child's last line, or None."""
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    try:
+        data = json.loads(lines[-1])
+        width, height = data["width"], data["height"]
+    except (IndexError, ValueError, TypeError, KeyError):
+        return None
+    if not data.get("ok") or any(isinstance(n, bool) or not isinstance(n, int) or n <= 0
+                                 for n in (width, height)):
+        return None
+    return (width * height) / 1_000_000
+
+async def describe_image(path, timeout: float = DESCRIBE_TIMEOUT_S) -> "float | None":
+    """A picture's size in megapixels from its header, read in a child process from its header, or None for one that cannot be read."""
+    answered = await _ask_child({"kind": "describe_image", "path": str(path),
+                                 "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a picture's size")
+    return None if answered is None else _image_size(answered[0])
 
 class Runner:
     """What bot.py provides. None of these may raise, except `deliver`, whose exception is the send failure."""
@@ -2272,6 +3475,38 @@ def _unlink(path) -> None:
     except OSError:
         logger.debug("Could not remove %s", path, exc_info=True)
 
+def remove_job_leftovers(work_dir, stem: str) -> int:
+    """Remove what a conversion named `stem` leaves in `work_dir` when it is killed: the folder `<stem>-contents` an archive was unpacked into and the padded copy `<stem>-source.<ext>` bsdtar reads."""
+    if not stem or stem in (".", "..") or any(sep in stem for sep in ("/", "\\", os.sep)):
+        return 0
+    try:
+        entries = list(os.scandir(work_dir))
+        base = os.path.normcase(os.path.realpath(work_dir))
+    except OSError:
+        return 0
+    import convert_utils
+    removed = 0
+    for entry in entries:
+        try:
+            contents = entry.name == f"{stem}-contents"
+            if not (contents or entry.name.startswith(f"{stem}-source.")):
+                continue
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                os.unlink(entry.path)
+            elif contents:
+                if os.path.normcase(os.path.dirname(os.path.realpath(entry.path))) != base:
+                    logger.warning("Not removing %s: it does not resolve inside the work directory", entry.name)
+                    continue
+                convert_utils.remove_tree(entry.path)
+                if os.path.lexists(entry.path):
+                    continue
+            else:
+                continue
+            removed += 1
+        except OSError:
+            logger.debug("Could not remove %s", entry.path, exc_info=True)
+    return removed
+
 async def _finish(job: Job, runner: Runner, kind: str | None, detail: str,
                   outcome: Outcome | None) -> None:
     try:
@@ -2307,6 +3542,12 @@ async def _finish(job: Job, runner: Runner, kind: str | None, detail: str,
         lock = _user_locks.get(job.user_id)
         if lock is not None and not lock.locked() and not getattr(lock, "_waiters", None):
             _user_locks.pop(job.user_id, None)
+        if job.started_at is not None:
+
+            try:
+                await asyncio.to_thread(remove_job_leftovers, runner.work_dir(), job_stem(job))
+            except Exception:
+                logger.debug("Could not clean up after conversion %s", job.id, exc_info=True)
 
 async def _watch_progress(job: Job, runner: Runner, limit: int) -> None:
     marks = [mark for mark in PROGRESS_MARKS_S if mark < limit]
@@ -2362,8 +3603,7 @@ async def _run(job: Job, runner: Runner) -> None:
                         watcher = asyncio.ensure_future(_watch_progress(job, runner, limit))
                         card_watcher = asyncio.ensure_future(_watch_card(job, runner))
                         try:
-                            outcome = await run_worker(job, runner.work_dir(),
-                                                       f"{job.user_id}-{job.id}-out", limit)
+                            outcome = await run_worker(job, runner.work_dir(), job_stem(job), limit)
                         finally:
                             watcher.cancel()
                         if not outcome.ok:
@@ -2705,6 +3945,7 @@ class ConvertRunner(jobs.Runner):
             jobs.TOO_SLOW: ("job_reason_too_slow", {"minutes": max(2, round(job.extra.get("projected_s", 0) / 60)),
                                                     "limit": max(1, round(limit / 60))}),
             jobs.CRASH: ("job_reason_crash", {}),
+            jobs.NO_MEMORY: ("job_reason_no_memory", {}),
             jobs.TOO_LARGE: ("job_reason_too_large", {"target": _upper(job.target_ext),
                                                       "mb": detail.split()[0] if detail else "?",
                                                       "limit": job.send_limit // (1024 * 1024)}),
