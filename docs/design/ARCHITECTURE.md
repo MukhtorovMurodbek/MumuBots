@@ -384,7 +384,9 @@ instant an update exists:
 - **`allowed_updates`**, listing only what each bot has a handler for.
   Telegram stops sending edited messages, channel posts, reactions and chat
   member updates entirely, rather than this process downloading and parsing
-  them to drop them.
+  them to drop them. AnonBot asks for reactions by name since 2.1.0, because
+  it passes them from one side of a conversation to the other -- and has to:
+  an empty list means every kind except reactions.
 
 In the cloud the rotating log files are off (the filesystem is ephemeral and
 the platform captures stdout anyway), `httpx`'s per-request INFO line is

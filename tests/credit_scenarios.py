@@ -22,6 +22,10 @@ What this covers, and why each one is here rather than assumed:
   corrections          -- take the bonus down with the balance, so a later
                           expiry cannot take credit that is no longer there,
                           and never change what somebody appears to have paid
+  one payment, once    -- a payment Telegram delivers twice (the same charge id) is
+                          credited once, even when both deliveries arrive at the same
+                          moment, and a failure between the claim and the credit leaves
+                          no claim behind
   payments are final   -- there is no function that takes a payment back
   the ledger           -- adds up from zero to the balance, row by row
 
@@ -61,9 +65,11 @@ sys.path.insert(1, str(ROOT / "shared"))
 
 import db  # noqa: E402
 import family_link as fl  # noqa: E402
+import psycopg  # noqa: E402
 
 USER, OTHER, RACER = 909001, 909002, 909003
 USERS = [USER, OTHER, RACER]
+DUP = 909004                      # the wallet the double-delivery checks use (kept out of USERS: the overview counts wallets)
 
 failures: list[str] = []
 _checks = 0
@@ -94,9 +100,10 @@ def scrub() -> None:
     schema to start clean -- it removes its own user ids and its own grant
     claims, and nothing else."""
     with db.pooled() as conn:
-        conn.execute("DELETE FROM family.star_bonus_lots WHERE user_id = ANY(%s)", (USERS,))
-        conn.execute("DELETE FROM family.star_ledger WHERE user_id = ANY(%s)", (USERS,))
-        conn.execute("DELETE FROM family.star_balances WHERE user_id = ANY(%s)", (USERS,))
+        conn.execute("DELETE FROM family.star_bonus_lots WHERE user_id = ANY(%s)", (USERS + [DUP],))
+        conn.execute("DELETE FROM family.star_ledger WHERE user_id = ANY(%s)", (USERS + [DUP],))
+        conn.execute("DELETE FROM family.star_balances WHERE user_id = ANY(%s)", (USERS + [DUP],))
+        conn.execute("DELETE FROM family.settings WHERE key LIKE 't909-%%' OR key LIKE 'stars:paid:t909-%%'")
         for user_id in USERS:
             conn.execute("DELETE FROM family.settings WHERE key LIKE %s",
                          (f"stars:granted:%:{user_id}",))
@@ -288,6 +295,147 @@ def main() -> int:
           sum(fl.star_totals(user_id)["bonus"] for user_id in USERS))
     check("a zero balance is left out of the list",
           sorted(row["user_id"] for row in top), sorted([OTHER, RACER]))
+
+    print("\n== a payment Telegram delivers twice ==")
+    first = fl.topup(DUP, 100, "paid", "t909-charge-1")
+    ok("the first delivery credits", first is not None and first["credited"] == 200 and first["bonus"] == 400,
+       str(first))
+    balance = fl.star_balance(DUP)
+
+    def ledger_rows():
+        with db.pooled() as conn:
+            return conn.execute("SELECT count(*) FROM family.star_ledger WHERE user_id = %s", (DUP,)).fetchone()[0]
+    rows = ledger_rows()
+    again = fl.topup(DUP, 100, "paid", "t909-charge-1")
+    check("the same charge again credits nothing, and says so", again, None)
+    check("the balance did not move", fl.star_balance(DUP), balance)
+    check("the ledger did not grow", ledger_rows(), rows)
+    check("the Stars counted as paid are the 100, not 200", fl.star_totals(DUP)["stars_paid"], 100)
+    with db.pooled() as conn:
+        claims = conn.execute("SELECT count(*) FROM family.settings WHERE key = 'stars:paid:t909-charge-1'").fetchone()[0]
+    check("there is exactly one claim for it", claims, 1)
+    second = fl.topup(DUP, 50, "paid", "t909-charge-2")
+    ok("a different charge is a different payment and credits (priced up the ladder from 100)",
+       second is not None and second["lifetime_before"] == 100, str(second))
+    sandbox = [fl.topup(DUP, 10, "sandbox top-up"), fl.topup(DUP, 10, "sandbox top-up")]
+    ok("without a charge id (the sandbox, which charges nobody) every call credits, as before",
+       all(entry is not None for entry in sandbox))
+
+    results: list = []
+    racers = [threading.Thread(target=lambda: results.append(fl.topup(DUP, 20, "racing", "t909-race")))
+              for _ in range(6)]
+    before = fl.star_balance(DUP)
+    for racer in racers:
+        racer.start()
+    for racer in racers:
+        racer.join()
+    check("six deliveries of one payment at the same moment: one wins", sum(1 for r in results if r is not None), 1)
+    won = next(r for r in results if r is not None)
+    check("and the balance moved by that one credit only", fl.star_balance(DUP) - before,
+          won["credited"] + won["bonus"])
+
+    real_move = fl._move_in
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("the database went away between the claim and the credit")
+    fl._move_in = boom
+    try:
+        fl.topup(DUP, 30, "paid", "t909-crash")
+        ok("a failure after the claim propagates", False, "it did not raise")
+    except RuntimeError:
+        ok("a failure after the claim propagates", True)
+    finally:
+        fl._move_in = real_move
+    with db.pooled() as conn:
+        left = conn.execute("SELECT count(*) FROM family.settings WHERE key = 'stars:paid:t909-crash'").fetchone()[0]
+    check("... and leaves no claim behind (claim and credit stand or fall together)", left, 0)
+    retry = fl.topup(DUP, 30, "paid", "t909-crash")
+    ok("so Telegram's redelivery of that payment is credited", retry is not None, str(retry))
+
+    print("\n== a database blip in the middle of a payment ==")
+    fl._TOPUP_BACKOFF_SECONDS = (0, 0)
+
+    def claims_for(charge):
+        with db.pooled() as conn:
+            return conn.execute("SELECT count(*) FROM family.settings WHERE key = %s",
+                                (f"stars:paid:{charge}",)).fetchone()[0]
+
+    tries = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        tries["n"] += 1
+        if tries["n"] == 1:
+            raise psycopg.OperationalError("server closed the connection unexpectedly")
+        return real_move(*args, **kwargs)
+    before = fl.star_balance(DUP)
+    fl._move_in = flaky
+    try:
+        blip = fl.topup(DUP, 40, "paid", "t909-blip")
+    except psycopg.OperationalError:
+        blip = None
+    finally:
+        fl._move_in = real_move
+    ok("a connection dropped mid-payment is tried again, and credits", blip is not None, str(blip))
+    if blip is not None:
+        check("... once: the balance moved by that one credit", fl.star_balance(DUP) - before,
+              blip["credited"] + blip["bonus"])
+    check("... with one claim for it", claims_for("t909-blip"), 1)
+
+    tries["n"] = 0
+
+    def down(*args, **kwargs):
+        tries["n"] += 1
+        raise psycopg.OperationalError("the database is down")
+    before = fl.star_balance(DUP)
+    fl._move_in = down
+    try:
+        fl.topup(DUP, 40, "paid", "t909-down")
+        ok("a database that stays down: the error comes out after the last try", False, "it did not raise")
+    except psycopg.OperationalError:
+        ok("a database that stays down: the error comes out after the last try", True)
+    finally:
+        fl._move_in = real_move
+    check("... after exactly _TOPUP_ATTEMPTS tries", tries["n"], fl._TOPUP_ATTEMPTS)
+    check("... crediting nothing", fl.star_balance(DUP), before)
+    check("... and leaving no claim, so a later delivery can still credit it", claims_for("t909-down"), 0)
+
+    # The hard case: the COMMIT reached the server and went through, but its answer
+    # never came back. The retry must find its own claim and credit nothing more.
+    real_connect = fl._connect
+    lost = {"done": False}
+
+    class _AnswerLost:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+        def commit(self):
+            self._conn.commit()
+            if not lost["done"]:
+                lost["done"] = True
+                raise psycopg.OperationalError("connection lost after COMMIT was sent")
+
+    class _Connect:
+        def __enter__(self):
+            self._cm = real_connect()
+            return _AnswerLost(self._cm.__enter__())
+
+        def __exit__(self, *exc):
+            return self._cm.__exit__(*exc)
+    before = fl.star_balance(DUP)
+    fl._connect = _Connect
+    try:
+        answer_lost = fl.topup(DUP, 40, "paid", "t909-lost-answer")
+    finally:
+        fl._connect = real_connect
+    check("a COMMIT whose answer was lost: the retry finds its own claim and returns None", answer_lost, None)
+    moved = fl.star_balance(DUP) - before
+    once = fl.quote_credit(fl.star_totals(DUP)["stars_paid"] - 40, 40)
+    check("... and the payment was credited exactly once (not zero, not twice)",
+          moved, once["base"] + once["bonus"])
+    check("... with one claim for it", claims_for("t909-lost-answer"), 1)
 
     scrub()
     with db.pooled() as conn:

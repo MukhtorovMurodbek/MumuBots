@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
-from telegram.error import BadRequest, NetworkError, RetryAfter
+from telegram.error import BadRequest, Conflict, NetworkError, RetryAfter
 
 import db
 import family_link
@@ -168,6 +168,61 @@ def note_network_ok() -> None:
     _network_alerted = False
 
 
+# ---------------------------------------------------------------------------
+# A Conflict is one blip or a second copy -- only a run of them is the second
+# ---------------------------------------------------------------------------
+# Telegram answers a getUpdates with "terminated by other getUpdates request"
+# when two requests for the same token overlap. A second copy of the bot
+# polling the same token does that on every poll cycle. But a single one is
+# also what a ~90 s network/database stall leaves behind (2026-10-09): the
+# bot's own request was still in flight when its retry arrived. Filing every
+# one as a crash woke the owner for a false alarm, so one is logged as a
+# warning and only a run of them is reported -- once.
+CONFLICT_ALERT_COUNT = 3        # this many Conflicts ...
+CONFLICT_ALERT_WINDOW_S = 120   # ... inside this many seconds means a second copy
+CONFLICT_QUIET_RESET_S = 600    # seconds with no Conflict at all before it may alert again
+
+# Monotonic times of the most recent Conflicts (only the last few matter), when
+# the latest was, and whether this run has been reported. Per process: every
+# bot is its own process in the base edition, and the combined edition loads a
+# separate copy of this module per bot, the same as _network_blips above.
+_conflict_times: "deque[float]" = deque(maxlen=CONFLICT_ALERT_COUNT)
+_conflict_last: "float | None" = None
+_conflict_alerted = False
+
+
+def note_conflict(exc: BaseException) -> None:
+    """A Conflict from the long poll (no update behind it). Counted and logged
+    as a warning, never a crash -- until CONFLICT_ALERT_COUNT of them arrive
+    within CONFLICT_ALERT_WINDOW_S, which is a second copy polling the same
+    token and is worth exactly one report. After that it stays quiet until
+    CONFLICT_QUIET_RESET_S pass with no Conflict, then counts afresh.
+
+    The log line carries numbers only: no token, and not the text of the error."""
+    global _conflict_last, _conflict_alerted
+    now = time.monotonic()
+    if _conflict_last is not None and now - _conflict_last >= CONFLICT_QUIET_RESET_S:
+        _conflict_times.clear()
+        _conflict_alerted = False
+    _conflict_last = now
+    _conflict_times.append(now)
+    in_window = sum(1 for seen in _conflict_times if now - seen <= CONFLICT_ALERT_WINDOW_S)
+    logging.getLogger(__name__).warning(
+        "Conflict on getUpdates: %s within the last %s s (a report needs %s)",
+        in_window, CONFLICT_ALERT_WINDOW_S, CONFLICT_ALERT_COUNT,
+    )
+    if in_window >= CONFLICT_ALERT_COUNT and not _conflict_alerted:
+        _conflict_alerted = True
+        message = (
+            "Another copy of this bot seems to be polling with the same token: "
+            f"{in_window} conflicts within {CONFLICT_ALERT_WINDOW_S} seconds"
+        )
+        logging.getLogger(__name__).error(message)
+        report = Conflict(message)
+        report.__cause__ = exc
+        record_error(report)
+
+
 def record_error(exc: BaseException) -> None:
     global _error_count
     _error_count += 1
@@ -200,7 +255,8 @@ async def error_handler(update, context) -> None:
     already handled inline elsewhere).
 
     A dropped long poll reaches here too, and is not a crash -- see
-    is_transient_network_error above."""
+    is_transient_network_error above. Nor is a single Conflict from the long
+    poll -- see note_conflict."""
     # Only a failure with no update behind it is the long poll. A network
     # error raised while handling somebody's message means that person asked
     # for something and did not get it, and that is not a blip however
@@ -208,6 +264,11 @@ async def error_handler(update, context) -> None:
     # reported like any other failure.
     if update is None and is_transient_network_error(context.error):
         note_network_blip(context.error)
+        return
+    # The same reasoning for a Conflict: only the poll's own is counted, one
+    # raised while handling an update is reported like any other failure.
+    if update is None and isinstance(context.error, Conflict):
+        note_conflict(context.error)
         return
     logging.getLogger(__name__).error("Unhandled exception while processing an update", exc_info=context.error)
     record_error(context.error)

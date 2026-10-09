@@ -15,6 +15,12 @@ is built.
 
 ### Archives: ZIP, TAR, 7z -- and RAR, read only
 
+**Built 2026-10-07** (`archive_convert.py`, `CHANGES_v2.1.0.md`) except "files" as a
+target and an archive of pictures to one PDF, which were not: a Telegram result is one
+document, and a RAR or 7z becoming a ZIP is the need. The text below is the design as it
+was written; the implementation differs where it says so in CHANGES (bsdtar for 7z and
+RAR instead of py7zr, no extra Python dependency).
+
 The owner: *"Elaborate on archives and camera RAW. Will do them next
 patch."*
 
@@ -67,6 +73,11 @@ disk after any of them.
 
 ### Camera RAW: CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2
 
+**Built 2026-10-07** (`raw_convert.py`). **The memory section below is wrong**: "up to
+100 MP, the full picture" was not measured. A full decode is about 13 MB a megapixel
+(50 MP: 684 MB, 100 MP: 1,334 MB), so the full picture is made up to 40 MP, half size to
+110 MP, and a larger photo is refused before it is paid for. See CHANGES.
+
 **What it does.** A photo straight off a camera -- or a phone: the owner's
 S23 Ultra shoots 50 and 200 MP DNG in Expert RAW -- becomes JPG, PNG, WEBP,
 AVIF, HEIC or TIFF. TIFF comes out at 16 bits per channel, for somebody who
@@ -101,6 +112,19 @@ to the Docker image: about 30 MB.
 
 ### The standby -- and what "backup hosting" would be
 
+**Not built, argued against (2026-10-07).** A second service holding every bot's token to say
+"back in a minute" is a second place for secrets and a way for a lease bug to hold the real bot's
+token hostage, for a failure Railway may already be able to contain: its documentation says a deploy
+whose HTTP health check does not pass in time "will be marked as failed" (default 300 s,
+`RAILWAY_HEALTHCHECK_TIMEOUT_SEC`) -- it does not say outright that the old deployment keeps serving, and
+that is the thing to confirm on a test project before relying on it. The bots expose no port, so they
+have no health check. A `/health` endpoint would give the protection with no new service, but **it
+must not mean "polling has begun"**: the new container waits for the old one's poll lease and the old
+one stops only after the new is healthy -- that is a deadlock. It can only mean "the process is up
+and the database answers", which proves less than a standby would. Cheaper than a standby, weaker
+than it, and it changes how production deploys, so it is for the owner to say yes to. Backup hosting (MumuCombined stopped on a second host) is
+unchanged, and needs a place to run it.
+
 The owner: *"If by standby service you mean backup hosting, then this will
 also be done next patch or independently from main bots."*
 
@@ -129,6 +153,10 @@ Either can be built independently of the bots' own releases.
 
 ### OCR
 
+**Built, and moved to 2.2.0** (2026-10-08 to 10-10; `MumuBots2.2.0`, whose `CHANGES_v2.2.0.md` says what it is and
+what is left): text from a picture or a scanned PDF, to TXT or a searchable PDF, on the bot's own machine. Not in
+2.1.0, by the owner's decision ("only fixes"). The plan below is what it was built from.
+
 Text out of a picture or a scanned PDF: "text" and "searchable PDF" as
 targets for images and documents. Measured in v1.5.0: a local `tesseract`
 costs nothing while idle, and the constraint is a job's peak memory, not
@@ -138,6 +166,10 @@ Russian and English language data, chosen from the person's language and
 overridable in the quote. About 40 MB added to the image.
 
 ### Sleeping the quiet bots
+
+**Recommended dropped (2026-10-07).** About $3 a month saved, against webhooks on every service and
+a 5 to 15 second wait for whoever messages a sleeping AnonBot; the combined edition already took
+memory from 302 MB to 77 MB.
 
 The owner: *"See and come up with the optimal conditions to put idle bots to
 sleep."* From the family's own tables, read on 2026-09-28 (the owner's
@@ -180,6 +212,9 @@ sessions are rarest.
 
 ### DownloaderBot merging files
 
+**Album to one PDF or one ZIP: built, and moved to 2.2.0** (`MumuBots2.2.0`): 📄 PDF and 🗜 ZIP buttons under a
+delivered album. A video with its subtitles is not built.
+
 Pictures of a carousel into one PDF, a video with its subtitles, an album
 into one ZIP. Self-contained, no new dependency (ffmpeg and PyMuPDF are both
 already there).
@@ -216,6 +251,9 @@ further, because it is priced today on the worst its size allows.
 
 ### Reports carrying the person's own words or a screenshot
 
+**Recommended closed (2026-10-07):** `/feedback` is the person's own words, one-way, without
+touching what the Report button promises.
+
 For the Report button. `problems.py`'s disclaimer promises *"not what you
 wrote"*, so that text has to change in the same release that makes it
 untrue.
@@ -228,6 +266,56 @@ that existing files keep working until **2026-12-01**. MumuBots' five
 services are configured by `<bot>/railway.json`; they need moving before
 then, or a push after that date may build with default settings -- no watch
 paths, no overlap, no drain.
+
+### AnonBot becomes `@mumu_anon_bot`
+
+**Argued against, not built (2026-10-07):** a name that matches a pattern is not worth every inbox
+link ever posted dying the moment a second bot fails to claim `@mumu_chat_bot` in time. The alias
+table already makes `/logs anon` work. The owner's decision stands until he withdraws it.
+
+The owner, 2026-09-29: *"add changing anonbot's username to "mumu_anon_bot" to
+the list of future updates."*
+
+AnonBot is `@mumu_chat_bot`, the one name in the family that does not follow
+`mumu_<role>_bot`; this makes all five line up.
+
+**What it overrides.** The docs (`ARCHITECTURE.md`, *The exception, and why it
+stays*; `DESIGN.md`; `DEPLOY.md` §8c) say that username is **frozen**: every
+inbox link anybody has posted is `https://t.me/mumu_chat_bot?start=q_<token>`,
+and a renamed bot breaks all of them for good. That was the reason ManagerBot's
+label moved in 1.6.0 rather than its address. It is still true -- so this is the
+owner choosing to override it, and it needs a way to keep the old links alive.
+Until it is done the rule stands; when it is done those passages change.
+
+**How, so that old links survive** (proposed, for the owner to confirm):
+
+1. In BotFather, rename the existing bot to `mumu_anon_bot`. Same token, same
+   chats, same database: nobody's conversation changes.
+2. **At once**, register a second, tiny bot at the name that was freed,
+   `@mumu_chat_bot`, before anyone else can -- Telegram does not promise to hold
+   a released name. It does one thing: on `/start q_<token>` it answers with a
+   button to `https://t.me/mumu_anon_bot?start=q_<token>`. The token is
+   unchanged, so the same inbox opens after one more tap. It needs no database
+   and reads no messages. **Skipping this step is the danger, not a detail:**
+   whoever registers the old name would receive everyone who taps an old link,
+   each believing they are writing an anonymous message to the inbox owner.
+3. Settings and code: `ABOT_USERNAME` (inbox links are built from it,
+   `anon_bot/bot.py`), `SIBLING_BOTS` in `shared/.env` and Railway (the other
+   bots' buttons carry `anonbot:AnonBot:mumu_chat_bot`), and the C edition's
+   settings; `USERNAME_ALIASES` in `manager_bot/bot.py` keeps `mumu_chat_bot`,
+   `chat` and `chatbot` and gains the new name; the docs above, the READMEs and
+   `tests/test_naming.py`'s exception go with it. Links AnonBot shows on its
+   `/link` screen follow the setting on their own.
+4. Hosting the second bot: its own token polled from inside AnonBot's process
+   (nothing new to deploy), or a service of its own (about 40 MB).
+5. Links already posted cannot be edited; only step 2 carries them, and it has to
+   stay for as long as they are out there. A one-time note to inbox owners who
+   were active recently -- their new link, and that the old one still works --
+   in the daytime, like an announced update.
+
+**Needs from the owner:** BotFather (only they can rename a bot or register the
+second one), a second token, and a morning -- not the night before an
+unattended release.
 
 ---
 

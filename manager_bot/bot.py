@@ -155,17 +155,18 @@ ALERT_LEVELS = {"warning", "error", "critical"}
 # "all fine" message is the kind of thing you stop reading).
 DIGEST_AT_UTC = os.environ.get("MBOT_DIGEST_UTC", "").strip()
 
-# The nightly problem report. The owner asked for it "at around midnight by
-# seoul/suwon time", which is where they are rather than where the users are.
-# Korea has not observed daylight saving since 1988, so KST is UTC+9 all year
-# and 15:00 UTC is midnight in Suwon on every date -- no timezone database
-# needed, and no twice-yearly hour where the report arrives at eleven.
+# The nightly problem report, at 22:00 where the owner is. It was "at around
+# midnight by seoul/suwon time" from 1.7.0; on 2026-10-03 the owner asked:
+# "Change the nightly report time to 22.00 instead of 24.00." Korea has not
+# observed daylight saving since 1988, so KST is UTC+9 all year and 13:00 UTC
+# is 22:00 in Suwon on every date -- no timezone database needed, and no
+# twice-yearly hour where the report arrives at nine.
 #
 # Deliberately NOT the release window. That is 04:00 Asia/Tashkent (23:00
 # UTC), chosen for when the *users* are asleep; this one is chosen for when
 # the owner is awake. The two have no reason to be the same time and it would
 # be a bug if changing one moved the other.
-NIGHTLY_REPORT_AT_UTC = os.environ.get("MBOT_NIGHTLY_UTC", "15:00").strip()
+NIGHTLY_REPORT_AT_UTC = os.environ.get("MBOT_NIGHTLY_UTC", "13:00").strip()
 NIGHTLY_REPORT_HOURS = int(os.environ.get("MBOT_NIGHTLY_HOURS", "24"))
 
 TELEGRAM_MAX_CHARS = 3900  # a little under the real 4096, leaving room for markup
@@ -640,6 +641,8 @@ async def me_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # were tracked, and is never blocked.
 COMMAND_SINCE = {
     "probe": "1.2.1",
+    "routewatch": "2.1.0",
+    "versions": "2.1.0",
     "providers": "1.2.3",
     "stars": "1.2.3",
     "crashtest": "1.2.3",
@@ -1820,11 +1823,13 @@ async def reports_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         problem = problems.PROBLEMS.get(row["code"])
         seen = f" ×{row['seen']}" if (row.get("seen") or 1) > 1 else ""
         mark = "🙋" if row.get("shared_at") else "  "
-        icon = problems.LEVEL_ICONS.get(int(row.get("level") or problems.level(row["code"])), "•")
-        lines.append(f"{mark}{icon} {row['reported_at']:%m-%d %H:%M} · {row['bot_id']} · "
+        lines.append(f"{mark}{_row_icon(row)} {row['reported_at']:%m-%d %H:%M} · {row['bot_id']} · "
                      f"{row['code']}{seen} ({row['incident']}) — "
                      f"{problem.title if problem else 'unknown code'}")
-    lines += ["", "🚨 urgent (messaged when it happened) · ⚠️ fault · • refused",
+    kinds = " · ".join(f"{icon} {heading.lower()}"
+                       for icon, heading, _ in (problems.KIND_LABELS[k] for k in problems.KIND_ORDER))
+    lines += ["", "🚨 urgent (messaged when it happened) · ⚠️ fault",
+              f"and where the bot was right and said why: {kinds}",
               "🙋 somebody attached their own details — /report <incident>",
               "What a code means: /decode <code>",
               f"The last {NIGHTLY_REPORT_HOURS}h, laid out: /nightly"]
@@ -1860,8 +1865,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"Recorded: {row['reported_at']:%Y-%m-%d %H:%M} UTC")
     lines.append(f"Version: {html.escape(str(row.get('version') or '?'))}")
     level = int(row.get("level") or problems.level(row["code"]))
-    lines.append(f"Level: {problems.LEVEL_ICONS.get(level, '•')} "
-                 f"{problems.LEVEL_NAMES.get(level, '?')}"
+    lines.append(f"Level: {_row_icon(row)} {_row_level_name(row)}"
                  + (" — the owner was messaged when it happened" if level == problems.URGENT
                     else " — in the nightly report"))
     if (row.get("seen") or 1) > 1:
@@ -1891,20 +1895,27 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # The nightly problem report
 # ---------------------------------------------------------------------------
 # Everything the four bots showed anybody in the last day, in one message, at
-# midnight where the owner is. The owner: "At the end of the day, at around
-# midnight by seoul/suwon time, managerbot should automatically send me a full
-# reply to the report command."
+# 22:00 where the owner is (midnight until 2.1.0). The owner: "At the end of
+# the day, at around midnight by seoul/suwon time, managerbot should
+# automatically send me a full reply to the report command."
 #
 # It is laid out by how much each line is worth reading, which is what the
 # levels are for:
 #
-#   urgent   listed one by one, with their incidents. These have already been
-#            messaged as they happened -- this is the recap, and seeing the
-#            same three incidents again is the point rather than a duplicate.
-#   faults   grouped by bot and code with a count, because "DL-ALL-ROUTES x9"
-#            is the useful shape and nine separate lines is not.
-#   refused  a count per bot and nothing else. These are the bot working
-#            correctly, and listing them would bury the two lines above.
+#   urgent     listed one by one, with their incidents. These have already
+#              been messaged as they happened -- this is the recap, and seeing
+#              the same three incidents again is the point, not a duplicate.
+#   faults     grouped by bot and code with a count, because "DL-ALL-ROUTES
+#              x9" is the useful shape and nine separate lines is not.
+#   explained  the bot was right and said why. Until 2.1.0 this was one line,
+#              "Refused — 2", which told the owner somebody had been turned
+#              down when what had happened was two people forgetting to
+#              swipe-reply. Now each KIND (problems.KINDS) is named for what
+#              it is, with its codes, their titles and their counts -- never
+#              their incidents, which nobody needs for these.
+#
+# Then the feedback, when the owner has asked for it here rather than as it
+# arrives (/feedback).
 #
 # A day with nothing in it still sends, briefly. "Nothing broke today" is
 # information when it arrives every day at the same time; it is only noise
@@ -1912,6 +1923,21 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # sure it is not.
 
 MAX_INCIDENTS_LISTED = 4
+# Codes listed under one kind before the rest are summed into a line.
+MAX_CODES_PER_KIND = 6
+
+
+def _row_icon(row) -> str:
+    """🚨 / ⚠️ for the first two levels; for the third, its kind's own."""
+    level = int(row.get("level") or problems.level(row["code"]))
+    kind = problems.kind(row["code"]) if level == problems.REFUSED else None
+    return problems.KIND_LABELS[kind][0] if kind else problems.LEVEL_ICONS.get(level, "•")
+
+
+def _row_level_name(row) -> str:
+    level = int(row.get("level") or problems.level(row["code"]))
+    kind = problems.kind(row["code"]) if level == problems.REFUSED else None
+    return problems.KIND_LABELS[kind][1].lower() if kind else problems.LEVEL_NAMES.get(level, "?")
 
 
 def _group_problems(rows: list) -> dict:
@@ -1928,9 +1954,66 @@ def _bot_name(bot_id: str) -> str:
     return found["name"] if found else bot_id
 
 
-def build_problem_report(rows: list, hours: int) -> str:
+# DownloaderBot's daily route check (downloader_bot/routewatch.py) keeps what it
+# found in family.settings: "routewatch:last_run" = when, and
+# "routewatch:state:<platform>" = "<state>|<since>|<alerted>". It pushes only a
+# platform's trouble starting, and never YouTube's; the owner asked for every
+# platform's standing, YouTube included, in the 22:00 report instead (2026-10-07).
+ROUTES_PREFIX = "routewatch:"
+ROUTES_ORDER = ("instagram", "tiktok", "twitter", "pinterest", "youtube")
+ROUTES_NAMES = {"instagram": "Instagram", "tiktok": "TikTok", "twitter": "X",
+                "pinterest": "Pinterest", "youtube": "YouTube"}
+ROUTES_LOOK = {"up": "✅", "last_resort": "⚠️ last route only", "down": "❌ down",
+               "sample_gone": "❔ sample post gone"}
+# The check runs once a day; past this, the line says the check itself stopped.
+ROUTES_STALE_S = 2 * 86400
+
+
+def _ago(seconds: float) -> str:
+    hours = seconds / 3600
+    return f"{hours:.0f}h" if hours < 48 else f"{hours / 24:.0f}d"
+
+
+def routes_section(settings: dict, now: float) -> "list[str]":
+    """The report's download-routes lines, from the route check's settings. Pure."""
+    try:
+        last = float(settings.get(ROUTES_PREFIX + "last_run") or "")
+    except ValueError:
+        last = None
+    if last is None:
+        return ["\n🛣 <b>Download routes</b> — not checked yet "
+                "(<code>/run downloaderbot routewatch</code>)"]
+    states = {}
+    for key, value in settings.items():
+        if not key.startswith(ROUTES_PREFIX + "state:"):
+            continue
+        parts = (value or "").split("|")
+        try:
+            states[key[len(ROUTES_PREFIX + "state:"):]] = (parts[0], float(parts[1]))
+        except (IndexError, ValueError):
+            continue
+    head = f"\n🛣 <b>Download routes</b> · checked {_ago(now - last)} ago"
+    if now - last > ROUTES_STALE_S:
+        head += " — ⚠️ the daily check has stopped running"
+    order = [p for p in ROUTES_ORDER if p in states] + sorted(p for p in states if p not in ROUTES_ORDER)
+    shown = []
+    for platform in order:
+        state, since = states[platform]
+        look = ROUTES_LOOK.get(state, html.escape(state))
+        if state != "up" and now - since >= 86400:
+            look += f" for {_ago(now - since)}"
+        shown.append(f"{html.escape(ROUTES_NAMES.get(platform, platform))} {look}")
+    return [head, "  " + " · ".join(shown)] if shown else [head]
+
+
+def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
+                         feedback_note: "str | None" = None, routes: "dict | None" = None,
+                         now: "float | None" = None) -> str:
     """The message. Pure, so tests/test_reporting.py can read it without a
-    database or a Telegram."""
+    database or a Telegram. `feedback` is what to show in full, and
+    `feedback_note` a line to say instead when it has already gone out.
+    `routes` is the route check's settings (see routes_section); None leaves
+    the section out."""
     grouped = _group_problems(rows)
     signed = [row for row in rows if row.get("shared_at")]
     lines = [f"🌙 <b>Problems, last {hours}h</b>"]
@@ -1966,19 +2049,39 @@ def build_problem_report(rows: list, hours: int) -> str:
                 f"×{len(group)} — {html.escape(problem.title if problem else 'unknown code')}"
                 f"{mark}\n      {incidents}")
 
-    refused = grouped.get(problems.REFUSED, {})
-    if refused:
-        per_bot: dict = {}
-        for (bot_id, _), group in refused.items():
-            per_bot[bot_id] = per_bot.get(bot_id, 0) + len(group)
-        total = sum(per_bot.values())
-        listed = " · ".join(f"{html.escape(_bot_name(bot_id))} {count}"
-                            for bot_id, count in sorted(per_bot.items(), key=lambda i: -i[1]))
-        lines.append(f"\n• <b>Refused — {total}</b>\n  {listed}"
-                     f"\n  <i>people told no by a bot that was working correctly</i>")
+    by_kind: dict = {}
+    for (bot_id, code), group in grouped.get(problems.REFUSED, {}).items():
+        by_kind.setdefault(problems.kind(code) or problems.GUIDED, []).append((bot_id, code, group))
+    for kind in problems.KIND_ORDER:
+        entries = sorted(by_kind.get(kind, ()), key=lambda e: (-len(e[2]), e[0], e[1]))
+        if not entries:
+            continue
+        icon, heading, meaning = problems.KIND_LABELS[kind]
+        total = sum(len(group) for _, _, group in entries)
+        lines.append(f"\n{icon} <b>{html.escape(heading)} — {total}</b>")
+        for bot_id, code, group in entries[:MAX_CODES_PER_KIND]:
+            problem = problems.PROBLEMS.get(code)
+            count = f" ×{len(group)}" if len(group) > 1 else ""
+            lines.append(
+                f"  {html.escape(_bot_name(bot_id))} · <code>{html.escape(code)}</code>{count} — "
+                f"{html.escape(problem.title if problem else 'unknown code')}")
+        rest = entries[MAX_CODES_PER_KIND:]
+        if rest:
+            lines.append(f"  +{sum(len(group) for _, _, group in rest)} more, under "
+                         f"{len(rest)} other code(s) — <code>/reports</code>")
+        lines.append(f"  <i>{html.escape(meaning)}</i>")
 
     if not rows:
         lines.append("\nNothing at all — no bot showed anybody a problem today.")
+
+    if routes is not None:
+        lines += routes_section(routes, time_module.time() if now is None else now)
+
+    if feedback:
+        lines.append(f"\n💬 <b>Feedback — {len(feedback)}</b> · read only")
+        lines += [_feedback_block(item) for item in feedback]
+    elif feedback_note:
+        lines.append(f"\n💬 {html.escape(feedback_note)}")
 
     if signed:
         incidents = ", ".join(f"<code>{html.escape(row['incident'])}</code>" for row in signed[:8])
@@ -1997,7 +2100,28 @@ async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:
         await notify_owner(context, f"🌙 Nightly problem report failed: {html.escape(str(exc))}")
         return
-    text = build_problem_report(rows, NIGHTLY_REPORT_HOURS)
+    # Whatever feedback nobody has been sent yet goes out here, in either
+    # mode: in "nightly" that is all of it, and in "instant" it is only what
+    # arrived while alerts were muted, which this is the place to catch.
+    feedback, note = [], None
+    try:
+        feedback = await asyncio.to_thread(family_link.take_undelivered_feedback, 200)
+        if not feedback and await _feedback_mode() == family_link.FEEDBACK_INSTANT:
+            count = await asyncio.to_thread(family_link.feedback_count_since, NIGHTLY_REPORT_HOURS)
+            if count:
+                note = (f"{count} feedback message(s) in the last {NIGHTLY_REPORT_HOURS}h, each "
+                        f"sent to you as it came — /feedback to read them again.")
+    except Exception:
+        logger.warning("Couldn't collect feedback for the nightly report", exc_info=True)
+    routes = await asyncio.to_thread(family_link.settings_with_prefix, ROUTES_PREFIX)
+    text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, feedback, note, routes=routes)
+    if feedback and len(text) > TELEGRAM_MAX_CHARS:
+        # A long day of feedback goes in messages of its own rather than
+        # pushing the problems past one message, where the cut could land
+        # inside a tag and lose the whole report.
+        text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, routes=routes)
+        await _send_feedback(context, f"💬 <b>Feedback — {len(feedback)}</b> · read only, with "
+                                      f"tonight's report", feedback)
     if len(text) <= TELEGRAM_MAX_CHARS:
         await notify_owner(context, text)
         return
@@ -2015,15 +2139,178 @@ async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception("Couldn't deliver the nightly report file to %s", admin_id)
 
 
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+# What people send with /feedback in the four public bots (shared_features),
+# delivered here: each one as it arrives, or all of them with the 22:00
+# report. The owner, 2026-10-03: "notifications for each feedback won't hurt
+# for now. Then add a switch for me to decide if i want each feedback to arrive
+# to me or only grouped in a nightly report." Instant is the default.
+#
+# A piece of feedback carries the words, the bot and the language -- nothing
+# about who wrote it, under the standing rule about what reaches the owner
+# unasked. Which makes it one-way, on purpose; the owner, offered a way to
+# reply: "Make the feedback one sided. I can only see the text copied and sent
+# by the bots. Make sure its mentioned anywhere that the feedback is read only
+# for me." So every place it shows here says "read only", and every place a
+# public bot mentions /feedback says nobody can write back.
+FEEDBACK_READ_ONLY = "read only: it names nobody, so there is nobody to answer"
+
+# A message holds 4096 characters; one piece of feedback can be that long by
+# itself, so what is shown of one is capped and /feedback <id> shows the rest.
+FEEDBACK_SHOWN_CHARS = 3000
+_feedback_mode_cache = {"value": None, "read_at": 0.0}
+
+
+async def _feedback_mode() -> str:
+    """"instant" or "nightly", read at most once a minute -- the event pump asks
+    on every sweep, and the answer changes when the owner taps a button here,
+    which updates this as well."""
+    now = time_module.monotonic()
+    if _feedback_mode_cache["value"] is None or now - _feedback_mode_cache["read_at"] > 60:
+        try:
+            value = await asyncio.to_thread(db.get_setting, family_link.FEEDBACK_DELIVERY_KEY,
+                                            family_link.FEEDBACK_INSTANT)
+        except Exception:
+            value = _feedback_mode_cache["value"] or family_link.FEEDBACK_INSTANT
+        _feedback_mode_cache.update(value=value, read_at=now)
+    return _feedback_mode_cache["value"]
+
+
+def _feedback_block(item: dict, shown: int = FEEDBACK_SHOWN_CHARS) -> str:
+    """One piece of feedback as HTML: where from, when, then the words."""
+    body = item["body"]
+    cut = len(body) > shown
+    text = html.escape(body[:shown]) + (f"… <code>/feedback {item['id']}</code> for the rest"
+                                        if cut else "")
+    when = item["created_at"].strftime("%m-%d %H:%M") if item.get("created_at") else "?"
+    return (f"  {html.escape(_bot_name(item['bot_id']))} · {html.escape(item.get('lang') or '?')} · "
+            f"{when} UTC · #{item['id']}\n  <i>{text}</i>")
+
+
+async def _send_feedback(context, header: str, items: list) -> None:
+    """Items packed into as few messages as fit, never split inside one."""
+    chunk = [header]
+    for block in (_feedback_block(item) for item in items):
+        if len("\n\n".join(chunk + [block])) > TELEGRAM_MAX_CHARS:
+            await notify_owner(context, "\n\n".join(chunk))
+            chunk = []
+        chunk.append(block)
+    if chunk:
+        await notify_owner(context, "\n\n".join(chunk))
+
+
+async def _deliver_feedback(context) -> None:
+    """Each new piece as it arrives, in "instant" mode. Called from the event
+    pump after the events, so it is held while alerts are muted (and goes out
+    with the nightly report if they still are)."""
+    if await _feedback_mode() != family_link.FEEDBACK_INSTANT:
+        return
+    try:
+        items = await asyncio.to_thread(family_link.take_undelivered_feedback, 10)
+    except Exception:
+        return
+    for item in items:
+        await notify_owner(context, "💬 <b>Feedback</b> · read only\n" + _feedback_block(item))
+
+
+def _feedback_keyboard(mode: str) -> InlineKeyboardMarkup:
+    tick = {mode: "✓ "}
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"{tick.get(family_link.FEEDBACK_INSTANT, '')}🔔 As it arrives",
+                             callback_data="fbmode:instant"),
+        InlineKeyboardButton(f"{tick.get(family_link.FEEDBACK_NIGHTLY, '')}🌙 With the 22:00 report",
+                             callback_data="fbmode:nightly"),
+    ]])
+
+
+def _feedback_mode_line(mode: str) -> str:
+    return ("🔔 Each piece reaches you as it arrives." if mode == family_link.FEEDBACK_INSTANT
+            else "🌙 It reaches you with the 22:00 report.")
+
+
+async def _feedback_overview(mode: str) -> str:
+    items = await asyncio.to_thread(family_link.recent_feedback, 10)
+    lines = ["💬 <b>Feedback</b>", f"<i>{FEEDBACK_READ_ONLY}.</i>", _feedback_mode_line(mode), ""]
+    if not items:
+        lines.append("Nobody has sent any yet.")
+    else:
+        lines.append(f"The latest {len(items)}, newest first:")
+        lines += [_feedback_block(item, shown=280) for item in items]
+    lines += ["", f"Kept {family_link.FEEDBACK_RETENTION_DAYS} days, then deleted. "
+                  "<code>/feedback &lt;id&gt;</code> shows one in full."]
+    return "\n".join(lines)
+
+
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/feedback -- the latest, and the switch. /feedback instant|nightly sets
+    it; /feedback <id> shows one piece in full."""
+    if not await guard(update, context):
+        return
+    args = [a.lower() for a in context.args]
+    if args and args[0] in (family_link.FEEDBACK_INSTANT, family_link.FEEDBACK_NIGHTLY):
+        await asyncio.to_thread(db.set_setting, family_link.FEEDBACK_DELIVERY_KEY, args[0])
+        _feedback_mode_cache.update(value=args[0], read_at=time_module.monotonic())
+        await update.message.reply_text(_feedback_mode_line(args[0]), parse_mode=ParseMode.HTML)
+        return
+    if args and args[0].lstrip("#").isdigit():
+        wanted = int(args[0].lstrip("#"))
+        items = await asyncio.to_thread(family_link.recent_feedback, 50)
+        item = next((i for i in items if i["id"] == wanted), None)
+        if item is None:
+            await update.message.reply_text(f"No feedback #{wanted} among the latest 50.")
+            return
+        await _send_feedback_one(context, update.effective_chat.id, item)
+        return
+    mode = await _feedback_mode()
+    await update.message.reply_text(await _feedback_overview(mode), parse_mode=ParseMode.HTML,
+                                    reply_markup=_feedback_keyboard(mode))
+
+
+async def _send_feedback_one(context, chat_id: int, item: dict) -> None:
+    head = (f"💬 #{item['id']} · {_bot_name(item['bot_id'])} · {item.get('lang') or '?'} · "
+            f"{item['created_at']:%Y-%m-%d %H:%M} UTC\n\n")
+    await send_long(context, chat_id, head + item["body"], f"feedback-{item['id']}.txt")
+
+
+async def feedback_mode_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The switch under /feedback."""
+    query = update.callback_query
+    if not await guard(update, context):
+        await query.answer()
+        return
+    mode = query.data.split(":", 1)[1]
+    if mode not in (family_link.FEEDBACK_INSTANT, family_link.FEEDBACK_NIGHTLY):
+        await query.answer()
+        return
+    await asyncio.to_thread(db.set_setting, family_link.FEEDBACK_DELIVERY_KEY, mode)
+    _feedback_mode_cache.update(value=mode, read_at=time_module.monotonic())
+    await query.answer("As it arrives" if mode == family_link.FEEDBACK_INSTANT
+                       else "With the 22:00 report")
+    await edit_in_place(query.message, context.bot, await _feedback_overview(mode),
+                        parse_mode=ParseMode.HTML, reply_markup=_feedback_keyboard(mode))
+
+
 async def nightly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/nightly [hours] -- the report the owner gets at midnight, on demand."""
+    """/nightly [hours] -- the report the owner gets at 22:00, on demand."""
     if not await guard(update, context):
         return
     hours = int(context.args[0]) if context.args and context.args[0].isdigit() \
         else NIGHTLY_REPORT_HOURS
     hours = max(1, min(hours, 168))
     rows = await asyncio.to_thread(family_link.recent_problem_reports_since, hours)
-    text = build_problem_report(rows, hours)
+    # On demand it only counts the feedback: taking it here would mark it as
+    # sent, and the 22:00 report would then leave out what it was asked for.
+    note = None
+    try:
+        count = await asyncio.to_thread(family_link.feedback_count_since, hours)
+        if count:
+            note = f"{count} feedback message(s) in the last {hours}h — /feedback to read them."
+    except Exception:
+        logger.debug("Couldn't count feedback for /problems", exc_info=True)
+    routes = await asyncio.to_thread(family_link.settings_with_prefix, ROUTES_PREFIX)
+    text = build_problem_report(rows, hours, feedback_note=note, routes=routes)
     if len(text) > TELEGRAM_MAX_CHARS:
         await send_long(context, update.effective_chat.id,
                         re.sub(r"<[^>]+>", "", text), "problems.txt")
@@ -2293,6 +2580,9 @@ async def event_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
             text += "\n\n<pre>" + html.escape("\n".join(tail)) + "</pre>"
         await notify_owner(context, text[:4000])
 
+    # Feedback rides the same sweep, after the events and under the same mute.
+    await _deliver_feedback(context)
+
 
 # How long ago each pump actually swept. The interval is chosen from whether
 # the bus is active (family_link.bus_is_active(), set when ManagerBot queues a
@@ -2410,7 +2700,8 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 /status — every bot: up/down, uptime, host, errors, users (with Refresh /
     Alerts / Ping buttons under it)
 /problems [hours] [mine] — what the bots showed people, laid out: urgent
-    listed, faults grouped, refusals counted. The midnight report, on demand
+    listed, faults grouped, the rest by what kind of thing it was. The 22:00
+    report, on demand
 /report &lt;incident&gt; — one problem in full, with whoever volunteered to be named
 /errors — what each bot has hit since it started (live; a redeploy clears it)
 /events [bot] [n] — recent crashes, startups, payments
@@ -2418,6 +2709,8 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 /logs [bot] [n] — tail a log; say "bot" or "problems" for the other two
 /usage [bot] — memory, peaks, and what they cost
 /idle [bot] — how quiet each bot is, and whether sleeping would pay
+/providers — which of DownloaderBot's download routes work, which rest
+/probe — test every download route, from DownloaderBot's container
 /alerts on|off — mute or unmute unprompted alerts
 
 <b>Doing something to a bot</b>
@@ -2435,11 +2728,15 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 /broadcast &lt;bot|all&gt; &lt;text&gt; — one message to everyone, <i>as</i> that bot
 /whois &lt;bot&gt; &lt;user_id&gt; — look someone up through that bot
 /users [hours] — active users per bot, default 24h
+/feedback [instant|nightly] — what people sent with /feedback (read only: it
+    names nobody, so there is nobody to answer), and whether each one reaches
+    you as it arrives or with the 22:00 report
 
 <b>Money</b>
 /balance [id] [±n|=n] — see or change a credit balance
 /addcredit &lt;id&gt; &lt;amount&gt; — put ⚡ into an account
 /donations — paid donations per bot
+/stars — ConvertBot's Stars: paid, refunded, recent
 
 <b>The database</b>
 /backup — the whole database, lossless and restorable, sent here and pinned
@@ -2451,8 +2748,6 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 Renamed in 1.7.0, with the old names kept so a habit does not break:
 /nightly and /reports → /problems · /finishupdates → /resume ·
 /errorlog, /botlog and /problemlog → /logs · /me → /status
-/providers, /probe and /stars reach one bot each and /run reaches all three:
-<code>/run downloader probe</code>, <code>/run convert stars</code>.
 /crashtest &lt;bot&gt; makes a bot raise on purpose, to check the alert arrives
     (no bot named crashes ManagerBot itself)
 
@@ -2686,29 +2981,48 @@ async def broadcast_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # The menu the owner sees, in the order HELP lists them: watching, reaching
-# into a bot, shipping an update, then the family-wide reads. Every command
-# ManagerBot handles is here -- it is a private bot with one user, so a command
-# left out of the menu is a command that has to be remembered instead, which
-# is how /probe and /stars went a version without being typed once.
+# into a bot, shipping an update, then the family-wide reads. It is a private
+# bot with one user, so a command left out of the menu is a command that has to
+# be remembered instead -- which is how /probe and /stars went a version
+# without being typed once, and how /providers went missing again in 2.1.0
+# (2026-09-29, the owner typing "/pro" and being offered /problems alone).
+#
+# What is left out on purpose is only what is a second name for something in
+# the list, or would do harm when tapped by accident: see UNLISTED in
+# tests/test_menu.py, which holds this list to that.
+#
+# A description is kept under 50 characters. Telegram's limit is 256, but the
+# menu is a popup, and a long line is cut where the window ends -- the owner's
+# screenshot of /problems read "...the midnight report" with the rest gone
+# (the report has been at 22:00 since 2.1.0).
 BOT_COMMANDS = [
     # Grouped by what the owner is in the middle of, because that is how it is
     # read at four in the morning: is everything alright, do something to a
     # bot, talk to somebody, money, the database.
     #
-    # Gone from here, still working: /me (its own status, which /status
-    # already carries), /errorlog, /botlog and /problemlog (/logs asks which),
-    # /reports and /nightly (both are /problems now), /finishupdates (/resume),
-    # /crashtest, /providers, /probe and /stars (/run reaches all three, and
-    # lists them). /help names every one of them.
+    # Gone from here, still working, because they are second names: /me (its
+    # own status, which /status already carries), /errorlog, /botlog and
+    # /problemlog (/logs asks which), /reports and /nightly (both are
+    # /problems now), /finishupdates (/resume). And /crashtest, which makes a
+    # bot raise on purpose and page the owner -- a command a stray tap on the
+    # menu should not be able to send. /help names every one of them.
+    #
+    # /providers, /probe and /stars are here: each reaches the one bot that
+    # has it (/run reaches them too, but only by naming the bot and the
+    # command), and they were dropped in 1.7.0 as "reachable through /run",
+    # which is how a command becomes one nobody is offered.
     BotCommand("status", "Every bot: up, version, errors, users"),
-    BotCommand("problems", "What the bots showed people — the midnight report, now"),
+    BotCommand("problems", "The 22:00 problems report, on demand"),
+    BotCommand("feedback", "What people sent with /feedback"),
     BotCommand("report", "One problem in full, by its incident code"),
     BotCommand("errors", "What each bot has hit since it started"),
     BotCommand("events", "Crashes, restarts and payments as they happened"),
     BotCommand("ping", "How fast each bot is, for a user and on the bus"),
+    BotCommand("providers", "Which download routes work, which rest"),
+    BotCommand("probe", "Test every download route, from its container"),
     BotCommand("logs", "Tail a bot's log"),
     BotCommand("usage", "Memory, peaks, and what they cost"),
-    BotCommand("idle", "How quiet each bot is, and whether sleeping would pay"),
+    BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
     BotCommand("run", "Run a command inside another bot"),
     BotCommand("restart", "Restart a bot's process"),
     BotCommand("pause", "Stop the bots taking work an update would lose"),
@@ -2721,6 +3035,7 @@ BOT_COMMANDS = [
     BotCommand("balance", "See or change a credit balance"),
     BotCommand("addcredit", "Add ⚡ credit to an account by Telegram id"),
     BotCommand("donations", "Paid donations per bot"),
+    BotCommand("stars", "ConvertBot's Stars: paid, refunded, recent"),
     BotCommand("backup", "Whole database, restorable, pinned here"),
     BotCommand("dbdump", "One bot's tables as CSVs"),
     BotCommand("sql", "Read-only query on the shared database"),
@@ -2872,6 +3187,7 @@ def main():
     # the thing that ran at midnight, and /reports was the raw list it
     # replaced. Both still work.
     app.add_handler(CommandHandler(["problems", "nightly"], nightly_command))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("decode", decode_command))
     app.add_handler(CommandHandler("alerts", alerts_command))
     app.add_handler(CommandHandler("crashtest", crashtest_command))
@@ -2905,6 +3221,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))
+    app.add_handler(CallbackQueryHandler(feedback_mode_button, pattern=r"^fbmode:"))
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_text))
 
@@ -2949,7 +3266,7 @@ def main():
         app.job_queue.run_daily(
             nightly_problem_report, time(int(hour), int(minute or 0), tzinfo=timezone.utc)
         )
-        logger.info("Nightly problem report scheduled for %s UTC (midnight in Seoul).",
+        logger.info("Nightly problem report scheduled for %s UTC (22:00 in Seoul at the default).",
                     NIGHTLY_REPORT_AT_UTC)
 
     # ManagerBot rides the same bus it runs: it heartbeats like everyone else,

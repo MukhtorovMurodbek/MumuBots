@@ -137,7 +137,22 @@ def _try_lease(bot_id: str) -> bool:
     import psycopg
 
     if _lease_conn is None or _lease_conn.closed:
-        _lease_conn = psycopg.connect(db.DATABASE_URL, autocommit=True)
+        # A connect timeout, so that a database that does not answer costs one
+        # attempt's wait and not the operating system's several minutes: the
+        # lease's own deadline is only looked at between attempts.
+        #
+        # The same keepalives and unacknowledged-data limit as db.py's pools
+        # (a lease on a dead network path should be found dead in about a
+        # minute, not in the operating system's several), but deliberately NOT
+        # their statement_timeout or idle_in_transaction_session_timeout: the
+        # lease is a session-level advisory lock held by this connection, and a
+        # server that cut the connection for being idle would drop the lease
+        # with it. Nothing else runs on this connection but a one-row SELECT.
+        _lease_conn = psycopg.connect(
+            db.DATABASE_URL, autocommit=True, connect_timeout=15,
+            keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
+            tcp_user_timeout=30000,
+        )
     cur = _lease_conn.execute("SELECT pg_try_advisory_lock(%s)", (_lease_key(bot_id),))
     return bool(cur.fetchone()[0])
 
@@ -476,8 +491,9 @@ class PostgresPersistence(BasePersistence):
     # ---- writing them out ----
 
     async def flush(self) -> None:
-        writes, deletes = [], [("user", str(u)) for u in self._dropped_users]
-        for user_id in self._dirty_users:
+        dirty, dropped = set(self._dirty_users), set(self._dropped_users)
+        writes, deletes = [], [("user", str(u)) for u in dropped]
+        for user_id in dirty:
             kept = _clean(self._user_data.get(user_id) or {})
             if kept:
                 writes.append(("user", str(user_id), kept))
@@ -495,6 +511,13 @@ class PostgresPersistence(BasePersistence):
             await asyncio.to_thread(_delete_state, deletes)
         except Exception:
             logger.warning("Could not save in-progress state.", exc_info=True)
+            # Nothing that was in this pass is known to be saved, so it is all
+            # still to do: kept for the next pass rather than forgotten until
+            # the person next does something. Anyone who changed, or was
+            # dropped, while the write was failing is as they now are, not as
+            # they were.
+            self._dirty_users |= dirty - self._dropped_users
+            self._dropped_users |= dropped - self._dirty_users
 
 
 # ---------------------------------------------------------------------------

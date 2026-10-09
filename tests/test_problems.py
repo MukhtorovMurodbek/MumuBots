@@ -58,7 +58,8 @@ for table in p.KEYS.values():
 check("every code is used, and every code used is defined",
       used == set(p.PROBLEMS), sorted(used ^ set(p.PROBLEMS)))
 check("every ending the conversion queue gives back credit for has a code",
-      set(p.JOB_ENDINGS) == {"refused", "timeout", "too_slow", "crash", "too_large", "send_failed", "interrupted"})
+      set(p.JOB_ENDINGS) == {"refused", "timeout", "too_slow", "crash", "no_memory", "too_large", "send_failed",
+                             "interrupted"})
 
 print("\n== which problems offer a Report button ==")
 check("every problem kept from a Report button is a real code",
@@ -66,9 +67,11 @@ check("every problem kept from a Report button is a real code",
 check("an unknown command is too simple for one (the owner's example)", not p.reportable("FM-UNKNOWN-COMMAND"))
 check("a crash still offers one, and so does every conversion that failed on the bot's side",
       p.reportable("FM-CRASH") and all(p.reportable(code) for kind, code in p.JOB_ENDINGS.items()
-                                        if kind != "too_slow"))
+                                        if kind not in ("too_slow", "no_memory")))
 check("but not one stopped for being too long for the host -- a shorter clip is the person's to send",
       not p.reportable("CV-TOO-SLOW"))
+check("nor one too big for the host's memory -- a lower resolution is the person's to send",
+      not p.reportable("CV-NO-MEMORY"))
 check("so does every sticker Telegram refused, bar a pack that is simply full, and the owner's own misconfiguration",
       all(p.reportable(code) for code in p.STICKER_ERRORS.values() if code != "ST-TG-PACK-FULL")
       and not p.reportable("ST-TG-PACK-FULL") and p.reportable("FM-DONATE-UNAVAILABLE"))

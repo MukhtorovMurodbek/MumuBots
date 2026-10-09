@@ -122,6 +122,15 @@ heartbeating as though nothing were wrong. It shows up as *wrong data*, not
 as a broken bot, which is the worst way to find out. (psycopg's automatic
 statement preparation is a second, independent casualty.)
 
+**The session pooler has a ceiling, and the bots come close to it.** In session mode every client of the role
+holds a server connection, and all of them together are capped at the project's *Pool Size* (Database settings →
+Connection pooling; 15 by default). One combined container holds about 10 when idle -- five poll leases and five
+pools of at least one -- and up to 20 when every pool has grown to its three; the base edition's five services the
+same. A connection past the cap waits in the pooler for up to a minute and is then refused, which looks like every
+bot stalling at once (it may be what happened on 2026-10-09 at 08:40 UTC). **Raise Pool Size to about 30 before
+setting Railway's deployment overlap**: during an overlap two containers are connected at once, and even idle that
+is over 15.
+
 `db.py` warns at startup if it sees port 6543, but the fix is to not put it
 there.
 
@@ -764,7 +773,17 @@ database. The release has to be committed and tagged first -- `v<version>` here,
 `--skip` is gone (it held one bot back while each had a repository of its
 own). Before it pauses anybody, the script refuses a folder whose `origin` is
 not its edition's repository -- this folder still on `telegram-bot-family`
-included.
+included -- and, since 2026-10-09, a folder with uncommitted changes or whose
+nearest tag is not the version (asked again at the window, in case it changes
+during the wait). Whatever then goes wrong once the bots are paused -- an
+exception, a git command that times out, Ctrl-C -- resumes them the way a
+normal release does and tells the owner in `family.events`. Every git command
+runs with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, no stdin and a
+timeout, so a credential prompt under Task Scheduler fails at once instead of
+hanging with the bots closed. `scripts\run_release.cmd`, the Task Scheduler
+launcher, runs the TempTools python and exits 2 when given no arguments: the
+scheduled task must say `--edition C` (production runs the C edition), because
+the script's default is the base one.
 `C:\.prog\.TelegramBots\scripts\run_latest_release.py` passes its arguments
 through and never picks a C folder as the newest.
 

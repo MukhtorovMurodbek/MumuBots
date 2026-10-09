@@ -23,9 +23,15 @@ Tapping the SAME link again always starts a brand-new conversation (a fresh
 conv_number, a fresh reply-chain anchor) -- it does not continue whatever
 was last open with that owner.
 
+A reaction on a message in a conversation is put on the same message in the
+other chat, by the bot -- see relay_reaction(). It shows beside the bot's
+picture, so it is as anonymous as everything else here.
+
 Commands:
-  /start, /help     - greeting + how it works (also handles /start q_<token>,
-                       i.e. someone tapping a link)
+  /start, /help     - greeting + how it works, the short version, with a
+                       button for the full one (/help full); /start also
+                       handles /start q_<token>, i.e. someone tapping a link
+  /feedback         - a suggestion or a report, for whoever runs the bots
   /link             - get your own permanent inbox link
   /newlink          - reset your link (invalidates the old one)
   /pause / /resume  - stop/resume NEW conversations (open ones keep working)
@@ -82,6 +88,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    MessageReactionHandler,
     PreCheckoutQueryHandler,
     TypeHandler,
     filters,
@@ -94,13 +101,18 @@ import live_message
 import transcript
 from live_message import LiveMessage, edit_in_place
 from anon_logic import (
+    REACTION_NOTE_SECONDS,
+    RELAYABLE_REACTIONS,
     message_allowed,
     new_conversation_allowed,
+    pick_reaction,
+    reaction_note_allowed,
     relay_content,
 )
 from db import (
     CONVERSATIONS_PER_PAGE,
     RELAY_RETENTION_DAYS,
+    claim_reactions_note,
     clear_follower_state,
     count_owner_conversation_states,
     first_relay_message,
@@ -109,6 +121,7 @@ from db import (
     get_anon_stats,
     get_conversation,
     get_conversation_for_relay,
+    get_reaction_route,
     get_relay_row,
     get_routing_context,
     list_owner_conversations,
@@ -146,6 +159,13 @@ from shared_features import (
     problem_report_callback,
     attach_flood_gate,
     attach_maintenance,
+    awaited_text_received,
+    feedback_command,
+    FORCE_REPLY_KEY,
+    HELP_TOGGLE_PATTERN,
+    help_keyboard,
+    help_toggle,
+    wants_full_help,
     CANCEL_PICK_ALL,
     CANCEL_PICK_NONE,
     CancelItem,
@@ -162,7 +182,6 @@ from shared_features import (
     donate_amount_chosen,
     donate_fiat_amount_chosen,
     donate_custom_button_chosen,
-    donate_custom_amount_received,
     balance_command,
     donate_command,
     donation_payment_callback,
@@ -227,8 +246,17 @@ async def _reply(update: Update, text: str, **kwargs):
     return await edit_in_place(update.callback_query.message, update.get_bot(), text, **kwargs)
 
 
-def build_help_text(lang: str) -> str:
-    return i18n.t(lang, "help_text") + sibling_bots_blurb(BOT_NAME, lang)
+def build_help_text(lang: str, full: bool = False) -> str:
+    """The short version unless asked for the long one -- the family's help
+    template (shared_features, "/help in two lengths"). The short one is what
+    /start and /help show: how the inbox works, that reactions travel, and
+    /feedback. The long one ("help_text", which tests/test_menu.py holds to
+    naming every command) is a tap away, and lists every reaction a bot is
+    allowed to pass on."""
+    if not full:
+        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
+    return (i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS))
+            + sibling_bots_blurb(BOT_NAME, lang))
 
 
 # Public command menu (the "/" button in Telegram's chat UI) -- set on
@@ -265,6 +293,7 @@ BOT_COMMANDS = [
     BotCommand("export", "Get a conversation back"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
+    BotCommand("feedback", "Suggest something, or report a problem"),
     BotCommand("balance", "Your ⚡ credit"),
     BotCommand("donate", "Chip in for hosting costs"),
     BotCommand("paysupport", "Trouble with a payment"),
@@ -316,12 +345,14 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     if args and args[0].startswith("q_"):
         return await start_follow_link(update, context, args[0][2:], lang)
 
-    kb = sibling_bots_keyboard_row(BOT_NAME)
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
     )
+    # The short help says reactions travel, so whoever has just read it has
+    # been told -- the one-time note would only say it again.
+    await _knows_reactions(context, update.effective_user.id)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -505,8 +536,12 @@ async def start_follow_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    await update.message.reply_text(build_help_text(lang))
+    full = wants_full_help(context)
+    await update.message.reply_text(build_help_text(lang, full=full),
+                                    reply_markup=help_keyboard(lang, full))
+    await _knows_reactions(context, update.effective_user.id)
 
 
 # ---------- owner: inbox link management ----------
@@ -1939,6 +1974,136 @@ async def edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raise ApplicationHandlerStop
 
 
+# ---------- reactions: passed across, as the bot's own ----------
+
+async def relay_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Somebody reacted to a bubble of a conversation: the bot puts the same
+    reaction on its twin in the other chat, where it shows beside the bot's
+    picture rather than theirs. Changing it changes the twin's; taking it off
+    takes the twin's off.
+
+    Edits cannot do this -- a copy is an independent message, and its text is
+    the other person's to keep (see edited_message) -- but a reaction is not
+    part of the message. It is a mark beside it, and a bot may set its own.
+
+    What cannot travel is a Telegram Premium custom-emoji reaction, a paid
+    one, or more than one per message (a bot gets one); the person is told,
+    briefly, by a note that removes itself. Nothing about a reaction is
+    stored, and nothing is said when there is simply nowhere to send it -- a
+    reaction on the bot's own notices, on a blocked conversation, or in a
+    chat Telegram will not deliver to."""
+    change = update.message_reaction
+    if change is None or change.user is None or change.chat.type != "private":
+        return
+    reactor = change.user.id
+    route = await asyncio.to_thread(get_reaction_route, change.chat.id, change.message_id)
+    if route is None or reactor not in (route["owner_user_id"], route["follower_user_id"]):
+        return
+    # Somebody who reacts has plainly found out reactions exist.
+    await _knows_reactions(context, reactor)
+    if route["blocked"]:
+        return
+    other = (route["follower_user_id"] if reactor == route["owner_user_id"]
+             else route["owner_user_id"])
+    chosen, note = pick_reaction(change.old_reaction, change.new_reaction)
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=other, message_id=route["peer_message_id"], reaction=chosen)
+    except Forbidden:
+        return
+    except BadRequest as exc:
+        if "REACTION_INVALID" in str(exc).upper():
+            # An emoji Telegram does not let a bot use after all.
+            note = "reaction_not_passed"
+        else:
+            # The twin deleted, or a reaction already exactly as asked.
+            logger.debug("Could not pass a reaction on: %s", exc)
+            return
+    if note and reaction_note_allowed(reactor):
+        lang = await i18n.get_lang(reactor, context)
+        await _show_briefly(context, change.chat.id, i18n.t(lang, note))
+
+
+# Notes that are about to take themselves down, held so the tasks are not
+# garbage-collected half-way through their sleep.
+_taking_down: set = set()
+
+
+async def _show_briefly(context, chat_id: int, text: str) -> None:
+    """A silent message that deletes itself after REACTION_NOTE_SECONDS.
+
+    The owner asked for Telegram's own floating notice -- the one that fades
+    after a few seconds. A bot can only show that as the answer to a button
+    tap (answerCallbackQuery), and a reaction is not one; Bot API 10's
+    ephemeral messages are for groups. This is the nearest thing: no sound,
+    no badge left behind, gone again before the next message. A restart in
+    those seconds leaves it in place, which costs one stray line."""
+    try:
+        sent = await context.bot.send_message(chat_id=chat_id, text=text,
+                                              disable_notification=True)
+    except Exception:
+        logger.debug("Could not show a reaction note", exc_info=True)
+        return
+
+    async def take_down():
+        await asyncio.sleep(REACTION_NOTE_SECONDS)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=sent.message_id)
+        except Exception:
+            logger.debug("Could not take a reaction note down", exc_info=True)
+
+    task = asyncio.get_running_loop().create_task(take_down())
+    _taking_down.add(task)
+    task.add_done_callback(_taking_down.discard)
+
+
+# The one-time note that reactions now travel, for people who were using the
+# bot before they did. Who is owed it is a column, user_settings.knows_reactions
+# (see db.init_db): NULL for everybody who was here before 2.1.0, TRUE for
+# everybody since and for everybody once told.
+KNOWS_REACTIONS_KEY = "knows_reactions"
+
+
+async def _knows_reactions(context, user_id: int) -> bool:
+    """Mark this person as told, without telling them. True if they had not
+    been -- the caller decides whether that means a note. Cached, so it is one
+    database round trip per person, ever."""
+    if context.user_data.get(KNOWS_REACTIONS_KEY):
+        return False
+    try:
+        owed = await asyncio.to_thread(claim_reactions_note, user_id)
+    except Exception:
+        logger.debug("Could not read whether %s knows about reactions", user_id, exc_info=True)
+        return False
+    context.user_data[KNOWS_REACTIONS_KEY] = True
+    return owed
+
+
+async def reactions_update_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After whatever somebody came to do: if they were here before reactions
+    travelled, tell them once. The owner: "The next time they interact with
+    the bot, they should get a one time short note about the update".
+
+    In a group of its own after every other handler, so the note comes after
+    the answer it is not part of. Not while a prompt is waiting for its answer
+    -- a note between a question and its reply box is in the way -- which
+    only puts it off to the next message."""
+    user, chat = update.effective_user, update.effective_chat
+    if user is None or chat is None or chat.type != "private":
+        return
+    if update.message is None and update.callback_query is None:
+        return
+    if context.user_data.get(KNOWS_REACTIONS_KEY) or FORCE_REPLY_KEY in context.user_data:
+        return
+    if not await _knows_reactions(context, user.id):
+        return
+    lang = await i18n.get_lang(user.id, context)
+    try:
+        await context.bot.send_message(chat_id=chat.id, text=i18n.t(lang, "reactions_update_note"))
+    except Exception:
+        logger.debug("Could not send the reactions note", exc_info=True)
+
+
 async def _route_into(update: Update, context: ContextTypes.DEFAULT_TYPE,
                       conversation_id: int, conv: dict | None = None,
                       peer_anchor: int | None = None) -> None:
@@ -2139,14 +2304,18 @@ def main():
     # written for update.message ever receives an update that has none.
     app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message), group=-2)
     # Runs after track_activity but before every other handler (including the
-    # anonymous-relay handle_message below) -- a no-op unless a "Custom" donate
-    # button was just tapped, in which case it consumes the reply and stops it
-    # from also being relayed as an anonymous message (see
-    # donate_custom_amount_received's docstring).
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, donate_custom_amount_received), group=-1)
+    # anonymous-relay handle_message below) -- a no-op unless /feedback or a
+    # "Custom" donate button has just asked for something to be typed, in
+    # which case it takes the answer and stops it from also being relayed as
+    # an anonymous message (see awaited_text_received). Replies of any kind
+    # reach it, so a photo sent as the answer to /feedback is asked about
+    # rather than relayed; anything that is not answering it passes through.
+    app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
+                                   awaited_text_received), group=-1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("link", link_command))
     app.add_handler(CommandHandler("newlink", newlink_command))
@@ -2179,6 +2348,7 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
 
     app.add_handler(CallbackQueryHandler(language_chosen, pattern=r"^setlang:"))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern=r"^cancelpick:"))
     app.add_handler(CallbackQueryHandler(anonlink_toggle_callback, pattern=r"^anonlink:toggle$"))
     app.add_handler(CallbackQueryHandler(anonlink_newlink_callback, pattern=r"^anonlink:newlink$"))
@@ -2202,12 +2372,22 @@ def main():
     app.add_handler(PreCheckoutQueryHandler(donation_precheckout_callback))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, donation_payment_callback))
 
+    # A reaction on a bubble of a conversation goes to its twin -- see
+    # relay_reaction. Nothing else in this group matches a reaction: every
+    # handler above is for a message or a button.
+    app.add_handler(MessageReactionHandler(
+        relay_reaction, message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_UPDATED))
+
     # Everything else non-command in a private chat is either an owner's
     # reply or a follower's question -- handle_message() tells them apart.
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_message))
     # Registered last so every real command above gets first shot -- only
     # reached by a slash-command this bot doesn't actually have.
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+
+    # After everything, in a group of its own: the one-time note that
+    # reactions now travel, for whoever was here before they did.
+    app.add_handler(TypeHandler(Update, reactions_update_note), group=1)
 
     # ManagerBot's link: heartbeats, crash/donation events, and the queue it
     # uses to run this bot's owner-only commands remotely. Never raises --
@@ -2220,11 +2400,14 @@ def main():
     # answers the moment an update exists -- for a third of the HTTP requests.
     # allowed_updates lists every kind this bot has a handler for, so Telegram
     # stops sending the rest rather than this process parsing and dropping it.
+    # Reactions have to be asked for by name: an empty list means everything
+    # except them.
     app.run_polling(**lifecycle.polling_kwargs(
         timeout=POLL_TIMEOUT,
         allowed_updates=[
             Update.MESSAGE, Update.EDITED_MESSAGE,
             Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY,
+            Update.MESSAGE_REACTION,
         ],
     ))
 

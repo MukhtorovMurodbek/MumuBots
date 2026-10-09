@@ -9,7 +9,7 @@ available inside the bot as `/privacy`, in English, Uzbek and Russian.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 10 September 2026._
+_Last reviewed: 3 October 2026._
 
 ---
 
@@ -58,6 +58,13 @@ _Last reviewed: 10 September 2026._
   has attached their details; the operator has to look those up deliberately.
 - **Work in progress** — a download waiting on a choice, so it survives a
   restart.
+- **Feedback, if you send it** — what you write with `/feedback`, which bot it
+  was sent from, the language you use, and when. Not your user id, your name
+  or your username. The operator receives it as a Telegram message — straight
+  away, or with the nightly summary, as they choose — and the copy in the
+  database is **deleted after 30 days**. Because nothing in it says who sent
+  it, `/deletemydata` cannot find it to erase it sooner. For the same reason it
+  is **one-way**: only the operator reads it, and they cannot reply.
 
 ## What is not held
 
@@ -109,6 +116,7 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 | work in progress | 12 hours (`DEPLOY_STATE_TTL_HOURS`) |
 | donation records | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the donation records |
+| feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it
 

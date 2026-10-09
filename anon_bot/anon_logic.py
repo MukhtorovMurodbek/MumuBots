@@ -128,6 +128,102 @@ def new_conversation_allowed(user_id: int) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Reactions
+# ---------------------------------------------------------------------------
+# A reaction on one bubble of a conversation is put on its twin in the other
+# chat, by the bot -- so it shows beside the bot's picture and says nothing
+# about who reacted. Asked for by the owner on 2026-10-03 ("if im chatting
+# with someone in anonbot and i put a reaction to their message, can it be
+# visible to the other person?"), after a probe on TestBot showed that
+# Telegram does tell a bot about reactions in its own private chats, whatever
+# the Bot API's wording about administrators suggests.
+#
+# What a bot may react with is narrower than what a person may: one reaction
+# per message, from the standard set below, never a custom emoji that is not
+# already on the message (a Telegram Premium one, in practice), never a paid
+# one. The list is Telegram's (Bot API 10.3, ReactionTypeEmoji) and is shown
+# in /help; Telegram still has the last word, because a reaction it has added
+# since is tried rather than refused, and one it has dropped comes back as
+# REACTION_INVALID. Nothing matches against this list -- what is passed on is
+# the exact emoji Telegram sent -- which is why it does not matter that four
+# of these are written without the variation selector (U+FE0F) that
+# python-telegram-bot's own list carries.
+RELAYABLE_REACTIONS = (
+    "❤", "👍", "👎", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩", "🤮", "💩",
+    "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡", "🍌", "🏆",
+    "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈", "😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🙈",
+    "😇", "😨", "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿", "🆒", "💘", "🙉", "🦄",
+    "😘", "💊", "🙊", "😎", "👾", "🤷‍♂", "🤷", "🤷‍♀", "😡",
+)
+
+# How long the note about a reaction that could not be passed on stays up.
+# Telegram's own pop-up -- the one a button tap can show -- only exists as an
+# answer to a button, so a reaction cannot have one; a silent message that
+# takes itself down again is the nearest thing a bot has. Eight seconds, not
+# the few of a pop-up: it is two lines, it opens with what the reader has lost
+# ("The other person won't see that reaction"), and somebody who reacted far
+# up the chat has to scroll down to it first. The owner: "just make sure the
+# users will be able to read the most important info."
+REACTION_NOTE_SECONDS = float(os.environ.get("ABOT_REACTION_NOTE_SECONDS", "8"))
+# And how often one person can be shown it, so a run of Premium reactions is
+# one note rather than a note per tap.
+REACTION_NOTE_EVERY_SECONDS = int(os.environ.get("ABOT_REACTION_NOTE_EVERY_SECONDS", "30"))
+_reaction_notes: "OrderedDict[int, float]" = OrderedDict()
+
+
+def _reaction_id(reaction) -> "tuple[str, str]":
+    kind = getattr(reaction, "type", None) or "emoji"
+    if kind == "emoji":
+        return kind, getattr(reaction, "emoji", "") or ""
+    if kind == "custom_emoji":
+        return kind, getattr(reaction, "custom_emoji_id", "") or ""
+    return kind, ""
+
+
+def pick_reaction(old, new) -> "tuple[list[str], str | None]":
+    """What to put on the twin, and which note the reactor needs, if any.
+
+    `old` and `new` are the person's reactions before and after, as Telegram
+    sends them. The answer is a list of at most one emoji -- the bot shows
+    one -- and an empty list means take the bot's reaction off. Of several
+    standard reactions, the one just added is the one passed on, which is
+    what the person was looking at when they tapped; taking one off passes on
+    whichever standard one is left.
+
+    The note is "reaction_not_passed" when what was just added cannot be shown
+    at all (a custom emoji, a paid reaction), "reaction_one_only" when it can
+    but the person now has more than one, and None otherwise.
+    """
+    before = {_reaction_id(r) for r in old or ()}
+    after = [_reaction_id(r) for r in new or ()]
+    standard = [value for kind, value in after if kind == "emoji" and value]
+    added = [(kind, value) for kind, value in after if (kind, value) not in before]
+    added_standard = [value for kind, value in added if kind == "emoji" and value]
+    if added_standard:
+        chosen = [added_standard[-1]]
+    else:
+        chosen = standard[:1]
+    note = None
+    if any(kind != "emoji" for kind, _ in added):
+        note = "reaction_not_passed"
+    elif added_standard and len(standard) > 1:
+        note = "reaction_one_only"
+    return chosen, note
+
+
+def reaction_note_allowed(user_id: int) -> bool:
+    """True at most once per REACTION_NOTE_EVERY_SECONDS for one person."""
+    now = time.monotonic()
+    last = _reaction_notes.get(user_id)
+    if last is not None and now - last < REACTION_NOTE_EVERY_SECONDS:
+        return False
+    _reaction_notes[user_id] = now
+    _reaction_notes.move_to_end(user_id)
+    _trim(_reaction_notes)
+    return True
+
+
 async def relay_content(
     bot, message, to_chat_id,
     reply_to_message_id=None, reply_markup=None, header=None, italic=True,

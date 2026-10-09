@@ -32,6 +32,14 @@ guesses at every point where it could get it wrong:
     5. Wait for every bot's heartbeat to report the new version.
     6. Resume, which also messages everyone step 1 turned away.
 
+Before step 1 it refuses, without pausing anything, a folder that is not the
+release (uncommitted changes, or the nearest tag is not the version); step 4
+asks again. And whatever goes wrong after step 1 -- any exception, a push that
+times out, Ctrl-C -- finish() resumes the bots the same way step 6 does and
+tells the owner, so the bots are never left closed by a crash. Every git command
+runs without stdin, with GIT_TERMINAL_PROMPT=0 and GCM_INTERACTIVE=never and
+with a timeout, so a credential prompt or a dead network fails rather than hangs.
+
 Everything it does is written to scripts/release.log and, at the end, into
 family.events -- so ManagerBot forwards the outcome to the owner as a Telegram
 message whether or not anybody was watching a terminal.
@@ -61,6 +69,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -74,6 +83,14 @@ PAUSE_LEAD_MINUTES = 20      # pause this long before the window opens
 QUIET_MINUTES = 15           # nobody active in this long == nobody mid-work
 MAX_WAIT_MINUTES = 60        # give up and abort rather than ship over someone
 HEARTBEAT_WAIT_MINUTES = 12  # how long to wait for the new version to appear
+GIT_TIMEOUT_SECONDS = 120    # any local git command; a healthy one takes milliseconds
+PUSH_TIMEOUT_SECONDS = 600   # the push, which is the one that crosses the network
+
+# Every git command here runs with these added, so that one which would ask a
+# question fails at once. Under Task Scheduler nobody is there to answer: a
+# credential prompt (git's own, or Git Credential Manager's window) would hang
+# until the push timeout, with the bots paused the whole time.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 BOTS = {
     "stickerbot": "sticker_bot",
@@ -93,6 +110,40 @@ def log(message: str) -> None:
 
 def tashkent_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=TZ_OFFSET_HOURS)
+
+
+def run_git(folder: Path, *args: str, timeout: int = GIT_TIMEOUT_SECONDS):
+    """git in `folder`, the way every git command in this script is run: it
+    cannot ask anybody a question (GIT_ENV, and no stdin), and it cannot take
+    for ever. Raises subprocess.TimeoutExpired, which each caller turns into
+    its own kind of "no" -- a refusal before the pause, a failed step after.
+
+    Its output goes to temporary files rather than pipes. A push is git plus a
+    helper process (git-remote-https) that inherits the pipes; on Windows,
+    killing git on a timeout then still waits for the helper to let go of them
+    (measured: a 2 s timeout returned after 25 s, when the helper's own wait
+    ended), and a push hung on a dead network is exactly the case the timeout
+    is for. With files nothing waits for the helper."""
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        def output():
+            texts = []
+            for fh in (out, err):
+                fh.seek(0)
+                texts.append(fh.read().decode("utf-8", errors="replace"))
+            return texts
+        try:
+            done = subprocess.run(["git", *args], cwd=folder, stdin=subprocess.DEVNULL,
+                                  stdout=out, stderr=err, timeout=timeout,
+                                  env={**os.environ, **GIT_ENV})
+        except subprocess.TimeoutExpired as exc:
+            exc.stdout, exc.stderr = output()
+            raise
+        stdout, stderr = output()
+        return subprocess.CompletedProcess(done.args, done.returncode, stdout, stderr)
+
+
+def _timed_out(exc: subprocess.TimeoutExpired) -> str:
+    return f"git did not answer within {exc.timeout:.0f} s ({' '.join(str(a) for a in exc.cmd[:3])})"
 
 
 def _env_of(folder: str) -> dict:
@@ -137,9 +188,10 @@ OLD_HISTORY_ROOTS = {
 def carries_old_history(folder: Path) -> str | None:
     """Why HEAD in `folder` cannot go to MumuBots because of what it descends
     from, or None."""
-    roots = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"], cwd=folder,
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace").stdout.split()
+    try:
+        roots = run_git(folder, "rev-list", "--max-parents=0", "HEAD").stdout.split()
+    except subprocess.TimeoutExpired as exc:
+        return _timed_out(exc)   # unknown is not "clean": refuse
     if OLD_HISTORY_ROOTS & set(roots):
         return (f"{folder.name}'s history still begins with telegram-bot-family's, whose early "
                 f"commits hold tokens, and a push would carry all of it -- MumuBots starts again "
@@ -149,8 +201,10 @@ def carries_old_history(folder: Path) -> str | None:
 
 def wrong_remote(folder: Path, edition: str) -> str | None:
     """Why `origin` in `folder` is not where `edition` is released to, or None."""
-    url = subprocess.run(["git", "remote", "get-url", "origin"], cwd=folder, capture_output=True,
-                         text=True, encoding="utf-8", errors="replace").stdout.strip()
+    try:
+        url = run_git(folder, "remote", "get-url", "origin").stdout.strip()
+    except subprocess.TimeoutExpired as exc:
+        return _timed_out(exc)
     # https://github.com/o/MumuBots.git, git@github.com:o/MumuBots, C:\mirror\MumuBots.git
     name = re.split(r"[/\\:]", url.rstrip("/\\").removesuffix(".git"))[-1]
     if name in REPOSITORIES[edition]:
@@ -236,15 +290,21 @@ def release_not_ready(target: str) -> str | None:
     behind without a word, and a missing tag means the version was never
     finalised. Release tooling committed after the tag is fine -- that is how
     scripts/run_release.cmd arrived -- so it is the nearest tag that is checked,
-    not the commit it sits on."""
+    not the commit it sits on.
+
+    Asked twice: before anything is paused, so that a release that is not going
+    to happen never closes the bots, and again at the window, because the folder
+    can change during the hours in between."""
     def git(*args):
-        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace").stdout.strip()
-    nearest = git("describe", "--tags", "--abbrev=0")
-    if nearest != f"v{target}":
-        return f"the nearest tag is {nearest or 'none'}, not v{target}"
-    if git("status", "--porcelain", "--untracked-files=no"):
-        return "there are uncommitted changes"
+        return run_git(ROOT, *args).stdout.strip()
+    try:
+        nearest = git("describe", "--tags", "--abbrev=0")
+        if nearest != f"v{target}":
+            return f"the nearest tag is {nearest or 'none'}, not v{target}"
+        if git("status", "--porcelain", "--untracked-files=no"):
+            return "there are uncommitted changes"
+    except subprocess.TimeoutExpired as exc:
+        return _timed_out(exc)
     return None
 
 
@@ -254,29 +314,120 @@ def c_not_ready(folder: Path, target: str) -> str | None:
     if not (folder / ".git").exists():
         return f"{folder} is not a checkout of MumuCombined (formerly BotFamily)"
     def git(*args):
-        return subprocess.run(["git", *args], cwd=folder, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace").stdout.strip()
-    nearest = git("describe", "--tags", "--abbrev=0")
-    if nearest != f"v{target}C":
-        return f"the C folder's nearest tag is {nearest or 'none'}, not v{target}C"
-    if git("status", "--porcelain", "--untracked-files=no"):
-        return "the C folder has uncommitted changes"
+        return run_git(folder, *args).stdout.strip()
+    try:
+        nearest = git("describe", "--tags", "--abbrev=0")
+        if nearest != f"v{target}C":
+            return f"the C folder's nearest tag is {nearest or 'none'}, not v{target}C"
+        if git("status", "--porcelain", "--untracked-files=no"):
+            return "the C folder has uncommitted changes"
+    except subprocess.TimeoutExpired as exc:
+        return _timed_out(exc)
     return None
 
 
 def publish(folder: Path, tag: str, dry_run: bool) -> bool:
     """Push the branch and the version's tag: this folder to MumuBots, or the
-    C folder to MumuCombined."""
-    cmd = ["git", "push", "origin", "HEAD:main", f"refs/tags/{tag}"]
+    C folder to MumuCombined.
+
+    False for any push that did not finish -- including one that ran out of
+    time, which is a failed step like any other and so goes down the same road
+    (the bots are resumed and the owner is told), not an unhandled crash. A
+    push that timed out may or may not have reached GitHub; the log says so."""
+    args = ["push", "origin", "HEAD:main", f"refs/tags/{tag}"]
     if dry_run:
-        cmd.append("--dry-run")
-    log("    running: " + " ".join(cmd) + f"   (in {folder.name})")
-    result = subprocess.run(cmd, cwd=folder, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", timeout=600)
+        args.append("--dry-run")
+    log("    running: git " + " ".join(args) + f"   (in {folder.name})")
+    try:
+        result = run_git(folder, *args, timeout=PUSH_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        log(f"    the push did not finish within {PUSH_TIMEOUT_SECONDS} s and was stopped; "
+            f"whether it reached the remote is not known")
+        for chunk in (exc.stdout, exc.stderr):
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8", errors="replace")
+            for line in (chunk or "").splitlines():
+                if line.strip():
+                    log("    | " + line.rstrip())
+        return False
     for line in ((result.stdout or "") + (result.stderr or "")).splitlines():
         if line.strip():
             log("    | " + line.rstrip())
     return result.returncode == 0
+
+
+def not_the_release(c_folder: Path | None, target: str) -> str | None:
+    """release_not_ready, or c_not_ready for the C edition -- one question,
+    asked before the pause and again at the window."""
+    return c_not_ready(c_folder, target) if c_folder else release_not_ready(target)
+
+
+class ReleaseState:
+    """What `finish` needs to know to leave the bots open and the owner told,
+    however the run ends. Filled in by `_run` as it goes."""
+
+    def __init__(self):
+        self.db = None
+        self.admins: set[int] = set()
+        self.target = "?"
+        self.paused = False      # the pause was (at least partly) queued
+        self.resumed = False     # the resume was queued, for every bot
+        self.announced = False   # the owner has been told how this ended
+        self.stage = "before"    # before -> publishing -> published
+        self.crash: BaseException | None = None
+
+
+def resume_bots(state: ReleaseState) -> None:
+    """The one place the resume is queued, so `finish` knows whether it has been."""
+    queue(state.db, state.admins, "resume")
+    state.resumed = True
+
+
+def tell(state: ReleaseState, level: str, message: str, details: str = "") -> None:
+    announce(state.db, level, message, details)
+    state.announced = True
+
+
+def finish(state: ReleaseState) -> None:
+    """The last line of defence, run however main() ends.
+
+    Pausing is the only thing this script does that hurts people if it is then
+    forgotten: the bots turn away everyone who comes, until something resumes
+    them. The normal paths all resume; this is for the ones nobody wrote, an
+    exception or a timeout somewhere after the pause. It resumes exactly as the
+    normal path does -- the same queue, so the people who were turned away are
+    told it is over just the same -- and says in family.events that the release
+    did not go as planned. The pause also runs out by itself (PAUSE_LEAD_MINUTES
+    + MAX_WAIT_MINUTES), which is the net under this net."""
+    if not state.paused or state.announced:
+        return
+    what = (f"{type(state.crash).__name__}: {state.crash}" if state.crash is not None
+            else "the run ended without saying how")[:300]
+    log(f"ABORTING: the release stopped on an error after the bots were paused ({what}).")
+    resume_failed = ""
+    if not state.resumed:
+        try:
+            resume_bots(state)
+        except Exception as exc:
+            resume_failed = f"{type(exc).__name__}: {exc}"
+            log(f"    COULD NOT QUEUE THE RESUME ({resume_failed}). The pause runs out by itself "
+                f"within {PAUSE_LEAD_MINUTES + MAX_WAIT_MINUTES} minutes; /resume from ManagerBot "
+                f"opens the bots sooner.")
+    if resume_failed:
+        fate = (f"The bots could NOT be resumed from here ({resume_failed}); they reopen by "
+                f"themselves within {PAUSE_LEAD_MINUTES + MAX_WAIT_MINUTES} minutes, or send /resume.")
+    else:
+        fate = "The bots have been resumed."
+    if state.stage == "published":
+        outcome = "The new version had already been pushed."
+    elif state.stage == "publishing":
+        outcome = "It stopped during the push, so whether the push reached GitHub is not known."
+    else:
+        outcome = "Nothing was published."
+    if state.db is not None:
+        tell(state, "error",
+             f"Release {state.target} aborted: the release script stopped on an error ({what}) "
+             f"after the bots were paused. {outcome} {fate} See scripts/release.log.")
 
 
 def main() -> int:
@@ -300,9 +451,25 @@ def main() -> int:
         # every release changes it, so every release rebuilds all five.
         parser.error("--skip no longer applies: since 2.0.0 one push carries all five bots")
 
+    state = ReleaseState()
+    try:
+        return _run(opts, state)
+    except BaseException as exc:
+        state.crash = exc
+        raise
+    finally:
+        # Whatever happened above -- a bug, a database that went away, a push that
+        # timed out, Ctrl-C -- the bots are not left closed and nobody is left
+        # guessing. A no-op unless the bots were paused and nothing has yet said
+        # how this ends.
+        finish(state)
+
+
+def _run(opts, state: "ReleaseState") -> int:
     admins, target = _setup()
     c_folder = _c_folder(opts.c_folder) if opts.edition == "C" else None
     import db  # ManagerBot's, now that the path and env are set
+    state.db, state.admins, state.target = db, admins, target
 
     log("=" * 70)
     log(f"Release run, {'C edition' if c_folder else 'base edition'}. Target version {target}. Tashkent time "
@@ -323,6 +490,19 @@ def main() -> int:
         log("Every bot already reports the target version. Nothing to do.")
         return 0
     log(f"    to publish: {', '.join(stale)}")
+
+    # Is the folder the release at all? Asked now, before anything is paused:
+    # an uncommitted change or a missing tag will not mend itself during the wait,
+    # and finding out after the pause costs the users a closed bot for nothing.
+    # (Asked again at the window, below -- the folder can change in between.)
+    not_ready = not_the_release(c_folder, target)
+    if not_ready:
+        log(f"    not the release: {not_ready}")
+        if not opts.dry_run:
+            log("ABORTING before anything was paused. Nothing was published.")
+            tell(state, "warning", f"Release {target} aborted before anything was paused: "
+                                   f"{not_ready}. The bots were not touched.")
+            return 1
 
     day = active_users(db, admins, 24 * 60)
     log(f"    users in the last 24h (admins excluded): {day}")
@@ -353,6 +533,7 @@ def main() -> int:
 
     log("1. Pausing the four public bots.")
     if not opts.dry_run:
+        state.paused = True   # before the queueing: half a pause is still a pause to undo
         queue(db, admins, "pause", str(PAUSE_LEAD_MINUTES + MAX_WAIT_MINUTES))
         time.sleep(20)   # let each bot's bus poll pick it up
 
@@ -375,36 +556,38 @@ def main() -> int:
             log("ABORTING: somebody has been active throughout the whole window.")
             log("    Resuming the bots. Nothing was published.")
             if not opts.dry_run:
-                queue(db, admins, "resume")
-                announce(db, "warning",
-                         f"Release {target} aborted: users were active throughout the "
-                         f"{MAX_WAIT_MINUTES}-minute window. The bots have been resumed "
-                         f"and nothing was published. Run it by hand when convenient.")
+                resume_bots(state)
+                tell(state, "warning",
+                     f"Release {target} aborted: users were active throughout the "
+                     f"{MAX_WAIT_MINUTES}-minute window. The bots have been resumed "
+                     f"and nothing was published. Run it by hand when convenient.")
             return 2
         time.sleep(60)
 
     # -- 4. publish ---------------------------------------------------------
     log("3. Publishing.")
-    not_ready = c_not_ready(c_folder, target) if c_folder else release_not_ready(target)
+    not_ready = not_the_release(c_folder, target)
     if not_ready:
         log(f"    not the release: {not_ready}")
         if not opts.dry_run:
             log("ABORTING: resuming the bots. Nothing was published.")
-            queue(db, admins, "resume")
-            announce(db, "warning", f"Release {target} aborted before publishing: {not_ready}. "
-                                    f"The bots have been resumed.")
+            resume_bots(state)
+            tell(state, "warning", f"Release {target} aborted before publishing: {not_ready}. "
+                                   f"The bots have been resumed.")
             return 1
+    state.stage = "publishing"
     published = (publish(c_folder, f"v{target}C", opts.dry_run) if c_folder
                  else publish(ROOT, f"v{target}", opts.dry_run))
     if not published:
         log("ABORTING: the publish step failed. Resuming the bots.")
         if not opts.dry_run:
-            queue(db, admins, "resume")
-            announce(db, "error",
-                     f"Release {target} failed while publishing. The bots have been "
-                     f"resumed and are still on their old version. See "
-                     f"scripts/release.log.")
+            resume_bots(state)
+            tell(state, "error",
+                 f"Release {target} failed while publishing. The bots have been "
+                 f"resumed and are still on their old version. See "
+                 f"scripts/release.log.")
         return 1
+    state.stage = "published"
 
     if opts.dry_run:
         log("DRY RUN: stopping here. Nothing was paused, published or resumed.")
@@ -427,26 +610,26 @@ def main() -> int:
 
     # -- 6. resume ----------------------------------------------------------
     log("5. Resuming, and telling everyone who was turned away.")
-    queue(db, admins, "resume")
+    resume_bots(state)
     time.sleep(20)
 
     final = versions(db)
     behind = [b for b in BOTS if final.get(b) != target]
     if behind:
         log(f"DONE, WITH A CAVEAT: {behind} did not report {target} in time.")
-        announce(db, "warning",
-                 f"Release {target} published and the bots were resumed, but "
-                 f"{', '.join(behind)} had not reported the new version after "
-                 f"{HEARTBEAT_WAIT_MINUTES} minutes. Check /status.",
-                 details=str(final))
+        tell(state, "warning",
+             f"Release {target} published and the bots were resumed, but "
+             f"{', '.join(behind)} had not reported the new version after "
+             f"{HEARTBEAT_WAIT_MINUTES} minutes. Check /status.",
+             details=str(final))
         return 3
 
     log(f"DONE. All four on {target}, paused and resumed cleanly.")
-    announce(db, "info",
-             f"Release {target} shipped at {window:%H:%M} Tashkent. All four public bots "
-             f"were paused, published and resumed; nobody was active during the "
-             f"window. /status to confirm.",
-             details=str(final))
+    tell(state, "info",
+         f"Release {target} shipped at {window:%H:%M} Tashkent. All four public bots "
+         f"were paused, published and resumed; nobody was active during the "
+         f"window. /status to confirm.",
+         details=str(final))
     return 0
 
 

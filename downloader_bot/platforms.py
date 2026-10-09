@@ -37,8 +37,20 @@ TIKTOK_RE = re.compile(
 # hands out whichever one the sharer was on. Allowing only `www.` meant a link
 # from anywhere but the default host was answered with "that is not a link I
 # recognise", which reads as the bot not supporting Pinterest at all.
+#
+# What follows `pinterest.` is a top-level domain and nothing else: com, a
+# country code (pinterest.ca, pinterest.de), or the two-part forms
+# (pinterest.co.uk, pinterest.com.au). It used to be `[a-z.]+`, which is any
+# domain at all that begins with "pinterest." -- `pinterest.attacker.example`
+# was a Pinterest link, and the pin resolvers fetch whatever address they are
+# given and follow it wherever it leads, so a stranger's link could point this
+# container at any address it could reach, and at the `og:image` that page
+# named after that. See net.py, which refuses the addresses no link to a
+# public site should ever lead to.
 PINTEREST_RE = re.compile(
-    r"https?://(?:[a-z0-9-]{1,8}\.)?(?:pinterest\.[a-z.]+|pin\.it)/\S+", re.IGNORECASE
+    r"https?://(?:[a-z0-9-]{1,8}\.)?"
+    r"(?:pinterest\.(?:com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})|pin\.it)/\S+",
+    re.IGNORECASE,
 )
 REDDIT_RE = re.compile(
     r"https?://(?:www\.|old\.|m\.)?reddit\.com/r/\S+|https?://redd\.it/\S+",
@@ -83,6 +95,13 @@ def detect_platform(text: str) -> tuple[str, str] | None:
     return None
 
 
+# What a Reddit or X answer may weigh: the 8 MB that resolvers.PAGE_LIMIT_BYTES
+# allows a provider's page, as a constant of its own because this module
+# depends on net.py alone and should not start importing the provider chain
+# (and a post's JSON or a tweet is far under it anyway).
+TEXT_PAGE_LIMIT_BYTES = 8 * 1024 * 1024
+
+
 # ---------- Reddit: public .json endpoint, no auth ----------
 
 async def fetch_reddit_post(url: str) -> dict:
@@ -97,7 +116,15 @@ async def fetch_reddit_post(url: str) -> dict:
         "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    resp = await net.client().get(json_url, headers=headers, timeout=15)
+    # Read through net.read_page, not `.get()`: `.get()` holds whatever the
+    # server sends, decoded however it was encoded, and a post's JSON is a
+    # page like any other (see net.body_chunks for what that can cost).
+    unreadable = "Couldn't read that Reddit post -- it may have been removed."
+    try:
+        resp = await net.read_page("GET", json_url, headers=headers, timeout=15,
+                                   limit=TEXT_PAGE_LIMIT_BYTES, too_big=lambda: FetchError(unreadable))
+    except net.BadEncoding as exc:
+        raise FetchError(unreadable) from exc
     if resp.status_code in (403, 429):
         raise FetchError(
             "Reddit blocked this request (their anti-scraping, not a bug here) -- "
@@ -181,8 +208,9 @@ async def fetch_tweet_syndication(url: str) -> dict | None:
     token = _syndication_token(tweet_id)
     api_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&token={token}&lang=en"
     try:
-        resp = await net.client().get(api_url, timeout=15)
-    except httpx.HTTPError:
+        resp = await net.read_page("GET", api_url, timeout=15, limit=TEXT_PAGE_LIMIT_BYTES,
+                                   too_big=lambda: FetchError("That tweet's answer was too big."))
+    except (httpx.HTTPError, FetchError):        # too big and unreadable encodings are FetchErrors
         return None
     if resp.status_code != 200:
         return None

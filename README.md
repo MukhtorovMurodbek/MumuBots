@@ -7,7 +7,7 @@ only to their owner.
 | | bot | what it does | folder |
 |---|---|---|---|
 | <img src="sticker_bot/logo.svg" width="28"> | **StickerBot** | Turns images, GIFs, videos and stickers into Telegram sticker packs. Co-editing by share link, bulk import from another pack or a WhatsApp export. | [`sticker_bot/`](sticker_bot) |
-| <img src="convert_bot/logo.svg" width="28"> | **ConvertBot** | Converts files between about 75 formats: pictures, video, audio, documents, e-books, spreadsheets and subtitles. Free under 3 MB, priced in ⚡ credit bought with Telegram Stars above that. | [`convert_bot/`](convert_bot) |
+| <img src="convert_bot/logo.svg" width="28"> | **ConvertBot** | Converts files between about 90 formats: pictures, video, audio, documents, e-books, spreadsheets, subtitles, camera raw photos and archives. Free under 3 MB, priced in ⚡ credit bought with Telegram Stars above that. | [`convert_bot/`](convert_bot) |
 | <img src="downloader_bot/logo.svg" width="28"> | **DownloaderBot** | Paste an Instagram, TikTok, Pinterest, Reddit or X link and get the media back. Text posts come back as a rendered card. Files over 50 MB, up to 2000 MB, for ⚡ credit -- only for somebody who switched that on in `/settings`. | [`downloader_bot/`](downloader_bot) |
 | <img src="anon_bot/logo.svg" width="28"> | **AnonBot** | A permanent personal link anyone can use to send you anonymous messages, with real two-way replies threaded per conversation. | [`anon_bot/`](anon_bot) |
 | <img src="manager_bot/logo.svg" width="28"> | **ManagerBot** | Private. Watches the other four, forwards their crashes and donations, and can run any of their owner-only commands remotely. | [`manager_bot/`](manager_bot) |

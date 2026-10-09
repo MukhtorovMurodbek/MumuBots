@@ -23,6 +23,8 @@ family_link.py. Things that live here:
      state of people who stopped using the bot months ago.
   7. attach_flood_gate(): a ceiling on what one person can make the bot do
      per minute, applied before any handler runs.
+  8. /feedback: a suggestion or a report about anything, for whoever runs
+     the bots -- the words and nothing about who wrote them.
 """
 import asyncio
 import gc
@@ -47,7 +49,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, NetworkError, RetryAfter
+from telegram.error import BadRequest, Conflict, NetworkError, RetryAfter
 from telegram.ext import ApplicationHandlerStop, ConversationHandler, TypeHandler
 
 import db
@@ -129,6 +131,55 @@ def language_keyboard(current: str | None = None) -> InlineKeyboardMarkup:
                              callback_data=f"setlang:{code}")
         for code, label in i18n.LANGUAGE_LABELS.items()
     ]])
+
+
+# ---------------------------------------------------------------------------
+# /help in two lengths, the same in every public bot
+# ---------------------------------------------------------------------------
+# The owner, 2026-10-03, of AnonBot's: "the help message is already too long.
+# Make a brief short one, and another one with full information." And of the
+# other three, the same day: "Yes all bots should be similar or share a
+# similar template."
+#
+# So /help and /start show each bot's "help_brief" -- what it does in a few
+# bullets, then the same bullet about /feedback in every bot, its main
+# commands, and where the rest is -- with one button to the full guide,
+# "help_text", which tests/test_menu.py holds to naming every command a user
+# can send. The button turns the message into the other version in place
+# (while it is still the last thing in the chat; see live_message.py), and
+# /help full goes straight to the long one. A bot keeps its own rows of
+# buttons under either version.
+
+HELP_TOGGLE_PATTERN = r"^help:(full|brief)$"
+
+
+def wants_full_help(context) -> bool:
+    """/help full -- or all, or more."""
+    args = getattr(context, "args", None) or []
+    return bool(args) and str(args[0]).lower() in ("full", "all", "more")
+
+
+def help_keyboard(lang: str, full: bool, rows=()) -> InlineKeyboardMarkup:
+    """The button to the other version, then the bot's own rows."""
+    toggle = (InlineKeyboardButton(i18n.t(lang, "help_brief_button"), callback_data="help:brief")
+              if full else
+              InlineKeyboardButton(i18n.t(lang, "help_full_button"), callback_data="help:full"))
+    return InlineKeyboardMarkup([[toggle]] + [list(row) for row in rows if row])
+
+
+def help_toggle(build_text, rows=None):
+    """The toggle's handler, for one bot: `build_text(lang, full=...)` is the
+    bot's own build_help_text, and `rows(lang)` the button rows it keeps
+    under its help, if any. Register it with pattern=HELP_TOGGLE_PATTERN."""
+    async def toggle(update, context) -> None:
+        query = update.callback_query
+        await query.answer()
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        full = query.data == "help:full"
+        await live_message.edit_in_place(
+            query.message, context.bot, build_text(lang, full=full),
+            reply_markup=help_keyboard(lang, full, rows(lang) if rows else ()))
+    return toggle
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +645,8 @@ async def _credit_topup(update_or_chat, context, user, amount: int, lang: str,
     sandbox path cannot drift apart -- which for a thing that hands out
     credit is the drift that matters.
 
-    Returns the text to send. It always names three things: what was
+    Returns the text to send, or None for a payment that was already credited
+    (see family_link.topup): then there is nothing to say. It always names three things: what was
     charged, what was credited, and what the credit can and cannot do. The
     last of those is not decoration -- credit is worth more than the Stars
     paid for it and cannot be paid back out, so a message that only said
@@ -603,7 +655,13 @@ async def _credit_topup(update_or_chat, context, user, amount: int, lang: str,
     """
     await asyncio.to_thread(db.update_star_transaction, payload, "paid", charge_id)
     result = await asyncio.to_thread(family_link.topup, user.id, amount,
-                                     "sandbox top-up" if sandbox else "stars top-up")
+                                     "sandbox top-up" if sandbox else "stars top-up", charge_id)
+    if result is None:
+        # Telegram delivered a payment it had already delivered. It was credited
+        # the first time; crediting it again is the person paying once and being
+        # paid twice, and thanking them twice is just noise.
+        emit_event("warning", "payment", "A Stars payment was delivered twice and credited once.")
+        return None
     # `total` and `convert_bot` are for the bots that take donations: there the
     # thank-you says the credit arrived in ConvertBot, the one place it can be
     # spent. ConvertBot's own wording does not use them.
@@ -904,6 +962,8 @@ async def donation_payment_received(update, context) -> None:
     if sp.currency == "XTR":
         text = await _credit_topup(update, context, user, sp.total_amount, lang,
                                    sp.invoice_payload, sp.telegram_payment_charge_id)
+        if text is None:
+            return
         await update.message.reply_text(text)
     else:
         await asyncio.to_thread(
@@ -1411,6 +1471,8 @@ def privacy_text(lang: str) -> str:
         + collapsed(i18n.t(lang, "privacy_stored")),
         heading(i18n.t(lang, "privacy_problems_heading")) + "\n"
         + collapsed(i18n.t(lang, "privacy_problems")),
+        heading(i18n.t(lang, "privacy_feedback_heading")) + "\n"
+        + body(i18n.t(lang, "privacy_feedback")),
         heading(i18n.t(lang, "privacy_seen_by_heading")) + "\n"
         + body(i18n.t(lang, "privacy_seen_by")) + "\n"
         + body(i18n.t(lang, "privacy_others")),
@@ -1694,6 +1756,10 @@ def cancel_items(context, lang: str) -> list[CancelItem]:
         items.append(CancelItem("donation",
                                 i18n.t(lang, "cancel_item_donation"),
                                 i18n.t(lang, "cancel_button_donation")))
+    if context.user_data.get(FEEDBACK_PROMPT_KEY):
+        items.append(CancelItem("feedback",
+                                i18n.t(lang, "cancel_item_feedback"),
+                                i18n.t(lang, "cancel_button_feedback")))
     return items
 
 
@@ -1702,6 +1768,8 @@ def cancel_shared_item(context, lang: str, key: str) -> str | None:
     None if that key is not ours or was not pending after all."""
     if key == "donation" and context.user_data.pop("donate_custom_currency", None):
         return i18n.t(lang, "cancel_item_donation")
+    if key == "feedback" and context.user_data.pop(FEEDBACK_PROMPT_KEY, None):
+        return i18n.t(lang, "cancel_item_feedback")
     return None
 
 
@@ -1832,6 +1900,139 @@ async def keep_going(update, context, lang: str) -> None:
     await live_message.edit_in_place(
         update.callback_query.message, context.bot, i18n.t(lang, "cancel_kept")
     )
+
+
+# ---------------------------------------------------------------------------
+# /feedback
+# ---------------------------------------------------------------------------
+# A way to write to whoever runs the bots, about anything. The owner,
+# 2026-10-03: "make a new command for user feedback, where they can send a
+# message with a suggestion or a report about anything."
+#
+# What is kept is the words and nothing about who wrote them: the bot, the
+# language and the time (family_link.save_feedback). ManagerBot delivers it to
+# the owner, each one as it arrives or all of them in the nightly report --
+# their switch, in ManagerBot's /feedback.
+#
+# It is one-way, and says so wherever it is mentioned -- the question, the
+# thank-you, /help, /privacy. Offered a way to reply, the owner chose not to:
+# "Make the feedback one sided. I can only see the text copied and sent by the
+# bots. Make sure its mentioned anywhere that the feedback is read only for me."
+#
+# Two ways to send it: `/feedback <text>` in one go, or `/feedback` alone,
+# which asks with a ForceReply. The answer is taken only when it is a reply to
+# that question, and that rule matters most in AnonBot, where nearly every
+# message is a reply: an owner who taps /feedback and then answers a guest
+# before writing anything must have the answer reach the guest, not the
+# person who runs the bots.
+
+FEEDBACK_PROMPT_KEY = "feedback_prompt"
+FEEDBACK_PER_DAY = int(os.environ.get("FEEDBACK_PER_DAY", "5"))
+# Telegram's own ceiling on a message, which an answer cannot pass anyway; a
+# `/feedback <text>` typed in one go is held to the same.
+FEEDBACK_MAX_CHARS = 4096
+_COMMAND_WORD = re.compile(r"^/\S*\s*")
+
+# user id -> monotonic times of what they sent in the last day. In memory, for
+# the reason the flood gate is: one process holds the polling lease, and a
+# redeploy forgetting the count costs at most one more day's allowance.
+_feedback_sent: "OrderedDict[int, deque]" = OrderedDict()
+
+
+def _feedback_room(user_id: int) -> bool:
+    """Whether this person may send another one today."""
+    if FEEDBACK_PER_DAY <= 0:
+        return True
+    window = _feedback_sent.get(user_id)
+    if not window:
+        return True
+    now = time.monotonic()
+    while window and now - window[0] > 86400:
+        window.popleft()
+    return len(window) < FEEDBACK_PER_DAY
+
+
+def _feedback_used(user_id: int) -> None:
+    window = _feedback_sent.setdefault(user_id, deque())
+    _feedback_sent.move_to_end(user_id)
+    window.append(time.monotonic())
+    _flood_trim(_feedback_sent)
+
+
+async def _ask_for_feedback(message, context, lang: str, key: str = "feedback_ask") -> None:
+    prompt = await message.reply_text(
+        i18n.t(lang, key),
+        reply_markup=ForceReply(selective=True,
+                                input_field_placeholder=i18n.t(lang, "feedback_placeholder")),
+    )
+    context.user_data[FEEDBACK_PROMPT_KEY] = prompt.message_id
+    remember_force_reply(context, prompt)
+
+
+async def _take_feedback(update, context, lang: str, text: str) -> None:
+    """Keep it for the owner and say so -- or say exactly why not."""
+    message = update.effective_message
+    user_id = update.effective_user.id
+    if not _feedback_room(user_id):
+        await message.reply_text(i18n.t(lang, "feedback_limit", per_day=FEEDBACK_PER_DAY))
+        return
+    try:
+        await asyncio.to_thread(family_link.save_feedback, lang, text[:FEEDBACK_MAX_CHARS])
+    except Exception:
+        logging.getLogger(__name__).warning("Could not keep a piece of feedback", exc_info=True)
+        await message.reply_text(i18n.t(lang, "feedback_failed"))
+        return
+    _feedback_used(user_id)
+    await message.reply_text(i18n.t(lang, "feedback_thanks"))
+
+
+async def feedback_command(update, context) -> None:
+    """/feedback [text] -- send it now, or be asked for it."""
+    message = update.effective_message
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    # The message's own text rather than context.args, which splits on
+    # whitespace and would flatten a paragraph into one line.
+    text = _COMMAND_WORD.sub("", message.text or "", count=1).strip()
+    if text:
+        await _take_feedback(update, context, lang, text)
+        return
+    await _ask_for_feedback(message, context, lang)
+
+
+def _answers_feedback_prompt(update, context) -> bool:
+    prompt = context.user_data.get(FEEDBACK_PROMPT_KEY)
+    replied = getattr(update.effective_message, "reply_to_message", None)
+    return bool(prompt) and replied is not None and replied.message_id == prompt
+
+
+async def awaited_text_received(update, context) -> None:
+    """Register in a group before your bot's own message handling, with
+    `(filters.TEXT | filters.REPLY) & ~filters.COMMAND` -- see track_activity
+    for why it needs a group of its own. It takes the two things this file
+    asks somebody to type: the answer /feedback asked for, and a custom
+    donation amount. One handler for both, because python-telegram-bot runs
+    one handler per group and both would match the same message.
+
+    A no-op for anything else, which then reaches the bot as usual. When it
+    takes a message it stops it there (ApplicationHandlerStop), so feedback is
+    never also relayed, converted or downloaded."""
+    message = update.effective_message
+    if message is None:
+        return
+    if _answers_feedback_prompt(update, context):
+        context.user_data.pop(FEEDBACK_PROMPT_KEY, None)
+        context.user_data.pop(FORCE_REPLY_KEY, None)
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        text = (message.text or "").strip()
+        if text:
+            await _take_feedback(update, context, lang, text)
+        else:
+            # A photo or a voice note sent as the answer. The words are the
+            # whole of what is kept, so ask again rather than keep nothing.
+            await _ask_for_feedback(message, context, lang, "feedback_text_only")
+        raise ApplicationHandlerStop
+    if message.text is not None:
+        await donate_custom_amount_received(update, context)
 
 
 # ---------------------------------------------------------------------------
@@ -2003,6 +2204,61 @@ def note_network_ok() -> None:
         emit_event("info", "network", "Telegram is reachable again.")
     _network_blips = 0
     _network_alerted = False
+
+
+# ---------------------------------------------------------------------------
+# A Conflict is one blip or a second copy -- only a run of them is the second
+# ---------------------------------------------------------------------------
+# Telegram answers a getUpdates with "terminated by other getUpdates request"
+# when two requests for the same token overlap. A second copy of the bot
+# polling the same token does that on every poll cycle. But a single one is
+# also what a ~90 s network/database stall leaves behind (2026-10-09): the
+# bot's own request was still in flight when its retry arrived. Filing every
+# one as a crash woke the owner for a false alarm, so one is logged as a
+# warning and only a run of them is reported -- once.
+CONFLICT_ALERT_COUNT = 3        # this many Conflicts ...
+CONFLICT_ALERT_WINDOW_S = 120   # ... inside this many seconds means a second copy
+CONFLICT_QUIET_RESET_S = 600    # seconds with no Conflict at all before it may alert again
+
+# Monotonic times of the most recent Conflicts (only the last few matter), when
+# the latest was, and whether this run has been reported. Per process: every
+# bot is its own process in the base edition, and the combined edition loads a
+# separate copy of this module per bot, the same as _network_blips above.
+_conflict_times: "deque[float]" = deque(maxlen=CONFLICT_ALERT_COUNT)
+_conflict_last: "float | None" = None
+_conflict_alerted = False
+
+
+def note_conflict(exc: BaseException) -> None:
+    """A Conflict from the long poll (no update behind it). Counted and logged
+    as a warning, never a crash -- until CONFLICT_ALERT_COUNT of them arrive
+    within CONFLICT_ALERT_WINDOW_S, which is a second copy polling the same
+    token and is worth exactly one report. After that it stays quiet until
+    CONFLICT_QUIET_RESET_S pass with no Conflict, then counts afresh.
+
+    The log line carries numbers only: no token, and not the text of the error."""
+    global _conflict_last, _conflict_alerted
+    now = time.monotonic()
+    if _conflict_last is not None and now - _conflict_last >= CONFLICT_QUIET_RESET_S:
+        _conflict_times.clear()
+        _conflict_alerted = False
+    _conflict_last = now
+    _conflict_times.append(now)
+    in_window = sum(1 for seen in _conflict_times if now - seen <= CONFLICT_ALERT_WINDOW_S)
+    logging.getLogger(__name__).warning(
+        "Conflict on getUpdates: %s within the last %s s (a report needs %s)",
+        in_window, CONFLICT_ALERT_WINDOW_S, CONFLICT_ALERT_COUNT,
+    )
+    if in_window >= CONFLICT_ALERT_COUNT and not _conflict_alerted:
+        _conflict_alerted = True
+        message = (
+            "Another copy of this bot seems to be polling with the same token: "
+            f"{in_window} conflicts within {CONFLICT_ALERT_WINDOW_S} seconds"
+        )
+        logging.getLogger(__name__).error(message)
+        report = Conflict(message)
+        report.__cause__ = exc
+        record_error(report)
 
 
 def record_error(exc: BaseException) -> None:
@@ -2571,7 +2827,8 @@ async def error_handler(update, context) -> None:
     already handled inline elsewhere).
 
     A dropped long poll reaches here too, and is not a crash -- see
-    is_transient_network_error above."""
+    is_transient_network_error above. Nor is a single Conflict from the long
+    poll -- see note_conflict."""
     # Only a failure with no update behind it is the long poll. A network
     # error raised while handling somebody's message means that person asked
     # for something and did not get it, and that is not a blip however
@@ -2579,6 +2836,11 @@ async def error_handler(update, context) -> None:
     # reported like any other failure.
     if update is None and is_transient_network_error(context.error):
         note_network_blip(context.error)
+        return
+    # The same reasoning for a Conflict: only the poll's own is counted, one
+    # raised while handling an update is reported like any other failure.
+    if update is None and isinstance(context.error, Conflict):
+        note_conflict(context.error)
         return
     incident = problems.new_incident()
     logging.getLogger(__name__).error(

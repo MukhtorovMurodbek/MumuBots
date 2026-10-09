@@ -76,6 +76,16 @@ ORDINARY = [
 # that name and ".jpeg" and ".jpg" must not become two buttons. Sanitising and
 # normalising are separate jobs and this is the second one, so it is asserted
 # separately -- and only for the bot that does it.
+# ...and one thing more: an archive's name ends in two extensions, and only the
+# pair says what it is (formats.compound_extension). DownloaderBot has no use
+# for that and keeps "gz".
+COMPOUND = [
+    ("archive.tar.gz", "tgz"),
+    ("PHOTOS.TAR.BZ2", "tbz2"),
+    ("a.tar.xz", "txz"),
+    ("backup.sql.gz", "gz"),           # a gzipped single file is not an archive of files
+    ("x.tar.gz.exe", "exe"),           # the pair must END the name
+]
 NORMALISED = [
     ("clip.jpeg", "jpg"),
     ("scan.TIF", "tiff"),
@@ -106,7 +116,7 @@ def check_convert_bot() -> None:
         check(f"convert: {name[:34]!r} stays in the upload directory",
               under(bot.UPLOAD_DIR, path), str(path))
 
-    for name, expected in ORDINARY + NORMALISED:
+    for name, expected in [pair for pair in ORDINARY if pair[0] != "archive.tar.gz"] + NORMALISED + COMPOUND:
         check(f"convert: {name!r} gives {expected!r}",
               bot._ext_of(name, "") == expected, bot._ext_of(name, ""))
 
@@ -142,6 +152,88 @@ def check_convert_bot() -> None:
     # normalisation above would quietly redirect one real format to another.
     shadowed = sorted(set(formats.ALIASES) & set(formats.CATEGORY_OF))
     check("convert: no alias shadows a real format", not shadowed, str(shadowed))
+
+    check_sweeper(bot)
+
+
+def check_sweeper(bot) -> None:
+    """The upload directory's sweeper takes old FOLDERS as well as old files.
+
+    A conversion that is killed (its time limit, Stop, the out-of-memory
+    killer) never runs the `finally` that removes the folder an archive was
+    unpacked into, and the sweeper removed files only: a 2.7 MB .tgz left
+    629 MB on a disk of 1 GB (review, 2026-10-07)."""
+    import tempfile
+    import time
+
+    saved = bot.UPLOAD_DIR
+    bot.UPLOAD_DIR = pathlib.Path(tempfile.mkdtemp(prefix="convertbot-sweep-"))
+    now = time.time()
+
+    def file_aged(name, age):
+        path = bot.UPLOAD_DIR / name
+        path.write_bytes(b"x")
+        os.utime(path, (now - age, now - age))
+        return path
+
+    def folder_aged(name, age):
+        """A folder like the one an archive leaves: nested, with a read-only file and a read-only folder in it."""
+        path = bot.UPLOAD_DIR / name
+        (path / "deep" / "er").mkdir(parents=True)
+        (path / "deep" / "er" / "file.bin").write_bytes(b"x" * 100)
+        (path / "ro.txt").write_bytes(b"r")
+        os.chmod(path / "ro.txt", 0o444)
+        os.chmod(path / "deep" / "er", 0o555)
+        os.utime(path, (now - age, now - age))
+        return path
+
+    try:
+        old_file, new_file = file_aged("1-old.bin", 5000), file_aged("1-new.bin", 5)
+        old_folder, new_folder = folder_aged("1-ab-out-contents", 5000), folder_aged("1-cd-out-contents", 5)
+        kept_folder = folder_aged("1-ef-out-contents", 5000)
+        kept_file = file_aged("1-kept.bin", 5000)
+        removed = bot._sweep_uploads(max_age_seconds=900, keep={str(kept_folder), str(kept_file)})
+        check("convert: the sweeper removes an old file and an old folder", not old_file.exists() and not old_folder.exists(),
+              str(sorted(p.name for p in bot.UPLOAD_DIR.iterdir())))
+        check("convert: ... and counts both", removed == 2, str(removed))
+        check("convert: ... a young file and a young folder stay", new_file.exists() and new_folder.exists())
+        check("convert: ... so does an old folder or file a running job still needs (the keep rule)",
+              kept_folder.exists() and (kept_folder / "deep" / "er" / "file.bin").exists() and kept_file.exists())
+        # A job's own folder and padded copy get the longest a job can run, not
+        # the upload TTL: with the time limit raised to an hour, 2000 s is young.
+        saved_limit = bot.jobs.TIME_LIMIT_S
+        bot.jobs.TIME_LIMIT_S = 3600
+        try:
+            busy_folder = folder_aged("1-gh-out-contents", 2000)
+            busy_copy = file_aged("1-gh-out-source.rar", 2000)
+            stale_upload = file_aged("1-stale.bin", 2000)
+            bot._sweep_uploads(max_age_seconds=900)
+            check("convert: ... a running job's folder and padded copy outlive the TTL when jobs may run longer",
+                  busy_folder.exists() and busy_copy.exists() and not stale_upload.exists())
+        finally:
+            bot.jobs.TIME_LIMIT_S = saved_limit
+        # bsdtar dates an unpacked folder from the archive's `./` (1970 is
+        # possible): a running job's things are known by its stem, not its date.
+        running = folder_aged("1-ij-out-contents", 10 ** 9)
+        running_copy = file_aged("1-ij-out-source.7z", 10 ** 9)
+        running_result = file_aged("1-ij-out.zip", 10 ** 9)
+        not_ours = folder_aged("someone-elses-folder", 5000)
+        bot._sweep_uploads(max_age_seconds=900, busy_stems={"1-ij-out"})
+        check("convert: ... a running job's folder, copy and result stay however old their dates say",
+              running.exists() and running_copy.exists() and running_result.exists())
+        check("convert: ... and a folder that is not an unpacked archive is never swept", not_ours.exists())
+        bot.convert_utils.remove_tree(not_ours)
+        present = len(list(bot.UPLOAD_DIR.iterdir()))
+        removed = bot._sweep_uploads(max_age_seconds=0)
+        check("convert: at startup (age 0) every file and folder goes, read-only ones too",
+              not list(bot.UPLOAD_DIR.iterdir()), str(sorted(p.name for p in bot.UPLOAD_DIR.iterdir())))
+        check("convert: ... and the count is all of them", removed == present, f"{removed} of {present}")
+        if os.name == "nt":
+            print("  (convert: Windows has no 0500 folders that block deletion: only the read-only file checks bite here)")
+    finally:
+        import convert_utils
+        convert_utils.remove_tree(bot.UPLOAD_DIR)
+        bot.UPLOAD_DIR = saved
 
 
 def check_downloader_bot() -> None:

@@ -149,7 +149,12 @@ from shared_features import (
     donate_amount_chosen,
     donate_fiat_amount_chosen,
     donate_custom_button_chosen,
-    donate_custom_amount_received,
+    awaited_text_received,
+    feedback_command,
+    HELP_TOGGLE_PATTERN,
+    help_keyboard,
+    help_toggle,
+    wants_full_help,
     donation_precheckout_callback,
     donation_payment_callback,
     setup_logging,
@@ -191,7 +196,11 @@ POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT", "30"))
 TITLE, EDITING, RENAME = range(3)
 
 
-def build_help_text(lang: str) -> str:
+def build_help_text(lang: str, full: bool = False) -> str:
+    """The short version unless asked for the long one -- the family's help
+    template (shared_features, "/help in two lengths")."""
+    if not full:
+        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
     return i18n.t(lang, "help_text") + sibling_bots_blurb(BOT_NAME, lang)
 
 
@@ -226,6 +235,7 @@ BOT_COMMANDS = [
     BotCommand("whomade", "Who made a pack — send me one of its stickers"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
+    BotCommand("feedback", "Suggest something, or report a problem"),
     BotCommand("balance", "Your ⚡ credit"),
     BotCommand("donate", "Chip in for hosting costs"),
     BotCommand("paysupport", "Trouble with a payment"),
@@ -280,18 +290,18 @@ def slugify(text: str) -> str:
     return slug
 
 
+def help_rows(lang: str) -> list:
+    """New pack and My packs: under /help, and under /start with the
+    sibling bots after them. The Help button that used to be here is the
+    family's full-guide button now (shared_features.help_keyboard)."""
+    return [[
+        InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="menu_newpack"),
+        InlineKeyboardButton(i18n.t(lang, "btn_my_packs"), callback_data="menu_mypacks"),
+    ]]
+
+
 def start_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="menu_newpack"),
-            InlineKeyboardButton(i18n.t(lang, "btn_my_packs"), callback_data="menu_mypacks"),
-        ],
-        [InlineKeyboardButton(i18n.t(lang, "btn_help"), callback_data="menu_help")],
-    ]
-    sibling_row = sibling_bots_keyboard_row(BOT_NAME)
-    if sibling_row:
-        rows.append(sibling_row)
-    return InlineKeyboardMarkup(rows)
+    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)])
 
 
 def packs_keyboard(packs: list[tuple[str, str]], lang: str) -> InlineKeyboardMarkup:
@@ -779,16 +789,19 @@ async def start_coedit_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The Help button on a start menu sent before 2.1.0: the full guide."""
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.callback_query.answer()
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_start")]])
-    await edit_in_place(update.callback_query.message, context.bot, build_help_text(lang), reply_markup=kb)
+    await edit_in_place(update.callback_query.message, context.bot, build_help_text(lang, full=True),
+                        reply_markup=help_keyboard(lang, True, help_rows(lang)))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_start")]])
-    await update.message.reply_text(build_help_text(lang), reply_markup=kb)
+    full = wants_full_help(context)
+    await update.message.reply_text(build_help_text(lang, full=full),
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
 
 
 async def menu_mypacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1787,10 +1800,12 @@ def main():
     # who was here, and /status is supposed to say so.
     attach_flood_gate(app, ADMIN_IDS)
     # Runs after track_activity but before every other handler (ConversationHandler
-    # included) -- a no-op unless a "Custom" donate button was just tapped, in
-    # which case it consumes the reply and stops it from also being treated as,
-    # e.g., a pack title (see donate_custom_amount_received's docstring).
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, donate_custom_amount_received), group=-1)
+    # included) -- a no-op unless /feedback or a "Custom" donate button has
+    # just asked for something to be typed, in which case it takes the answer
+    # and stops it from also being treated as, e.g., a pack title (see
+    # awaited_text_received's docstring).
+    app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
+                                   awaited_text_received), group=-1)
 
     conv = ConversationHandler(
         entry_points=[
@@ -1887,6 +1902,9 @@ def main():
     app.add_handler(CommandHandler("mypacks", mypacks_command))
     app.add_handler(CommandHandler("addsticker", addsticker_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+                                         pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("whomade", whomade_command))
     app.add_handler(CommandHandler("whois", whois_command))  # owner-only
     app.add_handler(CommandHandler("messageas", messageas_command))  # owner-only

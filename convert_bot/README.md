@@ -3,8 +3,8 @@
 # ConvertBot
 
 A Telegram bot that converts files between formats: pictures, video, audio,
-documents, e-books, spreadsheets and subtitles — around seventy-five formats
-in, forty out, and some eight hundred combinations, up to 2000 MB. Small
+documents, e-books, spreadsheets, subtitles, camera raw photos and archives —
+around ninety formats in, fifty out, and some nine hundred combinations, up to 2000 MB. Small
 files are free; larger ones are priced in ⚡ credit, bought with Telegram
 Stars in the chat.
 
@@ -31,7 +31,8 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/start` | Instructions. The first `/start` from a new user asks which language to use, once. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions on their own. |
+| `/help` | The instructions in short, with a button for the full guide; `/help full` goes straight to it. |
+| `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
 | `/deletemydata` | Erases what the bot holds about the person asking, after one confirmation. |
@@ -61,12 +62,13 @@ at.
 
 | | reads | writes |
 |---|---|---|
-| **Pictures** | PNG, JPEG, WEBP, BMP, TIFF, ICO, HEIC/HEIF, AVIF, JPEG 2000, PSD, TGA, PCX, DDS, PPM, SGI, XBM, XPM, ICNS, QOI, BLP, SVG | PNG, JPEG, WEBP, **PDF**, ICO, TIFF, BMP, GIF, AVIF, HEIC, JPEG 2000, TGA, PPM, QOI, ICNS |
+| **Pictures** | PNG, JPEG, WEBP, BMP, TIFF, ICO, HEIC/HEIF, AVIF, JPEG 2000, PSD, TGA, PCX, DDS, PPM, SGI, XBM, XPM, ICNS, QOI, BLP, SVG — and camera raw: CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 (to JPEG, PNG, WEBP, AVIF, HEIC or a 16-bit TIFF only) | PNG, JPEG, WEBP, **PDF**, ICO, TIFF, BMP, GIF, AVIF, HEIC, JPEG 2000, TGA, PPM, QOI, ICNS |
 | **Video** | MP4, MOV, M4V, AVI, WEBM, MKV, FLV, WMV, TS, M2TS, MPEG, 3GP, OGV, ASF, GIF, APNG | MP4, WEBM, MKV, MOV, AVI, GIF, animated WEBP, APNG — and the audio on its own, in any audio format below |
 | **Audio** | MP3, WAV, OGG, Opus, M4A, AAC, FLAC, AIFF, WMA, AMR, AC3, MP2, AU, CAF, W64, VOC | MP3, M4A, AAC, OGG, Opus, WAV, FLAC, AIFF, WMA, AC3 |
 | **Documents** | PDF, DOCX, EPUB, MOBI, FB2, CBZ, XPS, Markdown, HTML, plain text | PDF, PNG, JPEG, WEBP, TIFF, SVG, plain text, HTML, Markdown |
 | **Data** | CSV, TSV, JSON, YAML, XLSX, XML | JSON, CSV, TSV, YAML, XLSX, Markdown table, HTML table, PDF |
 | **Subtitles** | SRT, VTT, ASS/SSA | SRT, VTT, ASS — or the transcript with the timings removed |
+| **Archives** | ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, 7z, RAR | ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, 7z (RAR is read, never written) |
 
 `/formats` says the same thing inside the chat, and answers for one format at
 a time. What is offered is what the running host can actually do: the
@@ -88,6 +90,23 @@ Some combinations worth knowing about:
 - A **CSV, JSON or XML export** becomes an XLSX spreadsheet, and a workbook
   becomes a CSV per sheet.
 - **Subtitles** convert between SRT, VTT and ASS, or reduce to the transcript.
+- A **camera raw photo** — a phone's DNG, a camera's CR3, NEF or ARW — is developed with the camera's own
+  white balance, the right way up, into a JPEG, PNG, WEBP, AVIF or HEIC, or a 16-bit TIFF for editing.
+  The full picture is made up to 40 megapixels; a bigger one is made at half size (a quarter of the
+  pixels) and the menu says so before it is paid for; past 110 megapixels it is refused, because even
+  the half-size decode needs a gigabyte. LibRaw takes about 13 MB a megapixel (measured).
+- A **RAR or 7z that a phone cannot open** becomes a ZIP; ZIP, TAR and its gzip, bzip2 and xz forms,
+  and 7z convert between each other. An archive is opened in a folder of its own and packed again:
+  at most 10,000 entries and 300 MB expanded, no entry expanding more than 200-fold, names that
+  point outside the archive refuse all of it (so do a file and a folder with one name, a tar header
+  the size of a file, and, for a ZIP or 7z result, names that are not text), links and devices are
+  dropped rather than followed, a password-protected archive is refused (the bot never asks for one),
+  and an archive inside an archive is carried through as a file, not opened. What an archive leaves in
+  the upload folder when its conversion is killed is removed when the job ends, and by the sweeper.
+- A **4K HDR video** (what a recent phone films) is converted at 1080p, and any 4K video going to
+  WEBM likewise: at full size they need more memory than the server has (measured: 1.3 and 1.2 GB).
+  The menu says so before the price. MP4, MKV and MOV from a 4K video that is not HDR keep their size;
+  a video bigger than 4K (8K, 5.7K) is brought down for every video format, HDR or not.
 
 ---
 
@@ -120,7 +139,8 @@ automatically.
 
 **Conversion.** Pillow for still pictures, `ffmpeg` for video, audio and
 subtitles, PyMuPDF for documents and e-books, and the standard library with
-`openpyxl` for structured data. Everything runs under a timeout, so a
+`openpyxl` for structured data, `rawpy` (LibRaw) for camera raw, and the standard library with
+libarchive's `bsdtar` for archives. Everything runs under a timeout, so a
 pathological input cannot occupy the process indefinitely. The staged upload
 is deleted whether the conversion succeeded or not.
 
@@ -174,9 +194,19 @@ labelled as the BT.709 it becomes. The owner's own 15-second 4K60 HDR10 clip,
 read with `defusedxml`, which refuses the entity expansion that turns a
 fourteen-line upload into gigabytes of memory or a read of a local file; YAML
 is read with `safe_load`, never `load`, which would construct arbitrary Python
-objects named in the document; and images are decoded under a pixel ceiling
-that turns a decompression bomb into a caught error rather than an
-out-of-memory kill.
+objects named in the document, and a document that repeats itself through
+anchors and aliases is counted as it would be written and refused past the
+limit a table has (a few hundred bytes of nested aliases are otherwise
+gigabytes of JSON); a page is refused if drawing it as a picture would take
+more than 100 megapixels, however small the file that says so; a table is
+checked against its row and cell limits as it is read, not after; a file nested
+too deeply, or a CSV cell over 128 KB, is refused with a sentence; and images
+are decoded under a pixel ceiling that turns a decompression bomb into a caught
+error rather than an out-of-memory kill.
+
+**Photographs.** A phone stores a portrait shot as its sensor saw it, with a tag
+that says how to turn it. The tag is applied on the way in, so a photo sent as
+a file comes out the right way up, in every format and on a PDF page.
 
 ---
 
@@ -239,6 +269,8 @@ python db_merge.py --from local --into cloud
 | `convert_utils.py` | Pictures, video, audio and subtitles; the pricing table |
 | `doc_convert.py` | PDF, e-books, Word documents, Markdown and HTML |
 | `data_convert.py` | CSV, TSV, JSON, YAML, XLSX and XML |
+| `archive_convert.py` | ZIP, TAR, 7z and RAR |
+| `raw_convert.py` | Camera raw photos |
 | `db.py` | This bot's schema, the Stars ledger, and the connection pool |
 | `i18n.py` | English, Uzbek and Russian strings |
 | `family_link.py` | Heartbeats, crash reporting, and the command queue a monitoring bot uses |

@@ -40,6 +40,7 @@ import asyncio
 import itertools
 import json
 import logging
+import math
 import os
 import shutil
 import signal
@@ -234,6 +235,12 @@ LOSSLESS_BYTES_PER_PIXEL = {
     "qoi": 0.5,
 }
 
+# The same for a picture developed from a camera raw file, which is not what a
+# photo the camera already made is: TIFF comes out at 16 bits a channel,
+# uncompressed -- six bytes a pixel, exactly -- where an ordinary TIFF is
+# compressed and unpredictable.
+RAW_LOSSLESS_BYTES_PER_PIXEL = {"tiff": 6.0}
+
 # Encoders with a hard ceiling of their own, in megapixels. x265 refuses more
 # than 142,606,336 luma samples (HEVC level 6.2), so HEIC of a 150 MP photo
 # fails a few seconds in with an encoder error. Leaving it off the menu is
@@ -250,6 +257,11 @@ TIMEOUT = "timeout"
 # On course to miss its limit, and stopped before it did (PROJECT_AFTER_S).
 TOO_SLOW = "too_slow"
 CRASH = "crash"
+# The converter was killed for memory: the host is too small for this file
+# (a 4K HDR video in a 1 GB container). Refunded, and told as that -- not an
+# alert, like TOO_SLOW: the size of the host is known, a smaller file is the
+# person's to send.
+NO_MEMORY = "no_memory"
 TOO_LARGE = "too_large"
 SEND_FAILED = "send_failed"
 INTERRUPTED = "interrupted"
@@ -261,7 +273,7 @@ PAUSED = "paused"
 
 # Refunded when the job had been charged: every ending except the person
 # stopping it themselves. NO_CREDIT is never charged in the first place.
-REFUNDED = frozenset({REFUSED, TIMEOUT, TOO_SLOW, CRASH, TOO_LARGE, SEND_FAILED, INTERRUPTED})
+REFUNDED = frozenset({REFUSED, TIMEOUT, TOO_SLOW, CRASH, NO_MEMORY, TOO_LARGE, SEND_FAILED, INTERRUPTED})
 
 # Worth the owner's attention: the bot's own faults. A file the bot declined
 # (REFUSED) is the bot working as designed, and an alert for every unreadable
@@ -359,6 +371,15 @@ def active_paths() -> set[str]:
     return {str(path) for job in _jobs.values() for path in job.paths}
 
 
+def active_stems() -> set[str]:
+    """The stems (job_stem) of every queued or running job: what the files and
+    folders a job makes for itself in the work directory are named after. The
+    sweeper leaves anything starting with one alone, whatever its age says --
+    an unpacked folder's mtime is whatever the ARCHIVE said its `./` was, and a
+    7z made with `-C dir .` can say 1970 (review, 2026-10-08)."""
+    return {job_stem(job) for job in _jobs.values()}
+
+
 def uncharged_total(user_id: int) -> int:
     """Credit this person's queued jobs will need when they start. Checked at
     enqueue so a queue cannot be built that the balance will not cover."""
@@ -405,41 +426,15 @@ def storage_problem(user_id: int, incoming_bytes: int, upload_dir) -> tuple[str,
     return None
 
 
-def image_megapixels(path) -> float | None:
-    """The size of a picture, read from its header without decoding it.
-
-    Pillow's own decompression-bomb ceiling is switched off for the length of
-    the read, because opening a header is not the dangerous part and this is
-    the function that decides what the ceiling is. None for anything that is
-    not a picture Pillow can read."""
-    try:
-        from PIL import Image
-    except Exception:
-        return None
-    previous = getattr(Image, "MAX_IMAGE_PIXELS", None)
-    try:
-        Image.MAX_IMAGE_PIXELS = None
-        with Image.open(path) as img:
-            width, height = img.size
-        return (width * height) / 1_000_000
-    except Exception:
-        return None
-    finally:
-        try:
-            Image.MAX_IMAGE_PIXELS = previous
-        except Exception:
-            pass
-
-
-def estimate_output_bytes(megapixels: float | None, target_ext: str) -> int | None:
-    ratio = LOSSLESS_BYTES_PER_PIXEL.get(target_ext)
+def estimate_output_bytes(megapixels: float | None, target_ext: str, raw: bool = False) -> int | None:
+    ratio = (RAW_LOSSLESS_BYTES_PER_PIXEL.get(target_ext) if raw else None) or LOSSLESS_BYTES_PER_PIXEL.get(target_ext)
     if megapixels is None or ratio is None:
         return None
     return int(megapixels * 1_000_000 * ratio)
 
 
 def unsendable_targets(megapixels: float | None, targets, in_bytes: int = 0,
-                       chat_id: int = 0) -> list[str]:
+                       chat_id: int = 0, raw: bool = False) -> list[str]:
     """The formats that would certainly come out too big to send, or that
     the encoder itself cannot produce at this size."""
     out = []
@@ -448,7 +443,7 @@ def unsendable_targets(megapixels: float | None, targets, in_bytes: int = 0,
         if megapixels is not None and ceiling is not None and megapixels > ceiling:
             out.append(target)
             continue
-        estimate = estimate_output_bytes(megapixels, target)
+        estimate = estimate_output_bytes(megapixels, target, raw)
         if estimate is not None and estimate > send_limit_for(in_bytes, estimate, chat_id):
             out.append(target)
     return out
@@ -513,6 +508,22 @@ def _parse(returncode, out: bytes, err: bytes) -> Outcome:
     return Outcome(False, CRASH, f"the worker exited {returncode} without a result. {tail}".strip())
 
 
+async def _start_worker(payload: dict):
+    """The one place a child process is started: convert_worker.py, handed its
+    job as a single JSON argument. A conversion and a look at a raw photo's size
+    both start here, so the C edition (where the worker is a section of
+    convert.py that main.py runs) rewrites exactly one line."""
+    return await asyncio.create_subprocess_exec(
+        sys.executable, "-u", str(WORKER), json.dumps(payload),
+        cwd=str(HERE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **_OWN_GROUP,
+    )
+
+
+def job_stem(job: Job) -> str:
+    """What a job's own files in the work directory are named after."""
+    return f"{job.user_id}-{job.id}-out"
+
+
 async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
     payload = {
         "in_paths": [str(path) for path in job.paths],
@@ -523,10 +534,7 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
         "max_pixels": MAX_MEGAPIXELS * 1_000_000,
         "max_memory_mb": WORKER_MAX_MEMORY_MB,
     }
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-u", str(WORKER), json.dumps(payload),
-        cwd=str(HERE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **_OWN_GROUP,
-    )
+    proc = await _start_worker(payload)
     job.proc = proc
     kept: list[bytes] = []
     errors = bytearray()
@@ -587,6 +595,140 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
     finally:
         job.proc = None
     return _parse(proc.returncode, out, err)
+
+
+# ---------------------------------------------------------------------------
+# Looking at a raw photo
+# ---------------------------------------------------------------------------
+
+# LibRaw parses the file of a stranger, in C. That used to happen on a thread of
+# the bot's own process (bot.py asked raw_convert.describe) -- and in the C
+# edition the process is five bots'. So the question is put to a short-lived
+# child, started the way a conversion is, and a crash in it costs a menu without
+# a size and nothing else.
+DESCRIBE_TIMEOUT_S = 30
+
+
+def _raw_info(answer: bytes):
+    """(the RawInfo in the child's last line of output, "") or (None, why) for
+    anything that is not exactly that. The numbers are checked against each
+    other: the child is our own code, but whatever is on its stdout is data."""
+    import raw_convert
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    if not lines:
+        return None, "no answer"
+    try:
+        data = json.loads(lines[-1])
+    except ValueError:
+        return None, "an answer that is not JSON"
+    if not isinstance(data, dict):
+        return None, "an answer that is not an object"
+    if not data.get("ok"):
+        return None, str(data.get("kind") or "crash")
+    try:
+        fields = data["info"]
+        sizes = [fields[name] for name in ("width", "height", "out_width", "out_height")]
+        sizes_mp = [fields["megapixels"], fields["out_megapixels"]]
+        half = fields["half"]
+        if (not isinstance(half, bool) or any(isinstance(n, bool) or not isinstance(n, int) or n <= 0 for n in sizes)
+                or any(isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or n <= 0
+                       for n in sizes_mp)):
+            return None, "an answer that makes no sense"
+        width, height, out_width, out_height = sizes
+        megapixels, out_megapixels = (float(n) for n in sizes_mp)
+        if (not math.isclose(megapixels, width * height / 1_000_000, rel_tol=1e-9)
+                or not math.isclose(out_megapixels, out_width * out_height / 1_000_000, rel_tol=1e-9)):
+            return None, "an answer that makes no sense"
+    except (KeyError, TypeError):
+        return None, "an answer that makes no sense"
+    return raw_convert.RawInfo(width, height, megapixels, half, out_width, out_height, out_megapixels), ""
+
+
+async def describe_raw(path, src_ext: str, timeout: float = DESCRIBE_TIMEOUT_S):
+    """raw_convert.describe(), in a child process: the RawInfo of a camera raw
+    photo, or None for one that cannot be read -- which includes a child that
+    crashed, ran past `timeout` (it is killed) or answered nonsense. None is
+    today's "unreadable": the menu says nothing about the size rather than
+    refuse a file the converter might still take."""
+    payload = {"kind": "describe_raw", "path": str(path), "src_ext": src_ext,
+               "max_memory_mb": WORKER_MAX_MEMORY_MB}
+    answered = await _ask_child(payload, timeout, "a raw photo's size")
+    if answered is None:
+        return None
+    out, returncode = answered
+    info, why = _raw_info(out)
+    if info is None:
+        # "refused" is an ordinary unreadable file; anything else is the reader failing.
+        if why != "refused":
+            logger.warning("Reading a raw photo's size failed (%s, exit %s)", why, returncode)
+        return None
+    return info
+
+
+async def _ask_child(payload: dict, timeout: float, what: str):
+    """Run one describe job in a child (see _start_worker): (its stdout, its
+    exit code), or None -- logged -- when it could not be run or overran
+    `timeout` and was killed.
+
+    At most DESCRIBE_AT_ONCE at a time: an album of ten raw photos is ten
+    uploads in a second, and ten interpreters at once beside a running
+    conversion is not what a 1 GB container is for (review, 2026-10-08)."""
+    async with _describe_slots:
+        return await _ask_child_now(payload, timeout, what)
+
+
+DESCRIBE_AT_ONCE = 2
+_describe_slots = asyncio.Semaphore(DESCRIBE_AT_ONCE)
+
+
+async def _ask_child_now(payload: dict, timeout: float, what: str):
+    proc = None
+    try:
+        proc = await _start_worker(payload)
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        await _kill(proc)
+        logger.warning("Reading %s took over %.0f s and was stopped", what, timeout)
+        return None
+    except asyncio.CancelledError:
+        await asyncio.shield(_kill(proc))
+        raise
+    except Exception as exc:
+        await _kill(proc)
+        logger.warning("Reading %s failed to run (%s)", what, type(exc).__name__)
+        return None
+    return out, proc.returncode
+
+
+def _image_size(answer: bytes) -> "float | None":
+    """Megapixels from a describe_image child's last line, or None."""
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    try:
+        data = json.loads(lines[-1])
+        width, height = data["width"], data["height"]
+    except (IndexError, ValueError, TypeError, KeyError):
+        return None
+    if not data.get("ok") or any(isinstance(n, bool) or not isinstance(n, int) or n <= 0
+                                 for n in (width, height)):
+        return None
+    return (width * height) / 1_000_000
+
+
+async def describe_image(path, timeout: float = DESCRIBE_TIMEOUT_S) -> "float | None":
+    """A picture's size in megapixels from its header, read in a child process
+    from its header, or None for one that cannot be read.
+
+    Not in this process, because "reading the header" is not always only that.
+    Pillow's ICO plugin decodes the PNG inside an icon while opening it (a
+    684 KB file claiming 16x16 held a 13000x13000 PNG: 679 MB, review of
+    2026-10-08), its WebP plugin builds an animation's canvases in open(), and
+    a TIFF's tag arrays are read whole -- all of it on a thread of the bot's
+    own process, which in the C edition is five bots'. A child that blows up
+    costs a menu without a size; the conversion itself still refuses past
+    MAX_MEGAPIXELS, in the worker."""
+    answered = await _ask_child({"kind": "describe_image", "path": str(path),
+                                 "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a picture's size")
+    return None if answered is None else _image_size(answered[0])
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +807,49 @@ def _unlink(path) -> None:
         logger.debug("Could not remove %s", path, exc_info=True)
 
 
+def remove_job_leftovers(work_dir, stem: str) -> int:
+    """Remove what a conversion named `stem` leaves in `work_dir` when it is
+    killed: the folder `<stem>-contents` an archive was unpacked into and the
+    padded copy `<stem>-source.<ext>` bsdtar reads. A job that is killed -- the
+    time limit, Stop, the out-of-memory killer -- is SIGKILLed, so no `finally`
+    in the worker ran, and a 2.7 MB .tgz left 629 MB behind (review, 2026-10-07).
+
+    Exactly those two names, directly inside `work_dir`, and nothing wider: the
+    stem is a user id, a job id and a suffix, and a name that could stand for
+    anything else is refused. A link by either name is removed as a link and
+    never followed; a folder that does not resolve to a child of `work_dir` is
+    left alone. Returns how many entries went."""
+    if not stem or stem in (".", "..") or any(sep in stem for sep in ("/", "\\", os.sep)):
+        return 0
+    try:
+        entries = list(os.scandir(work_dir))
+        base = os.path.normcase(os.path.realpath(work_dir))
+    except OSError:
+        return 0
+    import convert_utils
+    removed = 0
+    for entry in entries:
+        try:
+            contents = entry.name == f"{stem}-contents"
+            if not (contents or entry.name.startswith(f"{stem}-source.")):
+                continue
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                os.unlink(entry.path)
+            elif contents:
+                if os.path.normcase(os.path.dirname(os.path.realpath(entry.path))) != base:
+                    logger.warning("Not removing %s: it does not resolve inside the work directory", entry.name)
+                    continue
+                convert_utils.remove_tree(entry.path)
+                if os.path.lexists(entry.path):
+                    continue
+            else:
+                continue                          # a folder named like a source copy is not ours
+            removed += 1
+        except OSError:
+            logger.debug("Could not remove %s", entry.path, exc_info=True)
+    return removed
+
+
 async def _finish(job: Job, runner: Runner, kind: str | None, detail: str,
                   outcome: Outcome | None) -> None:
     try:
@@ -701,6 +886,14 @@ async def _finish(job: Job, runner: Runner, kind: str | None, detail: str,
         lock = _user_locks.get(job.user_id)
         if lock is not None and not lock.locked() and not getattr(lock, "_waiters", None):
             _user_locks.pop(job.user_id, None)
+        if job.started_at is not None:
+            # Whatever the job ended with, including the worker having been
+            # killed: see remove_job_leftovers. Last, and off the event loop
+            # (a folder of ten thousand files), so nothing above waits for it.
+            try:
+                await asyncio.to_thread(remove_job_leftovers, runner.work_dir(), job_stem(job))
+            except Exception:
+                logger.debug("Could not clean up after conversion %s", job.id, exc_info=True)
 
 
 async def _watch_progress(job: Job, runner: Runner, limit: int) -> None:
@@ -760,8 +953,7 @@ async def _run(job: Job, runner: Runner) -> None:
                         watcher = asyncio.ensure_future(_watch_progress(job, runner, limit))
                         card_watcher = asyncio.ensure_future(_watch_card(job, runner))
                         try:
-                            outcome = await run_worker(job, runner.work_dir(),
-                                                       f"{job.user_id}-{job.id}-out", limit)
+                            outcome = await run_worker(job, runner.work_dir(), job_stem(job), limit)
                         finally:
                             watcher.cancel()
                         if not outcome.ok:

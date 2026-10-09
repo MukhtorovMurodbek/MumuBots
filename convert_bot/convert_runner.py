@@ -342,6 +342,7 @@ class ConvertRunner(jobs.Runner):
             jobs.TOO_SLOW: ("job_reason_too_slow", {"minutes": max(2, round(job.extra.get("projected_s", 0) / 60)),
                                                     "limit": max(1, round(limit / 60))}),
             jobs.CRASH: ("job_reason_crash", {}),
+            jobs.NO_MEMORY: ("job_reason_no_memory", {}),
             jobs.TOO_LARGE: ("job_reason_too_large", {"target": _upper(job.target_ext),
                                                       "mb": detail.split()[0] if detail else "?",
                                                       "limit": job.send_limit // (1024 * 1024)}),

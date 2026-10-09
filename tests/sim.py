@@ -68,6 +68,19 @@ MEDIA_FIELDS = tuple(MEDIA_PAYLOADS)
 UNCAPTIONABLE = ("sticker", "video_note")
 
 
+def _bare(emoji: str) -> str:
+    """An emoji without the variation selector, which Telegram's documentation
+    and python-telegram-bot's own list disagree about for four of them."""
+    return (emoji or "").replace("️", "")
+
+
+def _bot_reaction_set() -> set:
+    """What a bot may react with: python-telegram-bot's copy of Telegram's
+    list (ReactionTypeEmoji), which is the real library the sim runs on."""
+    from telegram.constants import ReactionEmoji
+    return {_bare(item.value) for item in ReactionEmoji}
+
+
 # ---------------------------------------------------------------------------
 # The server
 # ---------------------------------------------------------------------------
@@ -140,8 +153,34 @@ class FakeTelegram:
         self._attach_reply(message, chat_id, data)
         self._attach_markup(message, data)
         self.log.append({"endpoint": "sendMessage", "chat_id": chat_id,
-                         "text": message["text"], "message_id": message["message_id"]})
+                         "text": message["text"], "message_id": message["message_id"],
+                         "silent": bool(data.get("disable_notification"))})
         return self._store(chat_id, message)
+
+    def _api_set_message_reaction(self, data):
+        """The bot's own reaction on a message, as Telegram keeps it: one per
+        bot, from the standard set, and never a custom emoji or a paid one --
+        the refusals a real bot meets, with the real errors' words (asked of
+        Telegram with TestBot on 2026-10-03, which also showed that a bot may
+        react to its own message and that the same reaction twice is fine)."""
+        chat_id, message_id = int(data["chat_id"]), int(data["message_id"])
+        self._guard(chat_id)
+        message = self.find(chat_id, message_id)
+        if message is None:
+            raise BadRequest("Bad Request: message to react not found")
+        reaction = _plain(data.get("reaction") or [])
+        if isinstance(reaction, dict):
+            reaction = [reaction]
+        if len(reaction) > 1:
+            raise BadRequest("Bad Request: REACTIONS_TOO_MANY")
+        allowed = _bot_reaction_set()
+        for item in reaction:
+            if item.get("type") != "emoji" or _bare(item.get("emoji")) not in allowed:
+                raise BadRequest("Bad Request: REACTION_INVALID")
+        message["bot_reactions"] = [item["emoji"] for item in reaction]
+        self.log.append({"endpoint": "setMessageReaction", "chat_id": chat_id,
+                         "message_id": message_id, "reaction": message["bot_reactions"]})
+        return True
 
     def _api_copy_message(self, data):
         """copyMessage returns a MessageId, not a Message -- the real one does
@@ -422,6 +461,20 @@ class Person:
     async def edit(self, message_id: int, text: str) -> None:
         await self.sim.incoming_edit(self, message_id, text)
 
+    async def react(self, message_id: int, *emoji: str, custom: str | None = None) -> None:
+        """Set this person's reactions on a message in their chat -- all of
+        them, the way Telegram reports it: `react(7)` takes every reaction
+        off, `react(7, "👍", "🔥")` is a Premium user with two, and `custom=`
+        adds a custom-emoji one."""
+        new = [{"type": "emoji", "emoji": e} for e in emoji]
+        if custom is not None:
+            new.append({"type": "custom_emoji", "custom_emoji_id": custom})
+        await self.sim.incoming_reaction(self, message_id, new)
+
+    def bot_reaction(self, message_id: int) -> list[str]:
+        """The reaction the bot has put on a message in this chat."""
+        return list((self.sim.tele.find(self.id, message_id) or {}).get("bot_reactions", []))
+
     async def tap(self, label_contains: str, message_id: int | None = None) -> None:
         """Tap the button whose label contains this text, on the newest
         message in this chat that has one (or on `message_id`)."""
@@ -565,6 +618,28 @@ class Sim:
         message["text"] = text
         await self._process({"update_id": self.tele.next_update_id(),
                              "edited_message": message})
+
+    async def incoming_reaction(self, person: Person, message_id: int, new: list) -> None:
+        """A message_reaction update, with the old reactions remembered per
+        person per message -- Telegram sends both lists, and what changed is
+        read from the difference."""
+        message = self.tele.find(person.id, message_id)
+        if message is None:
+            raise AssertionError(f"no message #{message_id} in {person.name}'s chat")
+        mine = message.setdefault("user_reactions", {})
+        old = mine.get(person.id, [])
+        mine[person.id] = new
+        await self._process({
+            "update_id": self.tele.next_update_id(),
+            "message_reaction": {
+                "chat": {"id": person.id, "type": "private"},
+                "message_id": message_id,
+                "user": self._user(person),
+                "date": 1_700_000_000,
+                "old_reaction": old,
+                "new_reaction": new,
+            },
+        })
 
     async def tap(self, person: Person, label_contains: str | None,
                   message_id: int | None = None, callback_data: str | None = None) -> None:

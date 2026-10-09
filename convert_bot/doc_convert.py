@@ -85,6 +85,24 @@ def _page_count(doc) -> int:
     return count
 
 
+def _check_page_sizes(doc, pages: int) -> None:
+    """Refuse a document with a page too big to draw, before drawing any.
+
+    The number of pages is capped and the size of each is not: it is a
+    rectangle written into the file, and drawing it costs its area in memory
+    however little else is on it. Checked for every page up front, so that a
+    poster on page 190 is not found after 189 pages of work."""
+    for index in range(pages):
+        rect = doc[index].rect
+        megapixels = (rect.width * PAGE_DPI / 72) * (rect.height * PAGE_DPI / 72) / 1_000_000
+        if megapixels > formats.MAX_PAGE_MEGAPIXELS:
+            raise ConversionError(
+                f"Page {index + 1} is {rect.width / 72:.0f} by {rect.height / 72:.0f} inches, "
+                f"which would be {megapixels:,.0f} megapixels as a picture -- over the "
+                f"{formats.MAX_PAGE_MEGAPIXELS}-megapixel limit for one page."
+            )
+
+
 # ---------- getting to HTML ----------
 
 def _docx_to_html(in_path) -> str:
@@ -220,6 +238,7 @@ def _render_pages(in_path, src_ext: str, target_ext: str, work_dir, stem: str) -
     produced: list[Path] = []
     try:
         pages = _page_count(doc)
+        _check_page_sizes(doc, pages)
         for index in range(pages):
             report(index, pages)
             pixmap = doc[index].get_pixmap(dpi=PAGE_DPI)
@@ -354,6 +373,11 @@ _HEADING_2_RATIO = 1.6
 # Images smaller than this are page furniture -- rules, bullets, logos in a
 # footer -- and putting them in costs more than it gives.
 _MIN_IMAGE_PIXELS = 64 * 64
+# And past this an image is left out rather than decoded: the size is what the
+# PDF says it is, a few kilobytes of it can declare a picture too large to hold
+# once decoded, and a Word document is not where a 200-megapixel photograph is
+# wanted. Skipped, like every other picture the writer will not take.
+_MAX_IMAGE_PIXELS = 50_000_000
 _DOCX_PAGE_WIDTH_INCHES = 6.0
 
 
@@ -455,7 +479,7 @@ def _add_page_images(document, doc, page, pymupdf, work_dir) -> None:
         try:
             data = doc.extract_image(info[0])
             raw, width, height = data["image"], data.get("width", 0), data.get("height", 0)
-            if width * height < _MIN_IMAGE_PIXELS:
+            if width * height < _MIN_IMAGE_PIXELS or width * height > _MAX_IMAGE_PIXELS:
                 continue
             # Through Pillow, because python-docx only takes the handful of
             # formats Word understands and a PDF can hold any of a dozen.

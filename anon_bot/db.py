@@ -180,7 +180,19 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+                # Nothing here may wait on the network for ever. The five bots
+                # share one process and eight threads, and a query whose
+                # packets go unacknowledged (a dead network path) otherwise
+                # waits out TCP retransmission -- minutes -- holding one of
+                # them: measured in the incident of 2026-10-09 08:40 UTC. So a
+                # connection attempt gives up after 10 s (connect_timeout),
+                # data nobody acknowledges after 30 s (tcp_user_timeout, in
+                # ms), a statement after 60 s (statement_timeout) and a
+                # transaction left open and idle after 120 s
+                # (idle_in_transaction_session_timeout).
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
                 # Keep an idle connection alive at the TCP level rather than
                 # discovering it is dead on the next checkout. Cheaper than
                 # the check it saves, and it happens while nobody is waiting.
@@ -259,6 +271,32 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
         conn.commit()
 
 
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None
+    when the table has no such column.
+
+    init_db() asks this before every ALTER TABLE and issues the ALTER only when
+    the answer says something is missing or different. Every ALTER TABLE takes
+    an ACCESS EXCLUSIVE lock on its table and keeps it until the transaction
+    ends -- even one that turns out to change nothing, IF NOT EXISTS or not
+    (measured on Postgres 17, 2026-10-09) -- and init_db() is one transaction
+    that commits at the very end. So a start that only wanted to check used to
+    queue every other reader and writer of those tables behind it for as long
+    as init_db() took, and during a deploy overlap those are the old
+    instance's, still serving. This is a read of the catalog, which takes no
+    lock that blocks anybody; a normal start now takes none of the table locks.
+    IF NOT EXISTS stays on the statements, because two instances starting
+    together can both see the column missing; the second then waits for the
+    first and finds nothing left to do. The statements are literals, one per
+    column, on purpose: tests/test_sql_safety.py allows no SQL built from
+    names."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
+
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -290,8 +328,12 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # since some fiat currencies' minor-unit amounts can exceed a plain
         # INTEGER's range, and adds currency for bots migrating from
         # Stars-only donations (see shared_features.py's FIAT_CURRENCIES).
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        # Each runs only when it is needed (see _column).
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -305,11 +347,13 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # cadence is a schedule that runs out rather than a loop (see
         # DONATION_STEPS in shared_features.py), and this is the step counter
         # it reads. Safe to re-run on an existing table.
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
         # Set only when DONATION_PIN is on: the message this bot pinned, so
         # it can be unpinned again when they donate or when a newer nudge
         # replaces it.
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
         # Nullable, no default -- NULL means "hasn't picked a language yet",
         # which is what gates the first-run picker in bot.py's /start.
         conn.execute(
@@ -320,6 +364,23 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+        # Whether this person has been told that reactions now reach the other
+        # side of a conversation (2.1.0). The owner asked for "a check box in
+        # the database so each current user sees this update note only once".
+        #
+        # The two statements are in this order on purpose. Added without a
+        # default, the column is NULL on every row that already exists -- the
+        # current users, who are owed the note. The default added after it is
+        # TRUE, so everybody who arrives from now on starts out knowing: they
+        # meet reactions in /help, and "you can now react" means nothing to
+        # somebody who was never unable to. Each runs only when it is needed
+        # (the default is read back from the catalog as 'true'), so a second
+        # start takes neither of the table locks: see _column.
+        knows = _column(conn, "user_settings", "knows_reactions")
+        if knows is None:
+            conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS knows_reactions BOOLEAN")
+        if knows is None or (knows[1] or "").lower() != "true":
+            conn.execute("ALTER TABLE user_settings ALTER COLUMN knows_reactions SET DEFAULT TRUE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS anon_links (
@@ -348,13 +409,15 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # That one message is the only one either side may send without
         # saying what it answers -- it is the one that opens the thread, and
         # there is genuinely nothing above it. See handle_message.
-        conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_first_msg_at TEXT")
+        if _column(conn, "anon_conversations", "follower_first_msg_at") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_first_msg_at TEXT")
         # Replaced by the column above. It asked "has the owner answered
         # yet?", which exempted every message a guest sent to an owner who
         # never answered -- so a guest's whole side of a one-way conversation
         # was still being routed by session state rather than by what it
-        # replied to.
-        conn.execute("ALTER TABLE anon_conversations DROP COLUMN IF EXISTS owner_replied_at")
+        # replied to. Dropped only where it is still there (see _column).
+        if _column(conn, "anon_conversations", "owner_replied_at") is not None:
+            conn.execute("ALTER TABLE anon_conversations DROP COLUMN IF EXISTS owner_replied_at")
         # Filed away, either by the owner from /conversations or by
         # prune_old_data once a conversation has been silent long enough for
         # its reply anchors to be removed. NULL means open.
@@ -363,7 +426,8 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # of it, and the guest is never told. A conversation the owner has
         # archived un-archives itself the moment anything is relayed into it,
         # because a message arriving means it was not finished after all.
-        conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS archived_at TEXT")
+        if _column(conn, "anon_conversations", "archived_at") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS archived_at TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_anon_conversations_pair "
             "ON anon_conversations (owner_user_id, follower_user_id)"
@@ -411,7 +475,8 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # prompt, and there are no prompts. Kept, and kept being created, so
         # that a fresh database has the same shape as the live one -- nothing
         # reads it, nothing writes it, and its DEFAULT fills it in.
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS is_prompt BOOLEAN NOT NULL DEFAULT FALSE")
+        if _column(conn, "anon_relay", "is_prompt") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS is_prompt BOOLEAN NOT NULL DEFAULT FALSE")
         # The message in the OTHER chat that this one is the same message as
         # -- the copy that was delivered from it, or the original it was
         # copied from. A conversation exists twice, once in each chat, and
@@ -430,7 +495,8 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # line, an album, a message too long for one) so it cannot be
         # reconstructed by lining up what is already there. A row from before
         # this column falls back to the old behaviour rather than guessing.
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS peer_message_id BIGINT")
+        if _column(conn, "anon_relay", "peer_message_id") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS peer_message_id BIGINT")
         # When each bubble was written, and who wrote it: TRUE for a copy the
         # bot delivered, FALSE for the person's own message, NULL for the
         # bot's own words -- a header, a bookmark, a link's opening line.
@@ -444,8 +510,10 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # NULL for every row from before these columns. They cannot be
         # backfilled, for the reason peer_message_id cannot, and a forward of
         # such a message is listed in the transcript as unmatched.
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
-        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
+        if _column(conn, "anon_relay", "sent_at") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
+        if _column(conn, "anon_relay", "from_bot") is None:
+            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
         # "The first / newest message of THIS conversation in THIS chat" --
         # asked by get_routing_context on every un-replied message, and by
         # the bookmark /conversations and /which send. The primary key is
@@ -557,6 +625,50 @@ def set_user_language(user_id: int, language: str) -> None:
             (user_id, language),
         )
         conn.commit()
+
+
+def claim_reactions_note(user_id: int) -> bool:
+    """True exactly once for a person who has not been told about reactions,
+    and marks them told in the same statement -- so two updates arriving
+    together cannot both send the note. False for everybody else, including
+    somebody with no settings row at all (nobody to have been told before)."""
+    with pooled() as conn:
+        row = conn.execute(
+            "UPDATE user_settings SET knows_reactions = TRUE "
+            "WHERE user_id = %s AND knows_reactions IS NOT TRUE RETURNING user_id",
+            (user_id,),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+
+def get_reaction_route(chat_id: int, message_id: int) -> "dict | None":
+    """Where a reaction on this bubble should go: its twin in the other chat,
+    both sides of the conversation, and whether the guest is blocked. One
+    query, on the path of every reaction -- the database is on another
+    continent and the three questions are one join.
+
+    None for a message that is in no conversation (the bot's own notices, a
+    bookmark) and for a row from before twins were recorded
+    (peer_message_id NULL), neither of which has anywhere to send a reaction."""
+    with pooled_read() as conn:
+        row = conn.execute(
+            """
+            SELECT r.peer_message_id, c.id, c.owner_user_id, c.follower_user_id,
+                   EXISTS (SELECT 1 FROM anon_blocks b
+                           WHERE b.owner_user_id = c.owner_user_id
+                             AND b.follower_user_id = c.follower_user_id)
+            FROM anon_relay r
+            JOIN anon_conversations c ON c.id = r.conversation_id
+            WHERE r.chat_id = %s AND r.message_id = %s
+            """,
+            (chat_id, message_id),
+        ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return {"peer_message_id": int(row[0]), "conversation_id": int(row[1]),
+            "owner_user_id": int(row[2]), "follower_user_id": int(row[3]),
+            "blocked": bool(row[4])}
 
 
 # ---------- Telegram Stars ledger (this bot's /donate only) ----------

@@ -48,6 +48,17 @@ what it learns:
   of them is worth showing.
 - Requests that go out from the container's own address are tried **last**,
   because that is the address these sites treat differently.
+- yt-dlp, which is the download itself rather than a lookup, is given time for
+  one -- 90 seconds, and more for a large file (`DBOT_YTDLP_TIMEOUT`) -- where a
+  lookup gets 20. A download that is given up on is stopped and what it wrote
+  is removed.
+
+**Only the public internet.** Every address the bot fetches came from
+somebody else: a link, a page a link led to, a URL in a resolver's answer. So a
+name that resolves to this machine, a private network or a link-local address
+(where a cloud host's metadata service lives) is refused, on every redirect too,
+and the connection is made to the address that was checked. A link is
+recognised as a platform's only if its host is that platform's.
 
 `/providers` prints what the chain currently believes, per platform, with
 each provider's success and failure counts and its last error. `/probe`
@@ -70,7 +81,8 @@ happened, which answers "is it broken, or was that one post private".
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/start` | Instructions. The first `/start` from a new user asks which language to use, once. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions on their own. |
+| `/help` | The instructions in short, with a button for the full guide; `/help full` goes straight to it. |
+| `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
 | `/deletemydata` | Erases what the bot holds about the person asking, after one confirmation. |

@@ -10,7 +10,7 @@ available inside the bot as `/privacy`, in English, Uzbek and Russian.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 10 September 2026._
+_Last reviewed: 3 October 2026._
 
 ---
 
@@ -64,12 +64,23 @@ _Last reviewed: 10 September 2026._
   to deliver — so those are seen the same day rather than in a list. That
   message says which error and when. It does not say who, even when somebody
   has attached their details; the operator has to look those up deliberately.
+- **Feedback, if you send it** — what you write with `/feedback`, which bot it
+  was sent from, the language you use, and when. Not your user id, your name
+  or your username. The operator receives it as a Telegram message — straight
+  away, or with the nightly summary, as they choose — and the copy in the
+  database is **deleted after 30 days**. Because nothing in it says who sent
+  it, `/deletemydata` cannot find it to erase it sooner. For the same reason it
+  is **one-way**: only the operator reads it, and they cannot reply.
 
 ## What is not held
 
 - **What anybody writes.** Messages are relayed and never stored. They exist
   in the two Telegram chats, where each side can delete their own copy, and in
-  no database belonging to this bot.
+  no database belonging to this bot. The one exception is what you choose to
+  send the operator yourself, with `/feedback` (above).
+- **Reactions.** A reaction on a message in a conversation is put on the other
+  side's copy by the bot, beside the bot's own picture, so the other person sees
+  the reaction and not who made it. Nothing about it is written down.
 - Names, usernames or profile photos of the people writing anonymously.
 
 ## Getting a conversation back (`/export`)
@@ -157,6 +168,7 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 | timestamp per use | about 90 days (`ACTIVITY_RETENTION_DAYS`) |
 | donation records | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the donation records |
+| feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it
 

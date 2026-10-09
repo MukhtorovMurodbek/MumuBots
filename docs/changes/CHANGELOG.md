@@ -97,6 +97,118 @@ predecessors'.
 
 ---
 
+## 🚩 CHECKPOINT: v2.1.0
+
+Full detail in `CHANGES_v2.1.0.md`. Finalised by the owner on 2026-10-10 and released at 04:00 Tashkent
+(08:00 KST) as MumuBots `v2.1.0` and MumuCombined `v2.1.0C`: the review of everything, reactions and
+`/feedback`, a daily route check, archives and camera raw photos, and then reviews of all of it with only fixes.
+OCR and DownloaderBot's album buttons, built in the same weeks, went to 2.2.0.
+
+## v2.1.0: reviews of all of it, and only fixes (2026-10-07 to 2026-10-10)
+
+Full detail in `CHANGES_v2.1.0.md` ("Reviews of all of it"). Everything since 2026-10-07 was read again by a
+fresh reviewer, and each review found what the green tests had not. **DownloaderBot**: a 421-byte brotli answer
+became 512 MB (the bot now decodes gzip and deflate itself, with a ceiling, and refuses the rest), a redirect's body
+was read whole, two regular expressions could freeze every bot for minutes or an hour, a body sent a byte at a time
+held the event loop, any number of files a post, and pasted cookies whose secret yt-dlp printed into the logs or
+silently ignored. **ConvertBot**: a killed job's unpacked archive stayed on disk, tar headers were read whole, three
+archive crashes, raw and picture sizes parsed in the bot's own process, 8K video never scaled. **Every bot** speaks
+formally (вы / siz). **The deploy itself**: the release script could leave the bots paused after a failure and now
+cannot; every database connection has time limits; a normal start takes no table lock; a single getUpdates
+`Conflict` is a warning, three in two minutes an alert. `versions` lists what production really runs. **OCR and
+DownloaderBot's album buttons were built in the same weeks and moved to 2.2.0** (`MumuBots2.2.0`, the owner's
+decision of 2026-10-10: only fixes in this version). The first run on Linux CI found the archive test's hand-made
+RAR malformed for libarchive 3.6-3.7 (fixed in the test); extraction now sets folders' modes last (`-p`).
+
+## v2.1.0, in progress: everything that did not need the owner (2026-10-07)
+
+After the Windows reinstall the 2.1.0 folders were recreated (`MumuBots2.1.0`,
+`MumuBots2.1.0C`; the owner's naming from now on is `MumuBotsX.Y.Z`) and found
+complete. Then, on "do everything that does not require me ... when you are
+absolutely sure it is beneficial":
+
+- **DownloaderBot** knows before a user does: a daily check from inside the
+  container (`routewatch.py`), alerts on changes only, YouTube never pushed;
+  yt-dlp compared with its newest release, with an automatic update that is
+  written and off; a cobalt route for YouTube (one of three public instances
+  answered the day it was probed); cookies as a variable; `yt-dlp[default]`;
+  page reads capped; a CI workflow (not yet run).
+- **ConvertBot**: a 4K HDR video, and any 4K video to WEBM, is converted at
+  1080p, said before the price (measured 1.3 GB and 1.2 GB for what now takes 0.6
+  and 0.4); archives (ZIP, TAR and its three compressions, 7z; RAR read) with
+  every bomb and path guard tested on its own -- and a libarchive trap found
+  and closed (a RAR whose last file is a ZIP was read as that ZIP); camera raw
+  photos (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2) to JPG, PNG, WEBP, AVIF, HEIC
+  and a 16-bit TIFF, full to 40 MP, half size to 110, measured at 13 MB a
+  megapixel.
+- A Stars payment Telegram delivers twice is credited once (the charge id is claimed in the same
+  transaction as the credit; both real payment paths use it), tested on a real Postgres.
+- Tests 63 to 68; every new file was broken on purpose and the breakage caught.
+- Left undone with the argument: sleeping bots, the standby service, the
+  `@mumu_anon_bot` rename, reports with a person's words, a website.
+
+Details, numbers and the open items: `CHANGES_v2.1.0.md`, the section *"Do
+everything that does not need me"*.
+
+## v2.1.0, in progress: reactions, /feedback, a report that says what happened (2026-10-03)
+
+Full detail in `CHANGES_v2.1.0.md`; nothing committed, production (`v2.0.0C`)
+untouched. Asked for by the owner in one message. **AnonBot passes reactions
+across a conversation**: a reaction on one side's bubble is put on the other
+side's copy by the bot, beside the bot's picture -- tested on TestBot first,
+because the Bot API's wording says a bot gets no reaction updates in a private
+chat, and it does. What a bot cannot react with (Premium custom emoji, a second
+reaction) gets a silent note that removes itself, Telegram's own fading notice
+being for button taps only. **AnonBot's /help** comes in two lengths, the full
+one listing all 73 reactions and warning Premium users; people from before get
+a one-time note, ticked off in `user_settings.knows_reactions`. **/feedback in
+every public bot**, kept as the words, the bot and the language and never who
+wrote them, for 30 days; taken only as a reply to its own question, so an AnonBot
+owner's answer to a guest can never be swallowed. **ManagerBot** delivers it as
+it comes or with the nightly report (`/feedback`, a switch), and **the report is
+at 22:00 Korean time**. **"Refused" is gone from it**: two people who forgot to
+swipe-reply were being reported as refused, and every such problem is now
+reported under what it is -- shown how to use it, hit a limit, out of date,
+blocked or unavailable, turned away during an update. A scratch Postgres let the
+database suites run for the first time this version: `/sql`'s one-statement fix
+is now proven against Postgres, and a flood test that had passed on the word
+"waiting" in the old help was fixed. **Later that night, the owner's answers:**
+feedback is one-way and every place it is mentioned says only the operator
+reads it and nobody can reply; every public bot's `/help` is the same template
+now, a short version with a full-guide button built once in `shared_features`
+(StickerBot's welcome line stopped claiming to download videos on the way); the
+reaction note opens with what the reader has lost and stays up 8 s; "Hit a
+limit" says what it covers. Not finalised.
+
+## v2.1.0, in progress: a review of everything (2026-09-29)
+
+Full detail in `CHANGES_v2.1.0.md`; nothing committed, and no checkpoint until
+the owner finalises. The owner asked for a broad review, then for its work to
+leave `BotFamily2.0.0` and live here. It was done by reading and then by sending
+things at the code. **DownloaderBot could be aimed at any address**: the
+Pinterest pattern accepted `pinterest.<any domain>`, the resolvers fetch and
+follow whatever they are given, and what came back was sent to the person; the
+pattern is fixed and `net.py` refuses every address off the public internet, on
+each redirect too, connecting to the address it checked. **A timed-out yt-dlp
+download ran on** in its thread to the last byte and left its files; it stops
+and cleans up now, and gets time for a download (a policy change: 20 s to 90 s,
+more for large ones). **ConvertBot**: a YAML alias bomb (500 bytes, 570 MB, nine
+times more per level), a CSV cell over 128 KB, deep JSON/XML and a
+self-referencing YAML anchor raised faults (refunded, and reported to the owner)
+or were not refused; and a phone photo sent as a file came out **on its side** --
+nothing applied EXIF orientation, in ConvertBot or StickerBot. **StickerBot's
+ffmpeg** was capped on the encoder only (a 4K clip: 528 MB, or 1.3 GB as
+Railway's 48 cores size it; 172 MB capped). `/sql` was read-only for one
+statement. And three small ones in `big_files`, `lifecycle` and the InstaFix
+probe. Five new tests, each failing on the old code; the suite is 62 checks.
+ManagerBot's command menu had lost `/providers`, `/probe` and `/stars` (dropped
+as "reachable through /run", and exempted as "aliases" by the very test that
+should have caught it): they are back, `/crashtest` is left out on purpose with a
+reason on file, and two descriptions a popup cut off are shorter.
+Carried over from 2.0.0's working tree: a conversion killed for memory is told as
+that (`CV-NO-MEMORY`). Left alone, with reasons, in *Not done yet*: a Stars
+payment delivered twice would be credited twice.
+
 ## 🚩 CHECKPOINT: v2.0.0
 
 Full detail in `CHANGES_v2.0.0.md`, which as a major's file carries every
@@ -115,8 +227,10 @@ the decoder**: the encoder sized itself from the 48 cores the container
 reports and a 19 MB 1080p video was killed for memory before its first frame
 -- in 1.7.0, which production runs, too. The cap now reaches the encoder and
 the filters, in both editions; the same video converts in 5 s at 288 MB, a
-218 MB one in 52 s at 269 MB. A 4K HDR video still does not fit in 1 GB; at
-1080p it does -- which of the two is the owner's call. `railway_move.py`
+218 MB one in 52 s at 269 MB. A 4K HDR video still does not fit in 1 GB,
+which the owner accepted as long as the person is told so: a conversion killed
+for memory is now its own ending, explained, refunded, `CV-NO-MEMORY` -- it
+had read as an unreadable file, with ffmpeg's stream listing. `railway_move.py`
 sent a setting Railway's API refuses and did not know the plan allows 5
 services in a project: fixed, and it takes `--project`. All five images
 build and start on Railway from MumuBots. The owner asked for the fixes to be

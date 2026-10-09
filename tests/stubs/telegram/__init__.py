@@ -36,6 +36,7 @@ class TelegramObject: pass
 class Update:
     MESSAGE = "message"; EDITED_MESSAGE = "edited_message"
     CALLBACK_QUERY = "callback_query"; PRE_CHECKOUT_QUERY = "pre_checkout_query"
+    MESSAGE_REACTION = "message_reaction"
 
 class InputSticker(_Any): pass
 class InputMediaDocument(_Any): pass

@@ -184,6 +184,44 @@ SELF_DESCRIBING = {"language", "en", "uz", "rus"}
 MAX_DESCRIPTION = 256
 MAX_NAME = 32
 
+# What a person can actually read. The menu is a popup and a long line is cut
+# where the window ends: the owner's screenshot of ManagerBot's /problems (54
+# characters) read "...the midnight report" and stopped, in a window about as
+# wide as a phone's. 50 is where that line was cut; every other description in
+# the family was already under it.
+MAX_VISIBLE = 50
+# Three languages in one line is what /language is for -- it is the way out for
+# somebody who cannot read the menu -- and it is 51 characters.
+LONG_ON_PURPOSE = {"language"}
+
+
+def descriptions(bot):
+    """Every `X_COMMANDS = [BotCommand(name, description), ...]` in bot.py."""
+    tree = ast.parse((REPO / bot / "bot.py").read_text(encoding="utf-8"))
+    out = []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.List):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id.endswith("COMMANDS"):
+                for element in node.value.elts:
+                    if (isinstance(element, ast.Call) and getattr(element.func, "id", None) == "BotCommand"
+                            and len(element.args) >= 2
+                            and all(isinstance(a, ast.Constant) for a in element.args[:2])):
+                        out.append((target.id, element.args[0].value, element.args[1].value))
+    return out
+
+
+def check_visible(bot):
+    """No description is longer than a popup shows, in any language."""
+    rows = [("en", name, text) for _, name, text in descriptions(bot)]
+    for language, table in command_menu(bot).items() if (REPO / bot / "i18n.py").exists() else []:
+        rows += [(language, name, text) for name, text in table.items()]
+    cut = [f"/{name} ({language}, {len(text)})" for language, name, text in rows
+           if len(text) > MAX_VISIBLE and name not in LONG_ON_PURPOSE]
+    check(f"{bot}: every menu description fits the popup (under {MAX_VISIBLE + 1} characters)"
+          + (f" -- {', '.join(cut)}" if cut else ""), not cut)
+
 
 def command_menu(bot):
     """`COMMAND_MENU` out of the bot's i18n.py, without importing it."""
@@ -373,15 +411,26 @@ def check_parent():
     # Renamed in 1.7.0, with the old name still answering. The menu carries
     # the new one; listing both would offer the same thing twice, and dropping
     # the old one would break a habit for nothing.
+    # Only what is a second name for something in the menu. It used to list
+    # /providers, /probe and /stars here too, "reachable through /run" -- which
+    # they are not in the way an alias is: /run needs the bot and the command
+    # named, and the shortcuts exist so the owner need not. Calling them
+    # aliases is what kept them out of the menu from 1.7.0, and it hid the
+    # gap from this very check; the owner found it by typing "/pro" and being
+    # offered /problems and nothing else (2026-09-29).
     aliases = {
         "nightly": "problems", "reports": "problems",
         "finishupdates": "resume",
         "errorlog": "logs", "botlog": "logs", "problemlog": "logs",
         "me": "status",
-        "providers": "run", "probe": "run", "stars": "run",
-        "crashtest": "run",
     }
-    handlers = {c: fn for c, fn in handlers.items() if c not in aliases}
+    # Handled, kept out of the menu, and not because it has another name.
+    unlisted = {
+        "crashtest": "makes a bot raise on purpose and page the owner, and a tap "
+                     "in the menu sends the command at once -- a lever worth "
+                     "typing, not one to leave under a thumb",
+    }
+    handlers = {c: fn for c, fn in handlers.items() if c not in aliases and c not in unlisted}
 
     check(f"{bot}: no command is listed twice", len(menu) == len(set(menu)))
 
@@ -400,6 +449,18 @@ def check_parent():
     # A stranger who finds the private bot should not be handed a list of the
     # levers. Every one of them refuses -- guard() decides, not the menu -- but
     # publishing them is an invitation with no upside.
+    # An exception that stops being true is worse than none, as for the public
+    # bots: it would hide a command that has since become worth offering.
+    for cmd, why in unlisted.items():
+        all_handlers = analyse(bot)[0]
+        check(f"{bot}: /{cmd} is still handled and still kept out of the menu ({why[:36]}...)",
+              cmd in all_handlers and cmd not in menu)
+
+    # The commands that reach one bot each: what is offered has to be the
+    # command that runs, so a shortcut in the menu is a shortcut registered.
+    for cmd in ("providers", "probe", "stars"):
+        check(f"{bot}: /{cmd}, which reaches one bot, is in the menu", cmd in menu)
+
     check(f"{bot}: strangers are offered /start and nothing else",
           stranger == ["start"])
     for cmd in ("sql", "backup", "restart", "broadcast"):
@@ -413,6 +474,10 @@ def main() -> int:
 
     print("\n== manager_bot ==")
     check_parent()
+
+    print("\n== what the popup shows ==")
+    for bot in BOTS + ["manager_bot"]:
+        check_visible(bot)
 
     print()
     if failures:

@@ -122,6 +122,47 @@ async def main():
     await p.flush()
     equals("dropping a user drops their row", ("user", "111") in TABLE, False)
 
+    # ---- a write that fails is tried again, not forgotten ----
+    # flush() used to clear its list of who had changed *before* writing, so a
+    # database that was down for one pass lost every waiting user's saved
+    # state until they next did something -- and the ones most worth keeping
+    # are the ones who are waiting on a button.
+    TABLE.clear()
+    s = lifecycle.PostgresPersistence()
+    await s.update_user_data(301, {"lang": "uz", "step": "format"})
+    await s.update_user_data(302, {"lang": "en"})
+    real_write = lifecycle._write_state
+
+    def failing_write(rows):
+        raise RuntimeError("the database is away")
+    lifecycle._write_state = failing_write
+    await s.flush()
+    lifecycle._write_state = real_write
+    equals("nothing was saved while the database was away", sorted(k for k in TABLE if k[0] == "user"), [])
+    await s.flush()
+    equals("the next pass saved them, though neither had changed since",
+          sorted(k for k in TABLE if k[0] == "user"), [("user", "301"), ("user", "302")])
+    equals("with what they had", TABLE.get(("user", "301")), {"lang": "uz", "step": "format"})
+
+    # a user who changed again, or was dropped, while the write was failing keeps that
+    TABLE.clear()
+    t = lifecycle.PostgresPersistence()
+    await t.update_user_data(401, {"lang": "en", "step": "one"})
+    await t.update_user_data(402, {"lang": "en"})
+
+    def failing_write_meanwhile(rows):
+        raise RuntimeError("the database is away")
+    lifecycle._write_state = failing_write_meanwhile
+    flush = asyncio.ensure_future(t.flush())
+    await flush
+    lifecycle._write_state = real_write
+    await t.drop_user_data(402)                       # they were dropped after the failed pass
+    await t.update_user_data(401, {"lang": "en", "step": "two"})
+    await t.flush()
+    equals("a user who changed again is saved as they are now, once",
+          TABLE.get(("user", "401")), {"lang": "en", "step": "two"})
+    equals("a user who was dropped is not brought back by the retry", ("user", "402") in TABLE, False)
+
     # ---- a conversation key of a different arity still round-trips ----
     TABLE.clear()
     q = lifecycle.PostgresPersistence()

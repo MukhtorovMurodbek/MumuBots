@@ -18,6 +18,24 @@ STICKER_SIDE = 512
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
 
+def _upright(img):
+    """The picture the way up it was taken, from its EXIF Orientation tag -- 2
+    to 8 are the seven ways a camera can be held that are not the way it is
+    stored. The same as ConvertBot's convert_utils.upright(), which explains
+    why it is needed."""
+    try:
+        orientation = img.getexif().get(0x0112, 1)
+    except Exception:
+        return img
+    if orientation not in (2, 3, 4, 5, 6, 7, 8):
+        return img
+    from PIL import ImageOps
+    turned = ImageOps.exif_transpose(img)
+    if turned is not img:
+        img.close()
+    return turned
+
+
 def to_sticker_png(image_bytes: bytes) -> BytesIO:
     """Blocking (Pillow decodes and resamples in-process) -- call it through
     asyncio.to_thread so a large image doesn't stall every other user."""
@@ -28,6 +46,11 @@ def to_sticker_png(image_bytes: bytes) -> BytesIO:
     # roughly 1/8 scale rather than being expanded to 48 MB of RGBA and then
     # thrown away. No effect on formats that don't support it.
     img.draft("RGB", (STICKER_SIDE, STICKER_SIDE))
+
+    # A phone photo sent as a file is stored on its side, with a tag that says
+    # how to turn it, and Pillow does not turn it: the sticker came out lying
+    # down. Done after the draft, so it is the reduced picture that is turned.
+    img = _upright(img)
 
     w, h = img.size
     if w >= h:

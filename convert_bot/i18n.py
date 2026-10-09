@@ -79,10 +79,10 @@ STRINGS = {
         "balance_recent": "Recent:",
         "balance_empty_hint": '/recharge adds credit whenever you want some.',
         "bot_short_description": (
-            "Converts pictures, video, audio, documents, spreadsheets and subtitles "
-            "between about 75 formats."
+            "Converts pictures, raw photos, video, audio, documents, spreadsheets, subtitles and archives "
+            "— about 90 formats."
         ),
-        "bot_description": 'Send a file and pick what to turn it into. Pictures, video, audio, documents, spreadsheets, subtitles — 75 formats in, 40 out.\n\nA HEIC from an iPhone becomes a JPG. Several pictures become one PDF. A PDF becomes pictures or text. /formats has the rest.\n\nAnything under 3 MB is free. Above that it is priced by size in ⚡ credit, bought with Stars and shown before you choose. A conversion the bot fails gives its credit back.\n\nEnglish, Uzbek and Russian. /privacy says what it keeps about you.',
+        "bot_description": 'Send a file and pick what to turn it into. Pictures, raw, video, audio, documents, spreadsheets, subtitles, archives — 90 formats in, 50 out.\n\nA HEIC from an iPhone becomes a JPG. Several pictures become one PDF. A PDF becomes pictures or text. /formats has the rest.\n\nAnything under 3 MB is free. Above that it is priced by size in ⚡ credit, bought with Stars and shown before you choose. A conversion the bot fails gives its credit back.\n\nEnglish, Uzbek and Russian. /privacy says what it keeps about you.',
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
@@ -162,11 +162,45 @@ STRINGS = {
         "cancel_button_donation": '💸 Top-up amount',
         "cancel_item_donation": 'the top-up amount I asked you for',
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• Send me a file — a picture, camera raw photo, video, audio, document, spreadsheet, subtitles or archive — and choose what it should become. /formats lists everything.\n"
+            "• A conversion costs ⚡ credit, and its price is shown before anything is taken. /recharge tops it up; /balance shows what you have and where it went.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Every command, and the prices: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
         "cancel_item_conversion": "the .{ext} file you were converting",
         "cancel_button_conversion": "🔄 The file waiting to convert",
         # ---- convert_bot-specific keys ----
         "start_greeting": "Hey! Send me a file and I'll convert it to another format.\n\n",
-        "help_text": "Send me a file and I'll convert it to another format — pictures, video, audio, documents, spreadsheets and subtitles.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
+        "help_text": "Send me a file and I'll convert it to another format — pictures, camera raw photos, video, audio, documents, spreadsheets, subtitles and archives.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
         "convert_start_prompt": (
             "Send me a file to convert, up to {max_mb} MB — a picture, a video, a "
             "sound, a document, a spreadsheet or a subtitle file. Send several "
@@ -227,6 +261,11 @@ STRINGS = {
         "send_limit_note": "📤 The converted file can be up to {mb} MB. If it comes out bigger, it won't be sent — and its ⚡ goes straight back to your balance.",
         "too_many_megapixels": 'That picture is {mp} megapixels — over the {max} MP I can convert safely. Nothing was charged.',
         "too_big_to_send_note": "📐 {formats} aren't offered: at {mp} MP they would come out over the {limit} MB a bot can send. JPG, WEBP or AVIF keep it sendable.",
+        "raw_too_big": "That raw photo is {mp} megapixels. This server converts camera raw photos up to {max}: past that even the half-size decode needs more memory than it has. Nothing was charged.",
+        "raw_half_note": "⚠️ NOTE: this raw photo is {mp} MP. It is converted at half size ({out} MP): the full picture needs more memory than this server has.",
+        "video_fit_hdr_note": "⚠️ NOTE: this video is {w}×{h} HDR. This server converts it at {fw}×{fh} — the full picture needs more memory than it has. The colours are kept.",
+        "video_fit_big_note": "⚠️ NOTE: this video is {w}×{h}. WEBM is made at {fw}×{fh} here; MP4, MKV and MOV keep the full size.",
+        "video_fit_huge_note": "⚠️ NOTE: this video is {w}×{h}. This server converts it at {fw}×{fh} — the full picture needs more memory than it has.",
         "nothing_sendable": 'Every format I could offer would come out over the {limit} MB a bot can send for a picture this size. Nothing was charged.',
         "too_big_to_send_alert": 'That format would come out over the {limit} MB a bot can send for this picture.',
         "keep_toggle_off": '📌 Keep file for more formats: off',
@@ -258,6 +297,7 @@ STRINGS = {
         "job_reason_timeout": 'That conversion ran past its {minutes}-minute limit, so I stopped it. The owner has been told.',
         "job_reason_too_slow": "This one would take about {minutes} minutes to convert, and a conversion here can run for {limit}, so I stopped it now rather than make you wait for the limit. A shorter clip, or a lower resolution, will fit.",
         "job_reason_crash": 'The conversion failed on my side. The owner has been told.',
+        "job_reason_no_memory": "This one needs more memory to convert than this server has — that happens with 4K and HDR video. Your file is fine: a version at 1080p or lower will convert.",
         "job_reason_too_large": 'The {target} came out at {mb} MB, more than the {limit} MB I can send back for this conversion — JPG, WEBP or AVIF will be far smaller. The owner has been told.',
         "job_reason_send_failed": 'The file converted, but sending it to you failed. The owner has been told.',
         "job_reason_interrupted": 'I was restarted in the middle of that conversion. Send it again in a minute.',
@@ -272,6 +312,7 @@ STRINGS = {
         "category_document": "document",
         "category_data": "data",
         "category_subtitle": "subtitle",
+        "category_archive": "archive",
         "formats_title": "📁 What I convert",
         "formats_intro": (
             "{sources} formats in, {targets} out — {pairs} combinations in all. "
@@ -285,6 +326,8 @@ STRINGS = {
             "• PDF or EPUB → PNG, JPG or plain text\n"
             "• Word document → PDF, HTML or Markdown\n"
             "• CSV, JSON or XML → an XLSX spreadsheet\n"
+            "• Camera raw (CR3, NEF, ARW, DNG…) → JPG, PNG or a 16-bit TIFF\n"
+            "• A RAR or 7z your phone cannot open → ZIP\n"
             "• Subtitles: SRT, VTT and ASS between each other, or just the transcript"
         ),
         "formats_reads": "Reads",
@@ -378,10 +421,10 @@ STRINGS = {
         "balance_recent": 'Oxirgi amallar:',
         "balance_empty_hint": "/recharge orqali istalgan paytda balansni to'ldirishingiz mumkin.",
         "bot_short_description": (
-            "Rasm, video, audio, hujjat, jadval va subtitrlarni 75 ga yaqin format "
+            "Rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlarni 90 ga yaqin format "
             "orasida o'giradi."
         ),
-        "bot_description": "Fayl yuboring va qaysi formatga o'girishni tanlang. Rasm, video, audio, hujjat, jadval, subtitr — 75 formatdan 40 formatga.\n\niPhone'dagi HEIC rasm — JPG ga. Bir nechta rasm — bitta PDF ga. PDF — rasm yoki matnga. Hammasi: /formats\n\n3 MB gacha bepul. Kattaroq fayl hajmiga qarab Stars bilan sotib olinadigan ⚡ kreditda to'lanadi, narx oldindan ko'rsatiladi. Bot xato qilsa, ⚡ balansga qaytadi.\n\nIngliz, o'zbek va rus tillarida. Nima saqlanishi: /privacy",
+        "bot_description": "Fayl yuboring va qaysi formatga o'girishni tanlang. Rasm, kamera raw, video, audio, hujjat, jadval, subtitr, arxiv — 90 formatdan 50 formatga.\n\niPhone'dagi HEIC rasm — JPG ga. Bir nechta rasm — bitta PDF ga. PDF — rasm yoki matnga. Hammasi: /formats\n\n3 MB gacha bepul. Kattaroq fayl hajmiga qarab Stars bilan sotib olinadigan ⚡ kreditda to'lanadi, narx oldindan ko'rsatiladi. Bot xato qilsa, ⚡ balansga qaytadi.\n\nIngliz, o'zbek va rus tillarida. Nima saqlanishi: /privacy",
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
@@ -419,11 +462,45 @@ STRINGS = {
         "cancel_button_donation": "💸 To'ldirish miqdori",
         "cancel_item_donation": "kiritilishi kutilayotgan to'ldirish miqdori",
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• Menga fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv — va u nimaga aylanishini tanlang. Barcha formatlar: /formats\n"
+            "• Har bir konvertatsiya ⚡ kredit turadi, narxi esa hech narsa yechilishidan oldin ko'rsatiladi. Kreditni /recharge bilan to'ldirasiz; /balance qancha qolgani va nimaga sarflanganini ko'rsatadi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Barcha buyruqlar va narxlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "cancel_item_conversion": "o'girilishi kutilayotgan .{ext} fayli",
         "cancel_button_conversion": "🔄 Konvertatsiyani kutayotgan fayl",
         "start_greeting": "Salom! Menga faylni yuboring va men uni boshqa formatga o'giraman.\n\n",
-        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, video, audio, hujjat, jadval va subtitrlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
-        "convert_start_prompt": "O'girish uchun {max_mb} MB gacha fayl yuboring — rasm, video, audio, hujjat, jadval yoki subtitr. Bir nechta rasmni birga yuborsangiz, ularni bitta PDF qilib beraman.\n\nBarcha formatlar: /formats\n\nNarxlar ⚡ kreditda:\n{pricing}\n\nBekor qilish uchun: /cancel",
+        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
+        "convert_start_prompt": "O'girish uchun {max_mb} MB gacha fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv. Bir nechta rasmni birga yuborsangiz, ularni bitta PDF qilib beraman.\n\nBarcha formatlar: /formats\n\nNarxlar ⚡ kreditda:\n{pricing}\n\nBekor qilish uchun: /cancel",
         "cancelled": "Bekor qilindi.",
         "btn_cancel_conversion": "✖️ Bekor qilish",
         "unknown_extension": "Fayl nomidan formatini aniqlab bo'lmadi — faylni kengaytmasi bilan (masalan, rasm.png) hujjat sifatida yuboring.",
@@ -473,6 +550,11 @@ STRINGS = {
         "send_limit_note": "📤 Tayyor fayl {mb} MB gacha bo'lishi mumkin. Bundan katta chiqsa, u yuborilmaydi — bunday holda ⚡ darhol balansingizga qaytib tushadi.",
         "too_many_megapixels": "Bu rasm {mp} megapiksel — xavfsiz o'girish chegarasi {max} MP. Balansdan hech narsa yechilmadi.",
         "too_big_to_send_note": "📐 {formats} formatlari ko'rsatilmadi: {mp} MP rasmda ular bot yubora oladigan {limit} MB dan katta chiqadi. JPG, WEBP yoki AVIF esa yuborsa bo'ladigan hajmda bo'ladi.",
+        "raw_too_big": "Bu raw suratning o'lchami {mp} megapiksel. Server raw suratlarni {max} megapikselgacha o'giradi: undan kattasiga yarim o'lchamda ochish uchun ham xotira yetmaydi. Balansdan hech narsa yechilmadi.",
+        "raw_half_note": "⚠️ ESLATMA: bu raw surat {mp} MP. U yarim o'lchamda ({out} MP) o'giriladi: to'liq tasvir uchun serverda xotira yetmaydi.",
+        "video_fit_hdr_note": "⚠️ ESLATMA: bu video {w}×{h} HDR. Server uni {fw}×{fh} o'lchamda o'giradi — to'liq tasvir uchun serverda xotira yetmaydi. Ranglar saqlanadi.",
+        "video_fit_big_note": "⚠️ ESLATMA: bu video {w}×{h}. WEBM bu yerda {fw}×{fh} o'lchamda tayyorlanadi; MP4, MKV va MOV to'liq o'lchamda qoladi.",
+        "video_fit_huge_note": "⚠️ ESLATMA: bu video {w}×{h}. Server uni {fw}×{fh} o'lchamda o'giradi — to'liq tasvir uchun serverda xotira yetmaydi.",
         "nothing_sendable": "Bu o'lchamdagi rasm istalgan formatda bot yubora oladigan {limit} MB dan katta chiqadi. Balansdan hech narsa yechilmadi.",
         "too_big_to_send_alert": 'Bu rasm shu formatda bot yubora oladigan {limit} MB dan katta chiqadi.',
         "keep_toggle_off": "📌 Faylni boshqa formatlar uchun saqlash: o'chirilgan",
@@ -504,6 +586,7 @@ STRINGS = {
         "job_reason_timeout": "Konvertatsiya {minutes} daqiqalik vaqt chegarasidan oshib ketgani uchun to'xtatildi. Bot egasiga xabar berildi.",
         "job_reason_too_slow": "Bu faylni o'girish taxminan {minutes} daqiqa olardi, bu yerda esa bitta konvertatsiya ko'pi bilan {limit} daqiqa ishlaydi. Shuning uchun chegaragacha kuttirib o'tirmay, hozir to'xtatdim. Qisqaroq video yoki pastroq sifat bemalol sig'adi.",
         "job_reason_crash": 'Konvertatsiya bot tomonidagi xatolik tufayli bajarilmadi. Bot egasiga xabar berildi.',
+        "job_reason_no_memory": "Bu faylni o'girishga serverning xotirasi yetmadi — 4K va HDR videolarda shunday bo'ladi. Faylingizda muammo yo'q: uning 1080p yoki undan past sifatdagi nusxasi bemalol o'giriladi.",
         "job_reason_too_large": "{target} fayli {mb} MB chiqdi, bu konvertatsiya natijasini esa faqat {limit} MB gacha yubora olaman. JPG, WEBP yoki AVIF ancha kichik bo'ladi. Bot egasiga xabar berildi.",
         "job_reason_send_failed": "Fayl o'girildi, lekin uni sizga yuborib bo'lmadi. Bot egasiga xabar berildi.",
         "job_reason_interrupted": 'Konvertatsiya vaqtida bot qayta ishga tushdi. Bir daqiqadan keyin faylni qaytadan yuboring.',
@@ -514,9 +597,10 @@ STRINGS = {
         "category_document": "hujjat",
         "category_data": "ma'lumot",
         "category_subtitle": "subtitr",
+        "category_archive": "arxiv",
         "formats_title": "📁 Qaysi formatlarni o'giraman",
         "formats_intro": "{sources} ta formatdan {targets} ta formatga — jami {pairs} xil yo'nalish. Fayl yuborsangiz, uni nimaga o'girish mumkinligini ko'rsataman; to'liq ro'yxat uchun quyidan turkumni tanlang.",
-        "formats_highlights": "Ko'pchilik bilmaydigan imkoniyatlar:\n• iPhone rasmi (HEIC) → JPG yoki PNG\n• Istalgan rasm — yoki butun albom — bitta PDF\n• PDF yoki EPUB → PNG, JPG yoki oddiy matn\n• Word hujjati → PDF, HTML yoki Markdown\n• CSV, JSON yoki XML → XLSX jadval\n• Subtitrlar: SRT, VTT va ASS bir-biriga, yoki faqat matn",
+        "formats_highlights": "Ko'pchilik bilmaydigan imkoniyatlar:\n• iPhone rasmi (HEIC) → JPG yoki PNG\n• Istalgan rasm — yoki butun albom — bitta PDF\n• PDF yoki EPUB → PNG, JPG yoki oddiy matn\n• Word hujjati → PDF, HTML yoki Markdown\n• CSV, JSON yoki XML → XLSX jadval\n• Kamera raw (CR3, NEF, ARW, DNG…) → JPG, PNG yoki 16 bitli TIFF\n• Telefon ocha olmaydigan RAR yoki 7z → ZIP\n• Subtitrlar: SRT, VTT va ASS bir-biriga, yoki faqat matn",
         "formats_reads": "O'qiydi",
         "formats_writes": "Yozadi",
         "formats_category_title": "📁 {category} fayllari",
@@ -543,8 +627,8 @@ STRINGS = {
         "price_quoted_first": "Aniq narx pul yechilishidan oldin ko'rsatiladi — to'laydiganingiz aynan shu.",
     },
     "ru": {
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": '⚡ Часто конвертируете большие файлы? /recharge пополнит кредит заранее.',
         "donate_unknown_currency": 'Неизвестная валюта "{currency}" — попробуйте xtr или usd.',
         "donate_currency_not_configured": 'Оплата в {currency} на этом боте пока не настроена — используйте Stars.',
@@ -588,14 +672,14 @@ STRINGS = {
         "balance_recent": "Последние операции:",
         "balance_empty_hint": '/recharge пополнит кредит в любой момент.',
         "bot_short_description": (
-            "Конвертирует картинки, видео, аудио, документы, таблицы и субтитры "
-            "— около 75 форматов."
+            "Конвертирует картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы "
+            "— около 90 форматов."
         ),
-        "bot_description": 'Пришли файл и выбери, во что его превратить. Картинки, видео, аудио, документы, таблицы и субтитры — около 75 форматов на вход, 40 на выход.\n\nHEIC с iPhone становится JPG. Набор картинок — одним PDF. PDF — картинками или текстом. Весь список — /formats\n\nВсё меньше 3 МБ — бесплатно. Дороже — цена по размеру файла в ⚡ кредите, купленном за Stars, и видна до выбора. Если конвертация сорвётся по вине бота, кредит вернётся.\n\nАнглийский, узбекский и русский. /privacy — что бот о тебе хранит.',
+        "bot_description": 'Пришлите файл и выберите, во что его превратить. Картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы — около 90 форматов на вход, 50 на выход.\n\nHEIC с iPhone становится JPG. Набор картинок — одним PDF. PDF — картинками или текстом. Весь список — /formats\n\nВсё меньше 3 МБ — бесплатно. Дороже — цена по размеру файла в ⚡ кредите, купленном за Stars, и видна до выбора. Если конвертация сорвётся по вине бота, кредит вернётся.\n\nАнглийский, узбекский и русский. /privacy — что бот о вас хранит.',
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
-        "privacy_stored": '• твой числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• твой баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для тебя делает — пока не закончит',
+        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
@@ -609,41 +693,41 @@ STRINGS = {
             "наружу не передаются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
-        "terms_specific": 'Файлы и оплата: конвертируй то, что имеешь право конвертировать. Всё меньше 3 МБ бесплатно; дороже — цена в ⚡ кредите, который покупается за Telegram Stars, и показывается до выбора формата. ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Если остановишь идущую конвертацию сам, ⚡ НЕ вернётся; если сбой на стороне бота — ⚡ автоматически вернётся на баланс. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.',
-        "terms_money": 'О деньгах: /recharge покупает ⚡ кредит на конвертации: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_specific": 'Файлы и оплата: конвертируйте то, что имеете право конвертировать. Всё меньше 3 МБ бесплатно; дороже — цена в ⚡ кредите, который покупается за Telegram Stars, и показывается до выбора формата. ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Если остановите идущую конвертацию сами, ⚡ НЕ вернётся; если сбой на стороне бота — ⚡ автоматически вернётся на баланс. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.',
+        "terms_money": 'О деньгах: /recharge покупает ⚡ кредит на конвертации: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Язык, место в напоминании о пополнении и все отметки о том, когда ты пользовался ботом, будут стёрты. Файлы тут ни при чём: то, что ты конвертировал, удалилось сразу после конвертации.\n\nОплаты останутся, без username, потому что по ним разбираются споры о платежах, — и баланс ⚡ тоже: /balance по-прежнему его покажет.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Язык, место в напоминании о пополнении и все отметки о том, когда вы пользовались ботом, будут стёрты. Файлы тут ни при чём: то, что вы конвертировали, удалилось сразу после конвертации.\n\nОплаты останутся, без username, потому что по ним разбираются споры о платежах, — и баланс ⚡ тоже: /balance по-прежнему его покажет.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -657,13 +741,46 @@ STRINGS = {
         "cancel_button_donation": '💸 Сумма пополнения',
         "cancel_item_donation": 'сумма пополнения, которую я запросил',
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
+        ),
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• Пришлите файл — картинку, raw-фото, видео, аудио, документ, таблицу, субтитры или архив — и выберите, во что его превратить. Все форматы: /formats\n"
+            "• Конвертация стоит ⚡ кредит, и цена видна до того, как что-то списано. Пополнить — /recharge; /balance покажет остаток и на что он ушёл.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /convert · /formats · /balance · /recharge · /cancel\n"
+            "Все команды и цены — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
         "cancel_item_conversion": "\u0444\u0430\u0439\u043b .{ext}, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0432\u044b \u043a\u043e\u043d\u0432\u0435\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043b\u0438",
         "cancel_button_conversion": "🔄 Файл, ждущий конвертации",
-        "start_greeting": "Привет! Пришли мне файл, и я преобразую его в другой формат.\n\n",
-        "help_text": 'Пришли мне файл, и я преобразую его в другой формат — картинки, видео, аудио, документы, таблицы и субтитры.\n\nКоманды:\n/convert - начать конвертацию (или просто отправь файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
+        "start_greeting": "Здравствуйте! Пришлите мне файл, и я преобразую его в другой формат.\n\n",
+        "help_text": 'Пришлите мне файл, и я преобразую его в другой формат — картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы.\n\nКоманды:\n/convert - начать конвертацию (или просто отправьте файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
         "convert_start_prompt": (
-            "Пришли файл для конвертации, до {max_mb} МБ — картинку, видео, звук, "
-            "документ, таблицу или файл субтитров. Пришли несколько картинок "
+            "Пришлите файл для конвертации, до {max_mb} МБ — картинку, видео, звук, "
+            "документ, таблицу или файл субтитров. Пришлите несколько картинок "
             "сразу — соберу их в один PDF.\n\n"
             "/formats покажет все форматы, которые я знаю.\n\n"
             "Цена в ⚡ кредите:\n{pricing}\n\n"
@@ -672,13 +789,13 @@ STRINGS = {
         "cancelled": "Отменено.",
         "btn_cancel_conversion": "✖️ Отмена",
         "unknown_extension": (
-            "Не удалось определить формат файла по названию — попробуй отправить "
+            "Не удалось определить формат файла по названию — попробуйте отправить "
             "его как документ с обычным расширением (например, photo.png)."
         ),
         "file_too_large_download": "Этот файл больше {max_mb} МБ — боты Telegram не могут скачать ничего крупнее, увы.",
-        "file_too_large_in_group": "Файлы больше {limit} МБ я принимаю только в личном чате. Пришли этот файл мне напрямую — там можно до {max_mb} МБ.",
-        "big_download_unavailable": "Файл не скачан: файлы больше {limit} МБ приходят ко мне через отдельное подключение к Telegram, а оно сейчас не отвечает. Попробуй через несколько минут или пришли файл меньше {limit} МБ.",
-        "card_downloading": "📥 Скачиваю твой файл…",
+        "file_too_large_in_group": "Файлы больше {limit} МБ я принимаю только в личном чате. Пришлите этот файл мне напрямую — там можно до {max_mb} МБ.",
+        "big_download_unavailable": "Файл не скачан: файлы больше {limit} МБ приходят ко мне через отдельное подключение к Telegram, а оно сейчас не отвечает. Попробуйте через несколько минут или пришлите файл меньше {limit} МБ.",
+        "card_downloading": "📥 Скачиваю ваш файл…",
         "card_download_sizes": "{done} из {total}",
         "card_converting": "Конвертирую…",
         "card_sending": "Отправляю результат…",
@@ -710,33 +827,38 @@ STRINGS = {
         "btn_quote_go": "✅ Конвертировать · {price} ⚡",
         "btn_quote_free": "✅ Конвертировать",
         "btn_quote_back": "↩️ Другой формат",
-        "converted_file_caption": "Вот твой сконвертированный файл!",
-        "converted_file_caption_free": 'Вот твой сконвертированный файл! (бесплатно)',
-        "conversion_expired": "Срок этой сессии конвертации истёк — отправь файл заново.",
+        "converted_file_caption": "Вот ваш сконвертированный файл!",
+        "converted_file_caption_free": 'Вот ваш сконвертированный файл! (бесплатно)',
+        "conversion_expired": "Срок этой сессии конвертации истёк — отправьте файл заново.",
         "convert_invoice_title": "Конвертировать {src} в {target}",
-        "convert_invoice_description": "Разовая конвертация твоего файла на {size_kb} КБ.",
+        "convert_invoice_description": "Разовая конвертация вашего файла на {size_kb} КБ.",
         "convert_invoice_label": "{src}→{target} конвертация",
         "topup_needed": 'Это стоит {price} ⚡, а у вас {balance} ⚡.\n\nОтправлен счёт на {stars} ⭐ — он добавит {credited} ⚡: хватит на эту конвертацию, остаток останется на балансе. /cancel, чтобы отменить.',
-        "credit_policy_note": '⚠️ ВНИМАНИЕ: ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Остановишь её сам — ⚡ НЕ вернётся; если сбой на стороне бота, ⚡ сразу вернётся на баланс. Платежи окончательные — Stars не возвращаются.',
+        "credit_policy_note": '⚠️ ВНИМАНИЕ: ⚡ списывается, когда конвертация НАЧИНАЕТСЯ. Остановите её сами — ⚡ НЕ вернётся; если сбой на стороне бота, ⚡ сразу вернётся на баланс. Платежи окончательные — Stars не возвращаются.',
         "send_limit_note": '📤 Готовый файл может весить до {mb} МБ. Если он получится больше, отправлен он не будет — тогда ⚡ сразу вернётся на баланс.',
         "too_many_megapixels": 'В этой картинке {mp} мегапикселей — больше {max} МП, которые я могу безопасно конвертировать. Ничего не списано.',
         "too_big_to_send_note": '📐 {formats} не предлагаются: при {mp} МП они выйдут больше {limit} МБ, которые бот может отправить. JPG, WEBP или AVIF поместятся.',
+        "raw_too_big": "Это raw-фото — {mp} мегапикселей. Сервер конвертирует raw-фото до {max} МП: для больших не хватает памяти даже на половинный размер. Ничего не списано.",
+        "raw_half_note": "⚠️ ВАЖНО: это raw-фото — {mp} МП. Оно конвертируется в половинном размере ({out} МП): для полного кадра серверу не хватает памяти.",
+        "video_fit_hdr_note": "⚠️ ВАЖНО: это видео {w}×{h} HDR. Сервер конвертирует его в {fw}×{fh} — для полного кадра ему не хватает памяти. Цвета сохраняются.",
+        "video_fit_big_note": "⚠️ ВАЖНО: это видео {w}×{h}. WEBM здесь делается в {fw}×{fh}; MP4, MKV и MOV остаются в полном размере.",
+        "video_fit_huge_note": "⚠️ ВАЖНО: это видео {w}×{h}. Сервер конвертирует его в {fw}×{fh} — для полного кадра ему не хватает памяти.",
         "nothing_sendable": 'Любой формат, который я могу предложить, для картинки такого размера выйдет больше {limit} МБ, которые бот может отправить. Ничего не списано.',
         "too_big_to_send_alert": 'Этот формат для такой картинки выйдет больше {limit} МБ, которые бот может отправить.',
         "keep_toggle_off": '📌 Хранить файл для других форматов: выкл',
         "keep_toggle_on": '📌 Хранить файл для других форматов: вкл',
-        "keep_explained_on": 'После каждой конвертации я буду хранить файл {minutes} минут, чтобы ты мог конвертировать его и в другие форматы. /cancel удалит его раньше.',
+        "keep_explained_on": 'После каждой конвертации я буду хранить файл {minutes} минут, чтобы вы могли конвертировать его и в другие форматы. /cancel удалит его раньше.',
         "keep_explained_off": 'Файл удалится сразу после конвертации.',
-        "storage_full_user": 'У меня уже {used} МБ твоих файлов, а на одного человека я храню до {limit} МБ. Дождись окончания конвертации или отмени её через /cancel и пришли снова.',
-        "storage_full_global": 'Сейчас не хватает временного места — пришли это снова через пару минут.',
+        "storage_full_user": 'У меня уже {used} МБ ваших файлов, а на одного человека я храню до {limit} МБ. Дождитесь окончания конвертации или отмените её через /cancel и пришлите снова.',
+        "storage_full_global": 'Сейчас не хватает временного места — пришлите это снова через пару минут.',
         "cancel_item_job_running": 'конвертацию {size} МБ {src} в {target} — идёт',
         "cancel_item_job_queued": 'конвертацию {size} МБ {src} в {target} — в очереди, пока ничего не списано',
         "cancel_button_job": '⏹ Конвертация в {target}',
-        "queue_full": 'У тебя уже {count} конвертаций в очереди или в работе. Пришли ещё, когда какие-то закончатся.',
+        "queue_full": 'У вас уже {count} конвертаций в очереди или в работе. Пришлите ещё, когда какие-то закончатся.',
         "job_queued": '⏳ {src} → {target} в очереди, перед ней {ahead}. Ничего не списывается, пока она не начнётся.',
         "job_starting": '⏳ {src} → {target}: начинаю…',
         "job_not_running": 'Эта конвертация уже закончилась.',
-        "payment_kept_as_credit": 'Оплата получена — +{credited} ⚡, на балансе {balance} ⚡. Файл уже устарел, поэтому ничего не конвертировано; пришли его снова — оплата пойдёт с баланса.',
+        "payment_kept_as_credit": 'Оплата получена — +{credited} ⚡, на балансе {balance} ⚡. Файл уже устарел, поэтому ничего не конвертировано; пришлите его снова — оплата пойдёт с баланса.',
         "job_progress": '⏳ Конвертация ещё идёт — прошло {elapsed} мин. Напишу снова через {next} мин., а не позже чем через {last} мин. сообщу, чем всё закончилось.',
         "job_progress_last": '⏳ Конвертация всё ещё идёт — прошло {elapsed} мин. Последнее сообщение — через {last} мин.: к тому времени она закончится или будет остановлена, а ⚡ вернётся на баланс.',
         "job_stop_button": '⏹ Остановить',
@@ -752,25 +874,27 @@ STRINGS = {
         "job_reason_timeout": 'Конвертация не уложилась в {minutes} мин., и я её остановил. Владелец в курсе.',
         "job_reason_too_slow": "На этот файл ушло бы около {minutes} мин., а конвертация здесь может идти не дольше {limit} мин., поэтому я остановил её сразу, а не заставил вас ждать до конца лимита. Подойдёт ролик покороче или в меньшем разрешении.",
         "job_reason_crash": 'Конвертация сломалась на моей стороне. Владелец в курсе.',
+        "job_reason_no_memory": "Для этого файла не хватило памяти сервера — так бывает с видео в 4K и HDR. С самим файлом всё в порядке: версия в 1080p или ниже сконвертируется.",
         "job_reason_too_large": '{target} получился на {mb} МБ, а по этой конвертации я могу отправить не больше {limit} МБ. JPG, WEBP или AVIF будут намного меньше. Владелец в курсе.',
-        "job_reason_send_failed": 'Файл сконвертирован, но отправить его тебе не вышло. Владелец в курсе.',
-        "job_reason_interrupted": 'Меня перезапустили посреди конвертации. Пришли файл снова через минуту.',
+        "job_reason_send_failed": 'Файл сконвертирован, но отправить его вам не вышло. Владелец в курсе.',
+        "job_reason_interrupted": 'Меня перезапустили посреди конвертации. Пришлите файл снова через минуту.',
         "unknown_order": "Неизвестный заказ.",
         "unrecognized_message": (
-            "Это не файл, который я могу конвертировать — пришли файл или "
-            "/formats, чтобы увидеть, что я принимаю. Назовёшь формат («heic», "
+            "Это не файл, который я могу конвертировать — пришлите файл или "
+            "/formats, чтобы увидеть, что я принимаю. Назовёте формат («heic», "
             "«epub») — скажу, во что он превращается."
         ),
-        "unknown_command": "Я не знаю такую команду. Отправь /start, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /start, чтобы увидеть, что я умею.",
         # ---- /formats ----
         "category_document": "документ",
         "category_data": "данные",
         "category_subtitle": "субтитры",
+        "category_archive": "архив",
         "formats_title": "📁 Что я конвертирую",
         "formats_intro": (
             "{sources} форматов на вход, {targets} на выход — всего {pairs} "
-            "комбинаций. Пришли файл, и я покажу, во что его можно превратить; "
-            "нажми на категорию ниже, чтобы увидеть весь список."
+            "комбинаций. Пришлите файл, и я покажу, во что его можно превратить; "
+            "нажмите на категорию ниже, чтобы увидеть весь список."
         ),
         "formats_highlights": (
             "Из менее очевидного:\n"
@@ -793,7 +917,7 @@ STRINGS = {
         ),
         "btn_more_formats": "⋯ Ещё форматы",
         "btn_fewer_formats": "‹ Меньше",
-        "btn_what_formats": "📁 Что ты умеешь конвертировать?",
+        "btn_what_formats": "📁 Что вы умеете конвертировать?",
         "btn_formats_back": "‹ Все категории",
         "convert_options_prompt_batch": (
             "Принято — {count} файлов, всего {size}. Во что конвертировать:"
@@ -815,7 +939,7 @@ STRINGS = {
             "сервере нет."
         ),
         "batch_mixed_formats": (
-            "Эти файлы разных форматов, так что отправляй их по одному — или "
+            "Эти файлы разных форматов, так что отправляйте их по одному — или "
             "набор картинок, который я соберу в один PDF."
         ),
         "price_free": "Бесплатно",
@@ -884,6 +1008,7 @@ COMMAND_MENU = {
         "formats": "Men o'qiydigan va yozadigan barcha formatlar",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz va u qayerga sarflangani",
         "recharge": "⚡ kredit to'ldirish",
         "paysupport": "To'lov bilan muammo",
@@ -897,6 +1022,7 @@ COMMAND_MENU = {
         "formats": "Все форматы, которые я читаю и пишу",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит и куда он ушёл",
         "recharge": "Пополнить ⚡ кредит",
         "paysupport": "Проблема с оплатой",

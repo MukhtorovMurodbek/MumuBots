@@ -78,6 +78,9 @@ The other new dependencies are permissive and impose nothing:
 | Telethon (ConvertBot, since 1.7.1) | MIT — and its own pyaes (MIT) and rsa (Apache-2.0) |
 | cryptg (ConvertBot, since 1.7.1) | CC0 — public domain |
 | yt-dlp | Unlicense |
+| yt-dlp's `[default]` extras (since 2.1.0) | yt-dlp-ejs (Unlicense and permissive parts), curl-cffi MIT, pycryptodomex BSD-2, brotli MIT, websockets BSD-3, requests Apache-2.0, urllib3 MIT, certifi MPL-2.0 (unmodified), mutagen GPL-2.0-or-later (compatible with AGPL-3.0 through its "or later") — all pip dependencies, none modified |
+| rawpy (ConvertBot, since 2.1.0) | MIT — it carries LibRaw (LGPL-2.1 or CDDL-1.0, unmodified, as a wheel) and needs numpy (BSD-3-Clause) |
+| libarchive's bsdtar (ConvertBot, since 2.1.0) | BSD-2-Clause — shelled out as a separate process, not linked |
 | ffmpeg | shelled out as a separate process, not linked |
 
 ## Where that leaves the repositories

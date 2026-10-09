@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Categories
 # ---------------------------------------------------------------------------
-# Six, and they are user-visible: /formats has a button per category and the
+# Seven, and they are user-visible: /formats has a button per category and the
 # conversion menu groups by them. Vector graphics (svg) live in `image`
 # deliberately -- svg answers the same question a png does ("a picture"), and
 # splitting it out would give /formats a category with one member in it.
@@ -53,8 +53,9 @@ AUDIO = "audio"
 DOCUMENT = "document"
 DATA = "data"
 SUBTITLE = "subtitle"
+ARCHIVE = "archive"
 
-CATEGORIES = (IMAGE, VIDEO, AUDIO, DOCUMENT, DATA, SUBTITLE)
+CATEGORIES = (IMAGE, VIDEO, AUDIO, DOCUMENT, DATA, SUBTITLE, ARCHIVE)
 
 # ---------------------------------------------------------------------------
 # Extensions in, formats out
@@ -79,7 +80,28 @@ ALIASES = {
     "mts": "m2ts",
     "aif": "aiff", "aifc": "aiff",
     "text": "txt",
+    "tbz": "tbz2", "tb2": "tbz2", "taz": "tgz",
 }
+
+# An archive's name ends in two extensions, and only the pair says what it is:
+# `photos.tar.gz` is not "a .gz". ConvertBot names them by the one-word form
+# (tgz, tbz2, txz) because every format name here is a single plain word that
+# ends up in a file name and a callback -- see tests/test_untrusted_names.py.
+COMPOUND_EXTENSIONS = (("tar.gz", "tgz"), ("tar.bz2", "tbz2"), ("tar.xz", "txz"))
+
+
+def compound_extension(filename: "str | None") -> "str | None":
+    """`photos.TAR.GZ` -> `tgz`; None when the name does not end in one."""
+    lowered = (filename or "").lower()
+    for ending, name in COMPOUND_EXTENSIONS:
+        if lowered.endswith("." + ending):
+            return name
+    return None
+
+# Camera RAW, which is a picture to the person who sent it and arrives with an
+# extension of the maker's choosing. All of them are `image` sources and share
+# one list of targets (TARGETS_BY_FORMAT): see raw_convert.py.
+RAW_FORMATS = ("dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2")
 
 # What each category takes IN. Not the same as what it puts out: this bot
 # reads a .psd and a .mobi and writes neither, which is the normal shape of
@@ -90,6 +112,7 @@ SOURCES = {
         "png", "jpg", "webp", "bmp", "tiff", "ico", "cur",
         "heic", "heif", "avif", "jp2", "psd", "tga", "pcx", "dds",
         "ppm", "sgi", "xbm", "xpm", "icns", "qoi", "blp", "im", "svg",
+        *RAW_FORMATS,
     ),
     VIDEO: (
         "mp4", "mov", "m4v", "avi", "webm", "mkv", "flv", "wmv",
@@ -105,6 +128,10 @@ SOURCES = {
     ),
     DATA: ("csv", "tsv", "json", "yaml", "xlsx", "xml"),
     SUBTITLE: ("srt", "vtt", "ass"),
+    # tgz, tbz2 and txz are .tar.gz, .tar.bz2 and .tar.xz -- see
+    # COMPOUND_EXTENSIONS. RAR is read and never written: the format's own
+    # tools are not free software and nobody needs a RAR made for them.
+    ARCHIVE: ("zip", "tar", "tgz", "tbz2", "txz", "7z", "rar"),
 }
 
 # The reverse index, built once.
@@ -159,6 +186,9 @@ TARGETS_BY_CATEGORY = {
         "tsv", "pdf", "txt",
     ),
     SUBTITLE: ("srt", "vtt", "ass", "txt"),
+    # ZIP first: it is what a phone can open, which is most of why anybody
+    # sends an archive here. RAR is a source only, so it is not in this list.
+    ARCHIVE: ("zip", "7z", "tgz", "tar", "txz", "tbz2"),
     # DOCUMENT has no category-wide answer worth having: see below.
 }
 
@@ -181,6 +211,9 @@ TARGETS_BY_FORMAT = {
     # by the PDF engine rather than by Pillow, and it has no business being
     # offered "convert to ICO at whatever size we guess".
     "svg": ("png", "pdf", "jpg", "webp"),
+    # A raw photo is developed into a picture; there is no PDF of one, and no
+    # ICO of a 24-megapixel negative. TIFF is 16 bits per channel, for editing.
+    **{raw: ("jpg", "png", "webp", "avif", "heic", "tiff") for raw in RAW_FORMATS},
     # An animated source keeps its frames. A still target here would quietly
     # discard all but the first, which is the one mistake that looks like it
     # worked.
@@ -219,6 +252,9 @@ POPULAR_COUNT = 6
 #   xml       defusedxml -- the *safe* XML parser, and the only one this bot
 #             will point at a stranger's file. See data_convert.py.
 #   ffmpeg    the binary, on PATH, with the encoder the target needs.
+#   rawpy     LibRaw, which develops a camera raw photo (and brings numpy).
+#   bsdtar    libarchive's tar: reads 7z and RAR, writes 7z. ZIP and TAR are
+#             Python's own and need nothing.
 #
 # Pillow itself is a hard dependency: without it the bot does not import, so
 # it is not listed against anything.
@@ -239,6 +275,8 @@ FORMAT_NEEDS = {
     "xlsx": ("openpyxl",),
     "yaml": ("yaml",),
     "xml": ("xml",),
+    "7z": ("bsdtar",), "rar": ("bsdtar",),
+    **{raw: ("rawpy",) for raw in RAW_FORMATS},
 }
 
 # The one place a format's requirement depends on which side it is on. Every
@@ -298,6 +336,24 @@ def _pillow_feature(name: str) -> bool:
         return False
 
 
+def bsdtar_path() -> "str | None":
+    """libarchive's tar, which reads 7z and RAR and writes 7z: `bsdtar` where it
+    is installed as that (Debian's libarchive-tools), and on Windows the
+    system's own tar.exe, which is the same program. CBOT_BSDTAR names one
+    explicitly. GNU tar is not it, and is never mistaken for it."""
+    explicit = os.environ.get("CBOT_BSDTAR")
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    found = shutil.which("bsdtar")
+    if found:
+        return found
+    if os.name == "nt":
+        candidate = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tar.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def _ffmpeg_encoders() -> set[str]:
     """The encoder names this ffmpeg was built with.
 
@@ -338,10 +394,12 @@ def probe() -> set[str]:
     for requirement, module in (
         ("mupdf", "pymupdf"), ("mammoth", "mammoth"), ("markdown", "markdown"),
         ("openpyxl", "openpyxl"), ("yaml", "yaml"), ("xml", "defusedxml"),
-        ("pydocx", "docx"),
+        ("pydocx", "docx"), ("rawpy", "rawpy"),
     ):
         if _module(module):
             found.add(requirement)
+    if bsdtar_path():
+        found.add("bsdtar")
     _ENCODERS_PRESENT = _ffmpeg_encoders()
     if _ENCODERS_PRESENT:
         found.add("ffmpeg")
@@ -352,7 +410,7 @@ def probe() -> set[str]:
         ", ".join(sorted(found)) or "Pillow only", len(_ENCODERS_PRESENT),
     )
     absent = [name for name in ("mupdf", "heif", "openpyxl", "yaml", "markdown", "mammoth",
-                                "pydocx")
+                                "pydocx", "bsdtar", "rawpy")
               if name not in found]
     if absent:
         logger.warning(
@@ -529,6 +587,13 @@ def find_format(text: str) -> str | None:
 MAX_PAGES = int(os.environ.get("CONVERT_MAX_PAGES") or 200)
 MAX_ROWS = int(os.environ.get("CONVERT_MAX_ROWS") or 100_000)
 MAX_CELLS = int(os.environ.get("CONVERT_MAX_CELLS") or 2_000_000)
+# The largest a single page may be once it is drawn as a picture, in
+# megapixels. A page's size is written into the file, so a 500-byte PDF can
+# ask for one nine thousand points on a side -- 350 megapixels, and a gigabyte
+# to draw, which MuPDF does without complaint and a 1 GB container does not
+# survive (measured 2026-09-29; MuPDF refuses from about 9,500 points). 100 is
+# 66 by 66 inches at the 150 dpi pages are drawn at; an A0 poster is 35.
+MAX_PAGE_MEGAPIXELS = int(os.environ.get("CONVERT_MAX_PAGE_MEGAPIXELS") or 100)
 # How many files one batch may hold. Telegram caps an album at 10; a longer
 # run of separate messages is collected the same way, and this is where it
 # stops.

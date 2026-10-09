@@ -255,6 +255,40 @@ if BOT == "anon_bot":
     assert db.get_active_conversation_for_follower(2)["id"] == conv3["id"]
     print("  follower-state clear (/cancel) ok")
 
+    # 2.1.0: where a reaction on a bubble goes -- its twin, both sides and
+    # whether the guest is blocked, in one query.
+    route = db.get_reaction_route(1, 502)
+    assert route == {"peer_message_id": 8, "conversation_id": conv2["id"], "owner_user_id": 1,
+                     "follower_user_id": 2, "blocked": False}, route
+    db.set_anon_blocked(1, 2, True)
+    assert db.get_reaction_route(2, 601)["blocked"] is True
+    db.set_anon_blocked(1, 2, False)
+    assert db.get_reaction_route(1, 500) is None, "a row with no twin has nowhere to send it"
+    assert db.get_reaction_route(1, 504) is None
+    print("  reaction route ok")
+
+    # 2.1.0: the one-time note that reactions travel. Who is owed it is
+    # decided by the order of two ALTERs, so the migration is run here the way
+    # it runs on the live database: the column gone (a table from before it),
+    # two people already in it, then init_db again.
+    with db.pooled() as _conn:
+        _conn.execute("ALTER TABLE user_settings DROP COLUMN IF EXISTS knows_reactions")
+        _conn.execute("DELETE FROM user_settings WHERE user_id IN (801, 802, 803)")
+        _conn.execute("INSERT INTO user_settings (user_id, language) VALUES (801, 'en'), (802, 'ru')")
+        _conn.commit()
+    db.init_db()
+    assert db.claim_reactions_note(801) is True, "somebody already here is owed the note"
+    assert db.claim_reactions_note(801) is False, "once"
+    db.set_user_language(803, "uz")
+    assert db.claim_reactions_note(803) is False, "somebody new is not"
+    db.set_user_language(802, "en")
+    assert db.claim_reactions_note(802) is True, "changing language does not use it up"
+    assert db.claim_reactions_note(999999) is False, "nobody, no note"
+    db.init_db()
+    assert db.claim_reactions_note(801) is False and db.claim_reactions_note(803) is False, \
+        "a second run of the migration owes nobody anything again"
+    print("  reactions note: owed to those already here, once; never to anyone new")
+
 if BOT == "manager_bot":
     import family_link
     family_link.init_family_schema()
@@ -279,11 +313,49 @@ if BOT == "manager_bot":
     assert db.recent_events(5)[0]["message"] == "hello"
     cols, rows = db.run_readonly_query("SELECT 1 AS one")
     assert rows == [(1,)], rows
-    # the statement_timeout must NOT have leaked onto the pooled connection
+    # /sql's ten seconds must NOT have leaked onto the pooled connection, which
+    # keeps the pool's own minute (every pooled connection is started with
+    # -c statement_timeout=60s since 2.1.0; it was unlimited, "0", before)
     with db.pooled() as conn:
         left = conn.execute("SHOW statement_timeout").fetchone()[0]
-    assert left == "0", f"statement_timeout leaked onto the pool: {left}"
+    assert left == "1min", f"statement_timeout leaked onto the pool: {left}"
     print("  manager queries ok, statement_timeout not leaked")
+    # 2.1.0: prepare=True sends the query over the extended protocol, where
+    # Postgres refuses more than one statement -- so a second one can no
+    # longer end the read-only transaction and run outside it. Until this ran,
+    # that was checked against psycopg's source only.
+    for attempt in ("SELECT 1; SELECT 2",
+                    "SELECT 1; COMMIT; CREATE TABLE smoke_escape (a int)",
+                    "CREATE TABLE smoke_escape (a int)"):
+        try:
+            db.run_readonly_query(attempt)
+        except Exception:
+            pass
+        else:
+            raise AssertionError(f"/sql ran this: {attempt}")
+    with db.pooled() as conn:
+        escaped = conn.execute("SELECT to_regclass('smoke_escape')").fetchone()[0]
+    assert escaped is None, "a write got out of /sql"
+    assert db.run_readonly_query("SELECT 2 AS two")[1] == [(2,)], "/sql still works after a refusal"
+    print("  /sql: one statement, read-only, nothing got out")
+    # 2.1.0: family.feedback -- kept, taken once, read back, pruned.
+    family_link.init_family_schema()
+    with db.pooled() as conn:
+        conn.execute("DELETE FROM family.feedback")
+        conn.commit()
+    family_link._bot_id = "convertbot"
+    fid = family_link.save_feedback("uz", "smoke feedback")
+    assert family_link.feedback_count_since(1) == 1
+    taken = family_link.take_undelivered_feedback(10)
+    assert [(r["id"], r["bot_id"], r["lang"], r["body"]) for r in taken] == \
+        [(fid, "convertbot", "uz", "smoke feedback")], taken
+    assert family_link.take_undelivered_feedback(10) == [], "taken once"
+    assert family_link.recent_feedback(5)[0]["delivered_at"] is not None
+    with db.pooled() as conn:
+        conn.execute("UPDATE family.feedback SET created_at = now() - interval '31 days'")
+        conn.commit()
+    assert family_link.prune_feedback() == 1 and family_link.recent_feedback(5) == []
+    print("  feedback: kept, taken once, gone after 30 days")
     expired = db.expire_stale_commands(0)
     assert any(r["command"] == "ping" for r in expired), expired
     finished = db.take_finished_commands(20)

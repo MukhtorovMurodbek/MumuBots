@@ -103,6 +103,19 @@ PROBLEMS = {
         "A slash command this bot does not have.",
         "A typo, a command from an older version, or one that belongs to another bot.",
         "Nothing, unless an old command should be kept working as an alias."),
+    "FM-FEEDBACK-LIMIT": Problem(
+        EVERY_PUBLIC_BOT, "Too much feedback from one person today",
+        "The person had already sent FEEDBACK_PER_DAY messages with /feedback in the last 24 hours, so "
+        "this one was not taken.",
+        "Several thoughts sent one at a time, or somebody using /feedback to message the owner over and "
+        "over.",
+        "Nothing; raise FEEDBACK_PER_DAY if ordinary people reach it."),
+    "FM-FEEDBACK-FAILED": Problem(
+        EVERY_PUBLIC_BOT, "Feedback could not be saved",
+        "Writing what the person sent with /feedback to the database failed, so it did not reach the "
+        "owner; they were asked to send it again.",
+        "The shared database unreachable or timing out.",
+        "The traceback beside the incident in the log; /status for the database."),
 
     # ---- ConvertBot --------------------------------------------------------------
     "CV-NO-EXTENSION": Problem(
@@ -246,6 +259,15 @@ PROBLEMS = {
         "balance and the owner was alerted.",
         "An out-of-memory kill on a very large image, or a crash inside a native decoder.",
         "The log line beside the incident id has the exit code (-9 or 137 means killed); /usage shows memory."),
+    "CV-NO-MEMORY": Problem(
+        "ConvertBot", "Ran out of memory",
+        "ffmpeg was killed for memory while converting (SIGKILL: exit -9 or 137), or the worker hit a "
+        "MemoryError. The file is not at fault. Its ⚡ went back to the balance, and the person was told "
+        "that a lower resolution will convert.",
+        "A 4K or HDR video on a host with 1 GB a container: tone-mapping one 4K frame to SDR takes about "
+        "100 MB, and the encoder holds several. Measured on Railway, 2026-09-29.",
+        "Nothing, if it is rare. If it is common, the host needs more memory a service -- or such video "
+        "converted at 1080p (CHANGES_v2.0.0.md, Railway, measured)."),
     "CV-OUTPUT-TOO-BIG": Problem(
         "ConvertBot", "The result was over its send limit",
         "The conversion finished, but the file is larger than this job may send back: 50 MB, or where results "
@@ -628,6 +650,13 @@ PROBLEMS = {
         "A message from somebody with no inbox and no open conversation.",
         "Writing to the bot without having tapped a link.",
         "Nothing."),
+    "AN-REACTION-NOT-PASSED": Problem(
+        "AnonBot", "Reaction not passed on",
+        "A reaction on a message in a conversation could not be shown to the other person: a Telegram "
+        "Premium custom-emoji reaction, an emoji Telegram does not let bots use, or a second or third "
+        "reaction on one message (a bot shows one). The person saw a note for a few seconds.",
+        "A Premium user reacting with a custom emoji, or with more than one reaction.",
+        "Nothing; it is Telegram's limit on what a bot may react with (setMessageReaction)."),
 }
 
 # i18n key -> code. "shared" applies to every public bot unless the bot's own
@@ -647,6 +676,8 @@ KEYS = {
         "update_soon_try_later": "FM-UPDATING",
         "update_soon_try_later_soon": "FM-UPDATING",
         "unknown_command": "FM-UNKNOWN-COMMAND",
+        "feedback_limit": "FM-FEEDBACK-LIMIT",
+        "feedback_failed": "FM-FEEDBACK-FAILED",
     },
     "convert_bot": {
         "unknown_extension": "CV-NO-EXTENSION",
@@ -738,12 +769,16 @@ KEYS = {
         "export_gone": "AN-EXPORT-GONE",
         "export_nothing_to_export": "AN-EXPORT-NOTHING",
         "generic_nudge": "AN-UNADDRESSED",
+        # Two notes, one code: what was not passed on is the same fact.
+        "reaction_not_passed": "AN-REACTION-NOT-PASSED",
+        "reaction_one_only": "AN-REACTION-NOT-PASSED",
     },
 }
 
 # Codes a message is given where it is assembled, not by i18n.t().
 JOB_ENDINGS = {
     "refused": "CV-REFUSED", "timeout": "CV-TIMEOUT", "too_slow": "CV-TOO-SLOW", "crash": "CV-CRASH",
+    "no_memory": "CV-NO-MEMORY",
     "too_large": "CV-OUTPUT-TOO-BIG", "send_failed": "CV-SEND-FAILED", "interrupted": "CV-RESTARTED",
 }
 STICKER_ERRORS = {
@@ -776,10 +811,10 @@ ALERT_KEYS = {
 # purpose; tests/test_problems.py lists both halves so neither grows by default.
 SIMPLE = frozenset({
     "FM-FLOOD", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE",
-    "FM-UPDATING", "FM-UNKNOWN-COMMAND",
+    "FM-UPDATING", "FM-UNKNOWN-COMMAND", "FM-FEEDBACK-LIMIT",
     "CV-NO-EXTENSION", "CV-TG-LIMIT", "CV-GROUP-LIMIT", "CV-UNSUPPORTED", "CV-TOO-BIG", "CV-NOTHING-SENDABLE",
     "CV-MEGAPIXELS", "CV-FORMAT-TOO-BIG", "CV-STORAGE-USER", "CV-QUEUE-FULL", "CV-EXPIRED",
-    "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW",
+    "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW", "CV-NO-MEMORY",
     "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-UNRECOGNIZED",
     "DL-LARGE-OFF", "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
     "DL-BUTTON-EXPIRED",
@@ -790,7 +825,7 @@ SIMPLE = frozenset({
     "AN-NOT-STARTED", "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-BLOCKED",
     "AN-REPLY-STALE", "AN-TOO-FAST", "AN-EDIT-NOT-RELAYED", "AN-CONV-GONE", "AN-NOT-YOURS",
     "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-GONE",
-    "AN-EXPORT-NOTHING", "AN-UNADDRESSED",
+    "AN-EXPORT-NOTHING", "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
 })
 
 
@@ -816,11 +851,14 @@ SIMPLE = frozenset({
 #              conversion that timed out, Telegram refusing a sticker. Worth
 #              knowing about, not worth waking up for. Into the daily report.
 #
-#   3 REFUSED  The bot did exactly the right thing and said no: a file over
-#              the limit, a format nobody supports, a quota, an unknown
+#   3 EXPLAINED  The bot did exactly the right thing and told the person why
+#              it could not do what they asked: a file over the limit, a
+#              message that was not a reply, an expired button, an unknown
 #              command. Not a fault at all, and the reason SIMPLE exists --
-#              these are the problems whose own message explains them. Counted
-#              in the daily report, never listed one by one.
+#              these are the problems whose own message explains them. In the
+#              daily report by KIND (below), never one incident at a time.
+#              (The constant is still called REFUSED; the report stopped
+#              saying "refused" in 2.1.0 -- see KINDS for why.)
 #
 # A level-2 code can still reach the owner immediately without being promoted:
 # see BURST_ESCALATION in shared_features. Fifty of the same failure in an
@@ -859,8 +897,107 @@ def level(code) -> int:
     return FAULT
 
 
-LEVEL_NAMES = {URGENT: "urgent", FAULT: "fault", REFUSED: "refused"}
+LEVEL_NAMES = {URGENT: "urgent", FAULT: "fault", REFUSED: "explained"}
 LEVEL_ICONS = {URGENT: "🚨", FAULT: "⚠️", REFUSED: "•"}
+
+
+# ---------------------------------------------------------------------------
+# What kind of "the bot was right" it was
+# ---------------------------------------------------------------------------
+# Level 3 used to reach the owner as one line: "Refused — 2", "people told no
+# by a bot that was working correctly". The owner, 2026-10-03, about a night
+# whose only two entries were AnonBot messages sent without a swipe-reply:
+# "the report i receive is 'Refused' which is misleading for me. Fix the
+# wording for this and every other similar case." Nobody had been refused
+# anything -- they had used the bot the wrong way and been shown the right
+# one. Level 3 is five different things, and each is now named for what it
+# is, with every code listed under it by its title:
+#
+#   GUIDED      they sent something the bot cannot take -- no swipe-reply, an
+#               unknown command, a typo -- and were told what to do instead
+#   LIMIT       a size, a quota, a pace, a format or a setting, as designed
+#   GONE        an old button or link, a record that has gone, or a button
+#               that was somebody else's
+#   OTHER_SIDE  the other person's choice: blocked, paused, never started
+#   PAUSED      they came while the owner had the bots paused for an update
+#
+# Every SIMPLE code is in exactly one; tests/test_reporting.py holds that.
+GUIDED, LIMIT, GONE, OTHER_SIDE, PAUSED = "guided", "limit", "gone", "other_side", "paused"
+
+KINDS = {
+    GUIDED: frozenset({
+        "FM-UNKNOWN-COMMAND", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT",
+        "CV-NO-EXTENSION", "CV-MIXED-BATCH", "CV-UNRECOGNIZED",
+        "DL-UNRECOGNIZED",
+        "ST-WHOMADE-UNKNOWN", "ST-TITLE-EMPTY", "ST-IMPORT-SOURCE", "ST-UNRECOGNIZED",
+        "ST-NOTHING-ADDED", "ST-NO-STICKER",
+        "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-STALE",
+        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-NOTHING",
+        "AN-UNADDRESSED",
+    }),
+    LIMIT: frozenset({
+        "FM-FLOOD", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE", "FM-FEEDBACK-LIMIT",
+        "CV-TG-LIMIT", "CV-GROUP-LIMIT", "CV-UNSUPPORTED", "CV-TOO-BIG", "CV-NOTHING-SENDABLE",
+        "CV-MEGAPIXELS", "CV-FORMAT-TOO-BIG", "CV-STORAGE-USER", "CV-QUEUE-FULL", "CV-NO-CREDIT",
+        "CV-TOO-SLOW", "CV-NO-MEMORY",
+        "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-LARGE-OFF",
+        "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
+        "ST-ANIMATED", "ST-TG-PACK-FULL",
+        "AN-TOO-FAST", "AN-REACTION-NOT-PASSED",
+    }),
+    GONE: frozenset({
+        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED",
+        "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
+        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
+    }),
+    OTHER_SIDE: frozenset({
+        "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",
+        "AN-NOT-STARTED", "AN-REPLY-BLOCKED",
+    }),
+    PAUSED: frozenset({"FM-UPDATING"}),
+}
+
+# The order the nightly report shows them in -- the ones that say something
+# about the bots themselves first: people getting it wrong may mean a sentence
+# needs rewriting, a limit may need raising.
+KIND_ORDER = (GUIDED, LIMIT, GONE, OTHER_SIDE, PAUSED)
+
+# icon, heading, and the line saying what it means.
+KIND_LABELS = {
+    GUIDED: ("💡", "Shown how to use it",
+             "sent something the bot couldn't take, and were told what to do instead"),
+    LIMIT: ("📏", "Hit a limit",
+            "too big, too many, too fast, not enough ⚡, or something not offered — each by design"),
+    GONE: ("⌛", "Out of date, or not theirs",
+           "an old button or link, a record that had gone, or somebody else's button"),
+    OTHER_SIDE: ("🚫", "Blocked or unavailable",
+                 "the other person blocked them, paused or deleted their inbox, or never "
+                 "started the bot"),
+    PAUSED: ("⏸", "Turned away during an update",
+             "came while /pause was on, and were written down for /resume"),
+}
+
+
+def kind(code) -> "str | None":
+    """Which KIND a level-3 code is, or None for anything that is not level 3.
+    A level-3 code in no kind would be a gap in the table above; it is read as
+    GUIDED rather than dropped, and the test is what finds it."""
+    if level(code) != REFUSED:
+        return None
+    for name, codes in KINDS.items():
+        if code in codes:
+            return name
+    return GUIDED
+
+
+def kind_label(code) -> str:
+    """"💡 shown how to use it" -- what /reports and /report say for a level-3
+    code, in place of the level's bare name."""
+    found = kind(code)
+    if found is None:
+        return f"{LEVEL_ICONS.get(level(code), '•')} {LEVEL_NAMES.get(level(code), '?')}"
+    icon, heading, _ = KIND_LABELS[found]
+    return f"{icon} {heading[0].lower()}{heading[1:]}"
 
 
 def urgent(code) -> bool:

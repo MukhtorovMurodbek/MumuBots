@@ -174,7 +174,21 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+                # Nothing here may wait on the network for ever. The five bots
+                # share one process and eight threads, and a query whose
+                # packets go unacknowledged (a dead network path) otherwise
+                # waits out TCP retransmission -- minutes -- holding one of
+                # them: measured in the incident of 2026-10-09 08:40 UTC. So a
+                # connection attempt gives up after 10 s (connect_timeout),
+                # data nobody acknowledges after 30 s (tcp_user_timeout, in
+                # ms), a statement after 60 s (statement_timeout) and a
+                # transaction left open and idle after 120 s
+                # (idle_in_transaction_session_timeout). /sql sets its own,
+                # shorter statement_timeout for the length of its transaction
+                # (run_readonly_query), which overrides this one.
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
                 # Keep an idle connection alive at the TCP level rather than
                 # discovering it is dead on the next checkout. Cheaper than
                 # the check it saves, and it happens while nobody is waiting.
@@ -600,11 +614,20 @@ def run_readonly_query(sql: str, limit: int = 50):
     Both SETs are LOCAL, i.e. scoped to this transaction. The connection is
     pooled and gets handed to the next caller afterwards; a plain SET would
     leave a ten-second statement timeout stuck on it for the rest of the
-    process's life."""
+    process's life.
+
+    READ ONLY lasts as long as the transaction does, and one string may hold
+    several statements: psycopg sends a query without parameters over the
+    simple protocol, which runs them all, so `SELECT 1; COMMIT; DROP TABLE x`
+    ended the read-only transaction on its second statement and ran the third
+    in a new one that was not. `prepare=True` sends it over the extended
+    protocol instead, in which Postgres itself refuses more than one statement
+    ("cannot insert multiple commands into a prepared statement") -- so the
+    guarantee is Postgres's, not a parser's."""
     with pooled() as conn:
         conn.execute("SET TRANSACTION READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '10s'")
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, prepare=True)
         cols = [d.name for d in cur.description] if cur.description else []
         rows = cur.fetchmany(limit) if cur.description else []
         conn.rollback()

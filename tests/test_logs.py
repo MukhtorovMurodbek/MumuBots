@@ -83,6 +83,29 @@ try:
     check("while a log with no file still falls back to memory", "memory" in logs(), logs())
     (log_dir / "problems.log").write_text("", encoding="utf-8")
     check("an empty file says so", "nothing yet" in logs("problems"), logs("problems"))
+
+    print("\n== versions: what this process really runs ==")
+    lines = fl.installed_versions()
+    check("every line is name==version, sorted, each name once",
+          lines and all(line.count("==") == 1 for line in lines)
+          # sorted by name, not by whole line: "psycopg==" sorts after
+          # "psycopg-binary==" as text, because "=" comes after "-"
+          and [line.split("==")[0].lower() for line in lines]
+          == sorted(line.split("==")[0].lower() for line in lines)
+          and len({line.split("==")[0].lower() for line in lines}) == len(lines), lines[:5])
+    head, name, data = asyncio.run(fl._cmd_versions(None, []))
+    body = data.decode() if data else ""
+    check("bare, it is a requirements file to pin from",
+          name and name.endswith(".txt") and "packages" in head
+          and all(line in body.splitlines() for line in lines), (head, name))
+    check("the file says which bot and which Python it came from",
+          body.startswith("# ") and "Python" in body.splitlines()[0], body[:80])
+    wanted = lines[0].split("==")[0]
+    text, name, data = asyncio.run(fl._cmd_versions(None, [wanted.upper()]))
+    check("with a name, the matching lines as text and no file",
+          name is None and data is None and lines[0] in text, text)
+    check("the command is on the bus and has its help line",
+          fl.COMMANDS.get("versions") is fl._cmd_versions and "versions" in fl.COMMAND_HELP)
 finally:
     if log_dir.exists():
         shutil.rmtree(log_dir)

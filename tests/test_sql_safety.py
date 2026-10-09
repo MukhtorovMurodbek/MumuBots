@@ -221,6 +221,15 @@ def main() -> int:
     runner = db.split("def run_readonly_query", 1)[1].split("\ndef ", 1)[0]
     check("/sql runs in a read-only transaction", 'SET TRANSACTION READ ONLY' in runner)
     check("/sql cannot hold a connection open", "statement_timeout" in runner)
+    # A read-only transaction ends with a COMMIT, and a query without
+    # parameters goes over the simple protocol, which runs every statement in
+    # the string: "SELECT 1; COMMIT; DROP TABLE x" left read-only after its
+    # second statement. The extended protocol takes one statement, and
+    # Postgres is the one to refuse the rest.
+    executes = [line for line in runner.splitlines() if "conn.execute(sql" in line]
+    check("/sql sends the query over the extended protocol, which takes one statement",
+          bool(executes) and all("prepare=True" in line for line in executes),
+          "; ".join(line.strip() for line in executes) or "no conn.execute(sql ...) found")
 
     print("")
     print("FAILURES: " + str(len(failures)))

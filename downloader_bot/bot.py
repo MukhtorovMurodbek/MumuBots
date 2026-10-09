@@ -87,6 +87,7 @@ import lifecycle
 import net
 import platforms
 import resolvers
+import routewatch
 import big_files
 import large_files
 from live_message import LiveMessage, edit_in_place
@@ -144,7 +145,12 @@ from shared_features import (
     donate_amount_chosen,
     donate_fiat_amount_chosen,
     donate_custom_button_chosen,
-    donate_custom_amount_received,
+    awaited_text_received,
+    feedback_command,
+    HELP_TOGGLE_PATTERN,
+    help_keyboard,
+    help_toggle,
+    wants_full_help,
     donation_precheckout_callback,
     donation_payment_callback,
     setup_logging,
@@ -302,7 +308,11 @@ def _spawn_download(context, update, work) -> None:
     context.application.create_task(run(), update=update)
 
 
-def build_help_text(lang: str) -> str:
+def build_help_text(lang: str, full: bool = False) -> str:
+    """The short version unless asked for the long one -- the family's help
+    template (shared_features, "/help in two lengths")."""
+    if not full:
+        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
     return i18n.t(lang, "help_text", username=BOT_USERNAME or "this_bot") + sibling_bots_blurb(BOT_NAME, lang)
 
 
@@ -331,6 +341,7 @@ BOT_COMMANDS = [
     BotCommand("settings", "Captions and file quality"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
+    BotCommand("feedback", "Suggest something, or report a problem"),
     BotCommand("balance", "Your ⚡ credit"),
     BotCommand("donate", "Chip in for hosting costs"),
     BotCommand("paysupport", "Trouble with a payment"),
@@ -369,11 +380,10 @@ async def _reply(update: Update, text: str, **kwargs):
 
 
 async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    kb = sibling_bots_keyboard_row(BOT_NAME)
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
     )
 
 
@@ -422,7 +432,9 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
-    await update.message.reply_text(build_help_text(lang))
+    full = wants_full_help(context)
+    await update.message.reply_text(build_help_text(lang, full=full),
+                                    reply_markup=help_keyboard(lang, full))
 
 
 async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> list[CancelItem]:
@@ -789,6 +801,22 @@ async def _bus_probe(context, args):
     return header + resolvers.format_probe(results), None, None
 
 
+async def _bus_routewatch(context, args):
+    """`routewatch` over the family bus: the daily check, now.
+
+    Where `probe` asks every route of every platform and leaves the scores
+    alone, this is the same thing routewatch.py does by itself once a day --
+    first working route per platform, the state it puts each platform in, the
+    owner told if that changed, and yt-dlp compared with its newest release.
+    Asking is not neutral: it updates what the daily check remembers, so a
+    problem found now will not be announced again tonight.
+
+    The whole check can outlast the 90 seconds ManagerBot gives a command
+    (yt-dlp alone is allowed 90), so past routewatch.REPLY_WITHIN_S this
+    answers with the platforms finished so far and goes on in the background."""
+    return await routewatch.run(force=True, reply_within=routewatch.REPLY_WITHIN_S), None, None
+
+
 async def providers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/providers -- which download route is working and which is not.
 
@@ -886,6 +914,24 @@ def _remember_delivery(context, platform: str, url: str, lossless: bool) -> str:
     return token
 
 
+def _spend_redo(remembered: dict) -> bool:
+    """True the first time the button is taken from this delivery, False every
+    time after. The mark is made in the same breath as the look, with no await
+    between them, so a double tap (two updates in flight at once, before
+    Telegram has taken the button off) cannot get both through. A plain bool,
+    because user_data is saved as JSON."""
+    if remembered.get("spent"):
+        return False
+    remembered["spent"] = True
+    return True
+
+
+def _unspend_redo(remembered: dict) -> None:
+    """Give the button back: the tap that spent it came to nothing (the person
+    was out of downloads), so it is theirs to tap again."""
+    remembered.pop("spent", None)
+
+
 def _nudge_kb(lang: str | None = None, token: str | None = None,
               lossless: bool = False) -> InlineKeyboardMarkup | None:
     # Point at ConvertBot too -- e.g. someone might want just the audio, or
@@ -905,6 +951,14 @@ def _nudge_kb(lang: str | None = None, token: str | None = None,
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+async def _set_buttons(query, markup) -> None:
+    """Put `markup` under the message the tapped button was on."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=markup)
+    except Exception:
+        logger.debug("Couldn't change the delivery's button", exc_info=True)
+
+
 async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The button under a finished download. Runs the ordinary path with the
     quality flipped for this one delivery, and leaves /lossless alone."""
@@ -912,21 +966,23 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = await i18n.get_lang(update.effective_user.id, context)
     token = query.data[len(REDELIVER_PREFIX):]
     remembered = context.user_data.get("redeliver", {}).get(token)
-    if not remembered:
+    if not remembered or not _spend_redo(remembered):
         await query.answer(i18n.t(lang, "redeliver_expired"), show_alert=True)
         return
     await query.answer()
-    # The button is spent: tapping it twice would download the same file twice
-    # against the same allowance, and the second tap is always a mis-tap. The
-    # markup is edited rather than the text, because the message it is under
-    # is a photo or a video and edit_message_text does not work on those.
-    try:
-        await query.edit_message_reply_markup(reply_markup=_nudge_kb())
-    except Exception:
-        logger.debug("Couldn't take the redeliver button off", exc_info=True)
+    # The button is spent (above, before any await: a double tap is two updates
+    # in flight, and the markup below is only edited once Telegram answers):
+    # tapping it twice would download the same file twice against the same
+    # allowance, and the second tap is always a mis-tap. The markup is edited
+    # rather than the text, because the message it is under is a photo or a
+    # video and edit_message_text does not work on those.
+    await _set_buttons(query, _nudge_kb())
 
     allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
     if not allowance["allowed"]:
+        # Nothing was started, so nothing is spent: the button comes back.
+        _unspend_redo(remembered)
+        await _set_buttons(query, _nudge_kb(lang, token, remembered["lossless"]))
         await query.message.reply_text(_allowance_message(lang, allowance))
         return
     await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
@@ -1472,6 +1528,9 @@ async def _post_init(application):
             interval=PROVIDER_HEALTH_FLUSH_SECONDS,
             first=PROVIDER_HEALTH_FLUSH_SECONDS,
         )
+    # The daily "does every platform still have a way in" check, which first
+    # runs a few minutes after start. See routewatch.py.
+    routewatch.schedule(application)
     # Before the first getUpdates: if the container this one replaces is
     # still polling, both get 409 Conflict and this bot's updates are split
     # between them. See lifecycle.py.
@@ -1538,13 +1597,17 @@ def main():
     # who was here, and /status is supposed to say so.
     attach_flood_gate(app, ADMIN_IDS)
     # Runs after track_activity but before every other handler -- a no-op
-    # unless a "Custom" donate button was just tapped, in which case it
-    # consumes the reply and stops it from also being treated as a normal
-    # message (see donate_custom_amount_received's docstring).
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, donate_custom_amount_received), group=-1)
+    # unless /feedback or a "Custom" donate button has just asked for
+    # something to be typed, in which case it takes the answer and stops it
+    # from also being treated as a link (see awaited_text_received's
+    # docstring).
+    app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
+                                   awaited_text_received), group=-1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("settings", settings_command))
     app.add_handler(CommandHandler("caption", caption_toggle))
@@ -1601,6 +1664,9 @@ def main():
     family_link.COMMANDS["probe"] = _bus_probe
     family_link.COMMAND_HELP["probe"] = (
         "probe [platform|url ...] -- try every download route from in here")
+    family_link.COMMANDS["routewatch"] = _bus_routewatch
+    family_link.COMMAND_HELP["routewatch"] = (
+        "the daily route check, now: which platforms have a way in, and is yt-dlp current")
     family_link.COMMANDS["providers"] = _bus_providers
     family_link.COMMAND_HELP["providers"] = (
         "which download route is working and which is resting")

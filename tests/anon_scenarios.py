@@ -24,6 +24,11 @@ The scenarios are grouped the way a user would meet them:
     M  the handlers nothing else reached
     N  a link tapped, then a reply to something else
     O  /conversations, archiving, jumping, /which
+    P  which bubble a delivered answer hangs under, for every content type
+    Q  problems: always logged, a Report button only where it helps
+    R  reactions: passed across as the bot's own, and what cannot be
+    S  /help in two lengths, and the one-time note that reactions travel
+    T  /feedback, and the reply to a guest it must never take
 
 Run from the repo root:  python tests/anon_scenarios.py
 Needs a Postgres (TEST_DATABASE_URL, or the local default). No network.
@@ -65,6 +70,9 @@ os.environ["ABOT_NEW_CONV_COOLDOWN_SEC"] = "0"
 # updates for one user id inside a second is exactly the shape it exists to
 # stop. Group J turns it back on and checks it.
 os.environ["FLOOD_UPDATES_PER_MINUTE"] = "0"
+# The note about a reaction that could not be passed on takes itself down;
+# group R waits for that, and six seconds a time would be a slow suite.
+os.environ["ABOT_REACTION_NOTE_SECONDS"] = "0.2"
 
 import sim  # noqa: E402
 import db  # noqa: E402
@@ -140,8 +148,10 @@ async def fresh():
     reset_tables()
     anon_logic._recent_messages.clear()
     anon_logic._recent_opens.clear()
+    anon_logic._reaction_notes.clear()
     shared_features._flood_window.clear()
     shared_features._flood_told.clear()
+    shared_features._feedback_sent.clear()
     ab._albums.clear()
     # A new FakeTelegram restarts message ids at 1, but live_message's
     # watermark is module state and would still hold the previous group's
@@ -150,7 +160,8 @@ async def fresh():
     # scenarios mean to exercise.
     live_message._last_incoming.clear()
     tele = sim.FakeTelegram(bot_username="anonbot_test")
-    driver, _ = await sim.build(ab, tele)
+    driver, polling = await sim.build(ab, tele)
+    driver.polling_kwargs = polling
     # family_link.attach(), which main() has just run, installs its own event
     # hook -- so the collector set at import above was replaced the first time
     # a bot was built, and every "nothing crashed" check after that has been
@@ -262,12 +273,15 @@ async def group_a():
     check("with three buttons", len(owner.buttons()) == 3, owner.buttons())
 
     await owner.tap("English")
-    check("picking one prints the instructions", owner.said("inbox link"))
+    instructions = ab.build_help_text("en")
+    check("picking one prints the instructions",
+          any(instructions in (m.get("text") or "") for m in owner.chat), owner.transcript())
 
     before = len(owner.chat)
     await owner.send("/start")
     check("a second /start goes straight to the instructions",
-          owner.said("inbox link") and "Welcome!" not in owner.last()[0])
+          instructions in (owner.last()[0] or "") and "Welcome!" not in owner.last()[0],
+          owner.last()[0])
     check("and does not ask again", len(owner.chat) == before + 2)
 
     await owner.send("/language")
@@ -825,21 +839,23 @@ async def group_j():
         await onboard(guest)
         token = await token_for(OWNER)
         await open_link(guest, token)
-        await guest.send("one")
+        first = await guest.send("one")
 
         # Everything after the opening message has to be a reply, so the
-        # flood test rides on the Send-it-anyway path -- which is exactly how
-        # a determined spammer would drive it too.
+        # burst is sent the way a determined spammer would have to send it:
+        # as replies into the conversation. (It used to ride a Send-it-anyway
+        # button, long gone; sent unaddressed, every message was refused for
+        # not being a reply and the limit was never reached -- and "told to
+        # wait" still passed, on the word "waiting" in the old long /help.)
         delivered = 0
         for n in range(8):
-            await guest.send(f"spam {n}")
-            if guest.buttons() and "anyway" in " ".join(guest.buttons()).lower():
-                await guest.tap("anyway")
+            await guest.send(f"spam {n}", reply_to=first)
             if any(f"spam {n}" in (m.get("text") or "") for m in owner.chat):
                 delivered += 1
-        check("a burst is cut off before it all lands", delivered < 8, str(delivered))
+        check("a burst is cut off before it all lands", 0 < delivered < 8, str(delivered))
+        told = i18n.t("en", "too_fast", seconds=0).split("{")[0].split(" — ")[0]
         check("and the sender is told to wait rather than ignored",
-              guest.said("wait") or guest.said("too fast") or guest.said("slow"),
+              any((m.get("text") or "").startswith(told) for m in guest.chat),
               guest.last(2))
 
         second = s.person(GUEST_B, "GuestB")
@@ -1813,10 +1829,347 @@ async def _problems_and_reports(seen: _ProblemLines):
 
 
 # ---------------------------------------------------------------------------
+# R -- reactions
+# ---------------------------------------------------------------------------
+
+async def _conversation_with_reply(s):
+    """An owner and a guest one question and one answer in: the four bubbles
+    every reaction scenario needs, by id in the chat each is in."""
+    owner, guest = s.person(OWNER, "Owner"), s.person(GUEST_A, "GuestA")
+    await onboard(owner)
+    await onboard(guest)
+    await open_link(guest, await token_for(OWNER))
+    asked = await guest.send("is this really anonymous?")
+    incoming = owner_bubble(owner, 1)
+    answered = await owner.send("it really is", reply_to=incoming)
+    delivered = [m for m in guest.chat if "it really is" in (m.get("text") or "")][-1]["message_id"]
+    return owner, guest, {"asked": asked, "incoming": incoming,
+                          "answered": answered, "delivered": delivered}
+
+
+async def group_r():
+    section("R. reactions travel, as the bot's own")
+    s, tele = await fresh()
+    owner, guest, ids = await _conversation_with_reply(s)
+
+    check("the bot asks Telegram for reactions by name -- none arrive otherwise",
+          "message_reaction" in s.polling_kwargs.get("allowed_updates", []),
+          str(s.polling_kwargs.get("allowed_updates")))
+
+    before = len(guest.chat)
+    await owner.react(ids["incoming"], "❤")
+    check("the owner's reaction lands on the guest's own message",
+          guest.bot_reaction(ids["asked"]) == ["❤"], guest.bot_reaction(ids["asked"]))
+    check("as a reaction, not a message", len(guest.chat) == before, guest.transcript())
+    await owner.react(ids["incoming"], "🔥")
+    check("changing it changes theirs", guest.bot_reaction(ids["asked"]) == ["🔥"],
+          guest.bot_reaction(ids["asked"]))
+    await owner.react(ids["incoming"])
+    check("taking it off takes theirs off", guest.bot_reaction(ids["asked"]) == [],
+          guest.bot_reaction(ids["asked"]))
+
+    await guest.react(ids["delivered"], "👍")
+    check("the other way: the guest's reaction lands on the owner's own message",
+          owner.bot_reaction(ids["answered"]) == ["👍"], owner.bot_reaction(ids["answered"]))
+    await guest.react(ids["asked"], "😁")
+    check("a reaction on your own message reaches the copy the other side has",
+          owner.bot_reaction(ids["incoming"]) == ["😁"], owner.bot_reaction(ids["incoming"]))
+    check("nobody was named by any of it",
+          not any(str(GUEST_A) in (m.get("text") or "") for m in owner.chat)
+          and not any(str(OWNER) in (m.get("text") or "") for m in guest.chat))
+
+    # --- what cannot travel, and the note that says so ---
+    await guest.react(ids["asked"])          # clear the slate on both sides
+    anon_logic._reaction_notes.clear()
+    before = len(owner.chat)
+    await owner.react(ids["incoming"], custom="5368324170671202286")
+    check("a Premium (custom emoji) reaction is not passed on",
+          guest.bot_reaction(ids["asked"]) == [], guest.bot_reaction(ids["asked"]))
+    note = owner.chat[-1] if len(owner.chat) > before else {}
+    check("the person who put it is told, briefly",
+          (note.get("text") or "") == i18n.t("en", "reaction_not_passed"), str(note.get("text")))
+    check("with the problem's code on its last line",
+          problems.find_code(note.get("text") or "") == "AN-REACTION-NOT-PASSED", str(note.get("text")))
+    check("and without a sound",
+          any(e.get("endpoint") == "sendMessage" and e.get("message_id") == note.get("message_id")
+              and e.get("silent") for e in tele.log))
+    await asyncio.sleep(anon_logic.REACTION_NOTE_SECONDS + 0.3)
+    check("then the note takes itself down",
+          (OWNER, note.get("message_id")) in tele.deleted
+          and tele.find(OWNER, note.get("message_id")) is None, str(tele.deleted[-3:]))
+
+    before = len(owner.chat)
+    await owner.react(ids["incoming"], custom="5368324170671202287")
+    check("a second one straight after is not a second note",
+          len(owner.chat) == before, owner.transcript())
+
+    anon_logic._reaction_notes.clear()
+    await owner.react(ids["incoming"], "👍", "🎉")
+    check("of two reactions at once, one travels -- the newest",
+          guest.bot_reaction(ids["asked"]) == ["🎉"], guest.bot_reaction(ids["asked"]))
+    check("and the person is told only one goes through",
+          owner.chat[-1].get("text") == i18n.t("en", "reaction_one_only"), owner.chat[-1].get("text"))
+    await owner.react(ids["incoming"], "👍")
+    check("taking one of two off leaves the other on both sides",
+          guest.bot_reaction(ids["asked"]) == ["👍"], guest.bot_reaction(ids["asked"]))
+
+    anon_logic._reaction_notes.clear()
+    await owner.react(ids["incoming"], "🫠")
+    check("an emoji Telegram does not let a bot use is refused by Telegram, and said so",
+          guest.bot_reaction(ids["asked"]) == ["👍"]
+          and owner.chat[-1].get("text") == i18n.t("en", "reaction_not_passed"),
+          f"{guest.bot_reaction(ids['asked'])} / {owner.chat[-1].get('text')}")
+    await asyncio.sleep(anon_logic.REACTION_NOTE_SECONDS + 0.3)
+
+    # --- where there is nowhere to send it ---
+    sent_notice = next(m["message_id"] for m in guest.chat if (m.get("text") or "").startswith("Sent"))
+    owner_before, guest_before = len(owner.chat), len(guest.chat)
+    calls = len([e for e in tele.log if e.get("endpoint") == "setMessageReaction"])
+    await guest.react(sent_notice, "👍")
+    check("a reaction on the bot's own notice goes nowhere and says nothing",
+          len(owner.chat) == owner_before and len(guest.chat) == guest_before
+          and len([e for e in tele.log if e.get("endpoint") == "setMessageReaction"]) == calls)
+
+    db.set_anon_blocked(OWNER, GUEST_A, True)
+    await guest.react(ids["delivered"], "💔")
+    check("a blocked guest's reaction does not reach the owner",
+          owner.bot_reaction(ids["answered"]) != ["💔"], owner.bot_reaction(ids["answered"]))
+    await owner.react(ids["incoming"], "🙏")
+    check("nor does the owner's reach a guest they blocked",
+          guest.bot_reaction(ids["asked"]) != ["🙏"], guest.bot_reaction(ids["asked"]))
+    db.set_anon_blocked(OWNER, GUEST_A, False)
+
+    tele.blocked_by.add(GUEST_A)
+    await owner.react(ids["incoming"], "🤝")
+    check("a guest who blocked the bot costs nothing but the reaction",
+          not crashes, str(crashes[-2:]))
+    tele.blocked_by.discard(GUEST_A)
+
+    check("and not one reaction was written down anywhere",
+          not any(_text_in_database(e) for e in ("❤", "🔥", "🎉", "🤝")))
+
+
+# ---------------------------------------------------------------------------
+# S -- /help in two lengths, and the note that reactions are new
+# ---------------------------------------------------------------------------
+
+def _knows(user_id: int):
+    with db.pooled() as conn:
+        row = conn.execute("SELECT knows_reactions FROM user_settings WHERE user_id = %s",
+                           (user_id,)).fetchone()
+    return row[0] if row else "no row"
+
+
+def _as_if_here_before(s, user_id: int) -> None:
+    """A user from before 2.1.0: the column NULL, as the migration leaves it,
+    and the process's cache of the answer gone, as a restart leaves it."""
+    with db.pooled() as conn:
+        conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s", (user_id,))
+        conn.commit()
+    s.app.user_data[user_id].pop(ab.KNOWS_REACTIONS_KEY, None)
+
+
+async def group_s():
+    section("S. /help in two lengths, and the one-time note about reactions")
+    s, tele = await fresh()
+    owner = s.person(OWNER, "Owner")
+    await onboard(owner)
+
+    await owner.send("/help")
+    help_id = owner.chat[-1]["message_id"]
+    brief = owner.chat[-1].get("text") or ""
+    check("/help is the short version", brief == ab.build_help_text("en"), brief[:120])
+    check("a fraction of the full one",
+          len(brief) * 2 < len(ab.build_help_text("en", full=True)),
+          f"{len(brief)} vs {len(ab.build_help_text('en', full=True))}")
+    check("which still says reactions travel, and that Premium ones do not",
+          "react" in brief.lower() and "Premium" in brief)
+    check("with one button: to the full guide",
+          owner.buttons(help_id) == [i18n.t("en", "help_full_button")], owner.buttons(help_id))
+    await owner.tap("Full guide", help_id)
+    full = (tele.find(OWNER, help_id) or {}).get("text") or ""
+    check("the button turns it into the full guide, in place",
+          full == ab.build_help_text("en", full=True), full[:120])
+    check("listing every reaction a bot may pass on",
+          all(e in full for e in anon_logic.RELAYABLE_REACTIONS),
+          [e for e in anon_logic.RELAYABLE_REACTIONS if e not in full])
+    check("with the Premium warning in capitals, where it stands out",
+          "⚠️ NOTE: Telegram Premium reactions" in full and "can NOT be passed on" in full)
+    check("and a way back", owner.buttons(help_id) == [i18n.t("en", "help_brief_button")],
+          owner.buttons(help_id))
+    await owner.tap("Short version", help_id)
+    check("which turns it back", (tele.find(OWNER, help_id) or {}).get("text") == brief)
+    await owner.send("/help full")
+    check("/help full goes straight to the full guide",
+          owner.chat[-1].get("text") == ab.build_help_text("en", full=True))
+    for lang in ("uz", "ru"):
+        long_one, short_one = ab.build_help_text(lang, full=True), ab.build_help_text(lang)
+        check(f"[{lang}] the full guide lists every reaction and fits one message",
+              all(e in long_one for e in anon_logic.RELAYABLE_REACTIONS)
+              and len(long_one.encode("utf-16-le")) // 2 <= 4096)
+        check(f"[{lang}] and both versions name Telegram Premium",
+              "Premium" in long_one and "Premium" in short_one)
+
+    # --- the one-time note ---
+    guest = s.person(GUEST_A, "GuestA")
+    await onboard(guest)
+    await guest.send("/link")
+    check("somebody new is not told reactions are new",
+          not guest.said("You can now react"), guest.transcript())
+    check("because they start out knowing", _knows(GUEST_A) is True, _knows(GUEST_A))
+
+    _as_if_here_before(s, GUEST_A)
+    await guest.send("/link")
+    notes = [m for m in guest.chat if (m.get("text") or "") == i18n.t("en", "reactions_update_note")]
+    check("somebody who was here before is told, on their next visit",
+          len(notes) == 1, guest.transcript())
+    check("after what they came for, not instead of it",
+          guest.chat[-1].get("text") == i18n.t("en", "reactions_update_note")
+          and "t.me/anonbot_test" in (guest.chat[-2].get("text") or ""), guest.transcript())
+    check("and it is ticked off in the database", _knows(GUEST_A) is True, _knows(GUEST_A))
+    s.app.user_data[GUEST_A].pop(ab.KNOWS_REACTIONS_KEY, None)
+    await guest.send("/link")
+    notes = [m for m in guest.chat if (m.get("text") or "") == i18n.t("en", "reactions_update_note")]
+    check("once -- not again, even after a restart forgets the cache",
+          len(notes) == 1, guest.transcript())
+
+    guest_b = s.person(GUEST_B, "GuestB")
+    await onboard(guest_b)
+    _as_if_here_before(s, GUEST_B)
+    await guest_b.send("/help")
+    check("reading /help counts as being told: no note after it",
+          not guest_b.said("You can now react") and _knows(GUEST_B) is True, guest_b.transcript())
+
+    guest_c = s.person(GUEST_C, "GuestC")
+    await onboard(guest_c)
+    _as_if_here_before(s, GUEST_C)
+    await guest_c.send("/feedback")
+    check("a question waiting for its answer is not interrupted by the note",
+          not guest_c.said("You can now react"), guest_c.transcript())
+    await guest_c.send("love it", reply_to=guest_c.chat[-1]["message_id"])
+    await guest_c.send("/link")
+    check("which comes at the next visit instead",
+          guest_c.chat[-1].get("text") == i18n.t("en", "reactions_update_note"), guest_c.transcript())
+
+
+# ---------------------------------------------------------------------------
+# T -- /feedback
+# ---------------------------------------------------------------------------
+
+def _feedback_rows():
+    with db.pooled() as conn:
+        rows = conn.execute("SELECT bot_id, lang, body FROM family.feedback ORDER BY id").fetchall()
+    return [tuple(r) for r in rows]
+
+
+async def group_t():
+    section("T. /feedback, and the reply to a guest it must never take")
+    s, tele = await fresh()
+    with db.pooled() as conn:
+        conn.execute("DELETE FROM family.feedback")
+        conn.commit()
+    owner, guest = s.person(OWNER, "Owner"), s.person(GUEST_A, "GuestA")
+    await onboard(owner)
+    await onboard(guest)
+    await open_link(guest, await token_for(OWNER))
+    await guest.send("hello there")
+    incoming = owner_bubble(owner, 1)
+
+    await owner.send("/feedback make the link shorter")
+    check("/feedback with words sends them at once",
+          owner.chat[-1].get("text") == i18n.t("en", "feedback_thanks"), owner.transcript())
+    check("kept as the words, the bot and the language",
+          _feedback_rows() == [("anonbot", "en", "make the link shorter")], _feedback_rows())
+
+    await owner.send("/feedback")
+    prompt = owner.chat[-1]["message_id"]
+    check("/feedback alone asks for it", owner.chat[-1].get("text") == i18n.t("en", "feedback_ask"))
+    await owner.send("dark mode, please", reply_to=prompt)
+    check("the answer to the question is taken",
+          _feedback_rows()[-1] == ("anonbot", "en", "dark mode, please"), _feedback_rows())
+    check("and never relayed into a conversation", not guest.said("dark mode"), guest.transcript())
+
+    await owner.send("/feedback")
+    prompt = owner.chat[-1]["message_id"]
+    await owner.send("my answer to you", reply_to=incoming)
+    check("a reply to a guest while /feedback waits goes to the guest",
+          guest.said("my answer to you"), guest.transcript())
+    check("and not to the developer", all(r[2] != "my answer to you" for r in _feedback_rows()),
+          _feedback_rows())
+    await owner.send("found a typo in /help", reply_to=prompt)
+    check("the question is still open, and answering it still works",
+          _feedback_rows()[-1][2] == "found a typo in /help", _feedback_rows())
+
+    await owner.send("/feedback")
+    prompt = owner.chat[-1]["message_id"]
+    count = len(_feedback_rows())
+    await owner.media("photo", reply_to=prompt)
+    check("a photo sent as the answer is asked about again, in words",
+          owner.chat[-1].get("text") == i18n.t("en", "feedback_text_only")
+          and len(_feedback_rows()) == count, owner.transcript())
+    check("and is not relayed either", not any(sim.kind_of(m) == "photo" for m in guest.chat),
+          guest.transcript())
+    await owner.send("/cancel")
+    check("/cancel offers to stop the feedback it is waiting for",
+          i18n.t("en", "cancel_button_feedback") in owner.buttons(), owner.buttons())
+    await owner.tap(i18n.t("en", "cancel_button_feedback"))
+    check("and stops it", i18n.t("en", "cancel_item_feedback") in (owner.chat[-1].get("text") or ""),
+          owner.chat[-1].get("text"))
+
+    await guest.send("/feedback the guest side works too")
+    check("anybody can send it, guests included",
+          _feedback_rows()[-1] == ("anonbot", "en", "the guest side works too"), _feedback_rows())
+
+    shared_features.FEEDBACK_PER_DAY = 2
+    try:
+        shared_features._feedback_sent.clear()
+        await guest.send("/feedback one")
+        await guest.send("/feedback two")
+        await guest.send("/feedback three")
+        last = guest.chat[-1]
+        check("past the day's allowance it is refused, and says how many",
+              last.get("text") == i18n.t("en", "feedback_limit", per_day=2), last.get("text"))
+        check("as a limit, with no Report button",
+              problems.find_code(last.get("text")) == "FM-FEEDBACK-LIMIT" and only_report_button(last)
+              and not last.get("reply_markup"), str(last.get("reply_markup")))
+        check("and the third is not kept", all(r[2] != "three" for r in _feedback_rows()))
+    finally:
+        shared_features.FEEDBACK_PER_DAY = 5
+        shared_features._feedback_sent.clear()
+
+    real = shared_features.family_link.save_feedback
+    def _away(*args, **kwargs):
+        raise RuntimeError("the database is away")
+    shared_features.family_link.save_feedback = _away
+    try:
+        await owner.send("/feedback this one will not make it")
+    finally:
+        shared_features.family_link.save_feedback = real
+    last = owner.chat[-1]
+    check("a database that is away is said plainly",
+          problems.find_code(last.get("text")) == "FM-FEEDBACK-FAILED"
+          and (last.get("text") or "").startswith(i18n.t("en", "feedback_failed").split("\n")[0]),
+          last.get("text"))
+    check("with a Report button, because it is not theirs to fix",
+          any((b.get("callback_data") or "").startswith("rpt:")
+              for row in (last.get("reply_markup") or {}).get("inline_keyboard", []) for b in row))
+
+    with db.pooled() as conn:
+        columns = {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'family' AND table_name = 'feedback'").fetchall()}
+    check("the table has nowhere to put who wrote it",
+          columns == {"id", "bot_id", "lang", "body", "created_at", "delivered_at"}, sorted(columns))
+    with db.pooled() as conn:
+        conn.execute("DELETE FROM family.feedback")
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
 
 GROUPS = [group_a, group_b, group_c, group_d, group_e,
           group_f, group_g, group_h, group_i, group_j, group_k, group_l,
-          group_m, group_n, group_o, group_p, group_q]
+          group_m, group_n, group_o, group_p, group_q, group_r, group_s, group_t]
 
 
 async def main() -> int:

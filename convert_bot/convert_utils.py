@@ -22,9 +22,14 @@ of hundred megabytes per conversion.
 """
 from __future__ import annotations
 
+import json
+import logging
+import math
 import os
 import shutil
+import stat
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
@@ -33,6 +38,8 @@ from PIL import Image
 
 import big_files
 import formats
+
+logger = logging.getLogger(__name__)
 
 # ---------- what the caller gets back ----------
 
@@ -53,6 +60,104 @@ class Result(NamedTuple):
 
 class ConversionError(Exception):
     pass
+
+
+class OutOfMemory(ConversionError):
+    """The converter was killed for memory: the file is fine, the machine is
+    too small for it. On Railway's 1 GB container a 4K HDR video is this
+    (measured 2026-09-29) -- told as that, not as a file that could not be
+    read, which is what ffmpeg's last words made it look like."""
+
+
+def _killed(returncode) -> bool:
+    """Killed by SIGKILL -- the kernel's out-of-memory killer, when this
+    process did not do it itself (its own time limits raise before this is
+    asked)."""
+    return returncode in (-9, 137)
+
+
+def remove_tree(path) -> None:
+    """Remove a folder and everything in it, whatever the modes inside say.
+
+    shutil.rmtree stops at the first thing it may not touch, and an archive can
+    hand over exactly that: a folder with no permissions at all (it cannot be
+    listed, so its files cannot be found), one that is read-only (its files
+    cannot be unlinked), a read-only file on Windows. The worker that unpacked
+    them is the owner of all of it, so each of these is put right -- the entry
+    and the folder holding it made writable -- and the step that failed is
+    tried again. Never raises: this is cleanup, and what cannot be removed is
+    left for the sweeper (bot._sweep_uploads) to try again later.
+
+    A symlink is removed as a link and never followed or chmod-ed."""
+    path = str(path)
+    tried: set = set()
+
+    def make_writable(target: str) -> None:
+        try:
+            mode = os.lstat(target).st_mode
+            if stat.S_ISLNK(mode):
+                return
+            os.chmod(target, (mode | (stat.S_IRWXU if stat.S_ISDIR(mode) else stat.S_IRUSR | stat.S_IWUSR)) & 0o777)
+        except OSError:
+            pass
+
+    def retry(function, target, _error) -> None:
+        # rmtree's handler: (the call that failed, its argument, the error).
+        target = str(target)
+        if target in tried:                       # one more try each, or this loops on a file nobody can change
+            return
+        tried.add(target)
+        if target != path:                        # never the folder the caller's tree sits in
+            make_writable(os.path.dirname(target))
+        make_writable(target)
+        try:
+            if function in (os.scandir, os.listdir, os.open):
+                # The folder could not be entered, so nothing inside it was seen
+                # and the walk went on without it: do it over, now that it can be.
+                shutil.rmtree(target, **{_ON_ERROR: retry})
+            elif function is os.path.islink:
+                return
+            else:
+                function(target)
+        except OSError:
+            pass
+
+    try:
+        if os.path.islink(path):
+            os.unlink(path)
+            return
+        if not os.path.lexists(path):
+            return
+        # Every folder opened first, top down, with a list rather than
+        # recursion. The handler above can open a closed folder too, but it does
+        # so by starting another rmtree from inside rmtree, a few frames per
+        # level: a tree nested a few hundred closed folders deep -- one archive
+        # can be, when bsdtar was refused before the tree was opened up --
+        # would end in RecursionError, and the folder would stay (review,
+        # 2026-10-08). On Windows a read-only file blocks its own removal, so
+        # files are opened there as well.
+        waiting = [path]
+        while waiting:
+            folder = waiting.pop()
+            make_writable(folder)
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if entry.is_dir(follow_symlinks=False):
+                            waiting.append(entry.path)
+                        elif os.name == "nt" and entry.is_file(follow_symlinks=False):
+                            make_writable(entry.path)
+            except OSError:
+                continue
+        shutil.rmtree(path, **{_ON_ERROR: retry})
+    except (OSError, RecursionError):
+        logger.debug("Could not remove %s", path, exc_info=True)
+
+
+# Python 3.12 renamed rmtree's handler argument (and gave it the exception
+# itself instead of exc_info); the image runs 3.11. The handler above takes
+# either, because it ignores its third argument.
+_ON_ERROR = "onexc" if sys.version_info >= (3, 12) else "onerror"
 
 
 # ---------- how far a conversion has got ----------
@@ -257,7 +362,17 @@ _RATIO_BY_PAIR = {
     ("jpg", "png"): 3.5, ("jpg", "bmp"): 12.0, ("jpg", "tiff"): 10.0,
     ("svg", "png"): 20.0, ("svg", "jpg"): 8.0, ("svg", "pdf"): 1.5,
     ("heic", "jpg"): 2.0, ("heic", "png"): 6.0,
+    # A solid 7z, an xz or a RAR opens into more than a ZIP's per-file deflate
+    # packs it back into -- the phone-cannot-open-it case this exists for.
+    ("7z", "zip"): 1.6, ("rar", "zip"): 1.15, ("txz", "zip"): 1.25, ("tbz2", "zip"): 1.1,
+    ("tgz", "zip"): 1.02, ("tar", "zip"): 0.5,
+    ("zip", "7z"): 0.8, ("zip", "txz"): 0.85, ("zip", "tgz"): 1.0, ("zip", "tbz2"): 0.95, ("zip", "tar"): 1.5,
 }
+
+# A camera raw file is lossless-compressed sensor data, about a byte and a half
+# a pixel; a developed picture is something else per pixel, and the quote is
+# about "roughly", never "exactly". TIFF is 16 bits a channel, uncompressed.
+_RAW_RATIO = {"jpg": 0.25, "png": 3.0, "webp": 0.2, "avif": 0.15, "heic": 0.2, "tiff": 4.0}
 
 # Per category of source, then per target. Only where it differs from the
 # per-target default below.
@@ -274,6 +389,10 @@ _RATIO_BY_CATEGORY = {
     (formats.DATA, "xlsx"): 0.6, (formats.DATA, "pdf"): 2.0, (formats.DATA, "html"): 1.4,
     (formats.DATA, "md"): 1.1, (formats.DATA, "json"): 1.3, (formats.DATA, "yaml"): 1.1,
     (formats.SUBTITLE, "txt"): 0.7,
+    # Archives: what comes out depends on how well the SOURCE was packed, so
+    # the pairs below carry the real differences and these are the middle.
+    (formats.ARCHIVE, "zip"): 1.1, (formats.ARCHIVE, "tgz"): 1.1, (formats.ARCHIVE, "tbz2"): 1.05,
+    (formats.ARCHIVE, "txz"): 0.95, (formats.ARCHIVE, "7z"): 0.9, (formats.ARCHIVE, "tar"): 1.5,
 }
 
 # The fallback: roughly what this format weighs relative to whatever it came
@@ -310,13 +429,24 @@ _WORK_BY_CATEGORY = {
     # Video to a still or to sound is a decode and then almost nothing.
     (formats.VIDEO, "png"): 1.0, (formats.VIDEO, "jpg"): 1.0,
     (formats.VIDEO, "mp3"): 1.1, (formats.VIDEO, "m4a"): 1.1,
+    # Opening an archive and packing it again: LZMA and bzip2 are slow in both
+    # directions, and a solid 7z has to be read from its start.
+    (formats.ARCHIVE, "zip"): 1.4, (formats.ARCHIVE, "tgz"): 1.5, (formats.ARCHIVE, "tbz2"): 2.2,
+    (formats.ARCHIVE, "txz"): 2.6, (formats.ARCHIVE, "7z"): 2.6, (formats.ARCHIVE, "tar"): 1.1,
 }
+
+
+RAW_WORK_FACTOR = 2.0
 
 
 def work_factor(src_ext: str, target_ext: str) -> float:
     """How much hardware this pair costs for its size, as a multiplier."""
     src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
     category = formats.CATEGORY_OF.get(src_ext)
+    if src_ext in formats.RAW_FORMATS:
+        # A raw decode is real work -- demosaicing, white balance, a curve --
+        # about twice a JPEG's per byte, before the target's own cost.
+        return RAW_WORK_FACTOR * _WORK_BY_TARGET.get(target_ext, 1.0)
     if (category, target_ext) in _WORK_BY_CATEGORY:
         return _WORK_BY_CATEGORY[(category, target_ext)]
     return _WORK_BY_TARGET.get(target_ext, 1.0)
@@ -336,7 +466,9 @@ def estimate_output_bytes(src_ext: str, target_ext: str, in_bytes: int,
             formats.CATEGORY_OF.get(src_ext) == formats.DOCUMENT:
         return max(1, int(pages * _BYTES_PER_PAGE[target_ext]))
     category = formats.CATEGORY_OF.get(src_ext)
-    ratio = _RATIO_BY_PAIR.get((src_ext, target_ext))
+    ratio = _RAW_RATIO.get(target_ext) if src_ext in formats.RAW_FORMATS else None
+    if ratio is None:
+        ratio = _RATIO_BY_PAIR.get((src_ext, target_ext))
     if ratio is None:
         ratio = _RATIO_BY_CATEGORY.get((category, target_ext))
     if ratio is None:
@@ -443,12 +575,47 @@ def register_openers() -> None:
     _OPENERS_REGISTERED = True
 
 
+# EXIF's Orientation tag, which says which way up the camera was held.
+_EXIF_ORIENTATION = 0x0112
+# HEIF and AVIF carry their orientation in the container (a rotation box the
+# decoder applies), and say that any EXIF orientation beside it is to be
+# ignored -- so it is not applied a second time here.
+_ORIENTED_BY_CONTAINER = {"HEIF", "AVIF"}
+
+
+def upright(img: Image.Image) -> Image.Image:
+    """The picture the way up it was taken.
+
+    A phone stores a portrait photograph as its sensor saw it -- on its side --
+    with a tag that says how to turn it. Pillow reads the tag and does not act
+    on it, and writing the picture to PNG, WEBP or a PDF page drops the tag, so
+    a photo sent as a file (Telegram turns one sent as a photo itself, which is
+    why nobody noticed) came out lying down. Turned here, once, on the way in.
+
+    Only when there is something to do: `exif_transpose` copies the picture, and
+    a 200-megapixel one is 600 MB. The original is closed as soon as the turned
+    one exists."""
+    if img.format in _ORIENTED_BY_CONTAINER:
+        return img
+    try:
+        orientation = img.getexif().get(_EXIF_ORIENTATION, 1)
+    except Exception:
+        return img
+    if orientation not in (2, 3, 4, 5, 6, 7, 8):
+        return img
+    from PIL import ImageOps         # here, so a stand-in for Pillow (tests/stubs) still imports
+    turned = ImageOps.exif_transpose(img)
+    if turned is not img:
+        img.close()
+    return turned
+
+
 def _open_image(path) -> Image.Image:
     register_openers()
     try:
         img = Image.open(path)
         img.load()
-        return img
+        return upright(img)
     except Exception as exc:
         raise ConversionError(f"Couldn't read that as an image: {exc}") from exc
 
@@ -508,12 +675,23 @@ def _flatten_onto_white(img: Image.Image) -> Image.Image:
 
 def convert_image(in_path, target_ext: str, out_path) -> None:
     target_ext = formats.normalise(target_ext)
+    if target_ext not in _IMAGE_TARGETS:
+        raise ConversionError(f"Unsupported image target format: {target_ext}")
+    save_image(_open_image(in_path), target_ext, out_path)
+
+
+def save_image(img: Image.Image, target_ext: str, out_path) -> None:
+    """Write a picture that is already open as `target_ext`, by the table above,
+    and close it. The one place a still picture is written, so a raw photo
+    (raw_convert.py) comes out exactly as a JPEG of the same size would."""
+    target_ext = formats.normalise(target_ext)
     spec = _IMAGE_TARGETS.get(target_ext)
     if spec is None:
+        img.close()
         raise ConversionError(f"Unsupported image target format: {target_ext}")
     mode, pillow_format, kwargs = spec
-
-    img = _open_image(in_path)
+    register_openers()      # the HEIF and AVIF writers are registered with the readers; a picture that was
+                            # never opened from a file (a developed raw photo) has not done that
     try:
         if mode == "RGB" and img.mode in ("RGBA", "LA", "P"):
             img = _flatten_onto_white(img)
@@ -728,6 +906,140 @@ def _tonemapped(args: list, target_ext: str) -> list:
     return args
 
 
+# ---------- a big picture on a small machine ----------
+# Measured 2026-10-07 on a synthetic 3840x2160 clip with this bot's own ffmpeg
+# arguments, peak resident memory of the ffmpeg process:
+#
+#                      as it was      scaled to fit 1920x1920 first
+#     HDR  -> mp4        1,334 MB          558 MB   (and 7.3 s -> 4.1 s)
+#     HDR  -> webm       1,655 MB          667 MB   (54 s -> 15 s)
+#     SDR  -> mp4          887 MB            -
+#     SDR  -> webm       1,182 MB            -      (53 s)
+#
+# On a 1 GB container the first two and the fourth are a kill, which is what
+# CV-NO-MEMORY has been (the owner's S23 Ultra films 4K60 HDR, so it is not a
+# rare file). The 2.0.0 note said "converted at 1080p with the result saying
+# so" was the way out if it became common; this is that. What is brought down:
+#
+#   - an HDR video over FIT_PIXELS, to any video target -- the tonemap works in
+#     32-bit float and its cost is the picture's area, so it runs after the
+#     scale;
+#   - any video over FIT_PIXELS to WEBM, whose VP9 encoder is the other thing
+#     that does not fit at 4K.
+#
+# MP4, MKV, MOV and AVI from a 4K picture that is not HDR keep their size: they
+# fit, if narrowly (the review of 2026-10-07 doubted "narrowly": 887 MB for
+# ffmpeg, plus the bot and the worker, is about the whole of a 1 GB container --
+# but 4K is what phones film, so it is left until a measurement says otherwise).
+# What no longer keeps its size is anything BIGGER than 4K, HDR or not: an 8K
+# or 5.7K clip going to MP4, MKV or MOV was never scaled, so it was always
+# killed for memory and refunded. Past HUGE_PIXELS every video target is
+# brought down. "Fit" is a 1920x1920 box, so a portrait phone video comes
+# out 1080x1920 and a 4:3 one 1920x1440; nothing is ever scaled up.
+# CONVERT_VIDEO_FIT_PIXELS=0 turns all of it off (a host with the memory).
+FIT_PIXELS = int(os.environ.get("CONVERT_VIDEO_FIT_PIXELS") or 2_900_000)
+HUGE_PIXELS = 3840 * 2160
+FIT_BOX = 1920
+_FIT_FILTER = (f"scale={FIT_BOX}:{FIT_BOX}:force_original_aspect_ratio=decrease:"
+               "force_divisible_by=2:flags=bicubic")
+
+
+def _quarter_turn(stream: dict) -> bool:
+    """Whether the player turns this stream a quarter (90 or 270 degrees) before
+    showing it, which swaps its width and its height.
+
+    A phone films a portrait clip as a landscape picture and writes the turn
+    next to it: a display matrix, which ffprobe reports as side data with a
+    `rotation`, and in older ffprobe (5.x and before) also as a `rotate` tag.
+    The width and height ffprobe prints are the STORED ones -- a portrait 4K
+    clip says 3840x2160 -- while ffmpeg turns the picture on its way in
+    (autorotate), so what it converts, and what the person sees, is
+    2160x3840. Confirmed 2026-10-08 on a clip written with -display_rotation.
+    The side data is asked first; the tag only when there is none, so a file
+    that carries both is not turned twice."""
+    turn = None
+    for data in stream.get("side_data_list") or ():
+        if isinstance(data, dict) and "rotation" in data:
+            turn = data["rotation"]
+            break
+    if turn is None:
+        turn = (stream.get("tags") or {}).get("rotate")
+    try:
+        turn = float(turn)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(turn):
+        return False
+    return round(turn / 90) % 2 == 1
+
+
+def video_geometry(in_path) -> "tuple[int, int, bool] | None":
+    """(width, height, is HDR) of the first video stream, from one ffprobe
+    call -- or None for no video stream, no ffprobe, or an answer that makes
+    no sense. The size is the DISPLAYED one: a clip stored sideways and turned
+    by a rotation flag is reported the way up it is shown and converted."""
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_streams", "-of", "json", str(in_path)],
+            capture_output=True, text=True, timeout=20)
+        stream = json.loads(probe.stdout or "{}")["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    if _quarter_turn(stream):
+        width, height = height, width
+    return width, height, str(stream.get("color_transfer") or "").lower() in _HDR_TRANSFERS
+
+
+def video_needs_fit(width: int, height: int, hdr: bool, target_ext: str) -> bool:
+    """Whether this video is brought down to the 1920x1920 box for this
+    target. Pure."""
+    if not FIT_PIXELS or width * height <= FIT_PIXELS:
+        return False
+    target_ext = formats.normalise(target_ext)
+    if target_ext not in _SDR_VIDEO:
+        return False
+    return hdr or target_ext == "webm" or width * height > HUGE_PIXELS
+
+
+def fitted_size(width: int, height: int) -> "tuple[int, int]":
+    """What the box makes of this size: never larger, even numbers, same shape."""
+    scale = min(1.0, FIT_BOX / width, FIT_BOX / height)
+    return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
+
+
+def _fitted(args: list) -> list:
+    """The same arguments with the fit in front of whatever video filter they
+    already have -- before the tonemap, because that is the expensive part."""
+    args = list(args)
+    if "-vf" in args:
+        at = args.index("-vf") + 1
+        args[at] = _FIT_FILTER + "," + args[at]
+        return args
+    return ["-vf", _FIT_FILTER] + args
+
+
+def video_fit_note(in_path) -> "tuple[str, int, int, int, int] | None":
+    """What to tell somebody about a video before they pay: None, or
+    (which, width, height, fitted width, fitted height) with `which` being
+    "hdr" (HDR: every video target is brought down), "huge" (not HDR, but
+    bigger than 4K: every video target is brought down) or "big" (only WEBM
+    is)."""
+    geometry = video_geometry(in_path)
+    if geometry is None:
+        return None
+    width, height, hdr = geometry
+    if not FIT_PIXELS or width * height <= FIT_PIXELS:
+        return None
+    fw, fh = fitted_size(width, height)
+    which = "hdr" if hdr else ("huge" if width * height > HUGE_PIXELS else "big")
+    return (which, width, height, fw, fh)
+
+
 def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
     target_ext = formats.normalise(target_ext)
     args = _FFMPEG_ARGS.get(target_ext)
@@ -740,8 +1052,13 @@ def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
         )
     if not os.path.getsize(in_path):
         raise ConversionError("That file came through empty -- try sending it again.")
-    if target_ext in _SDR_TARGETS and _is_hdr(in_path) and _ffmpeg_has_filters("zscale", "tonemap"):
+    hdr = target_ext in _SDR_TARGETS and _is_hdr(in_path)
+    if hdr and _ffmpeg_has_filters("zscale", "tonemap"):
         args = _tonemapped(args, target_ext)
+    if target_ext in _SDR_VIDEO and FIT_PIXELS:
+        geometry = video_geometry(in_path)
+        if geometry and video_needs_fit(geometry[0], geometry[1], hdr or geometry[2], target_ext):
+            args = _fitted(args)
 
     duration = _media_duration(in_path) if PROGRESS is not None else None
     if duration:
@@ -759,6 +1076,9 @@ def convert_media_ffmpeg(in_path, target_ext: str, out_path) -> None:
             f"Conversion took longer than {FFMPEG_TIMEOUT_S}s and was stopped. "
             "Try a shorter or smaller file."
         ) from None
+    if _killed(proc.returncode):
+        raise OutOfMemory(f"ffmpeg was killed (exit {proc.returncode}), for memory: "
+                          f"{(proc.stderr or '').strip()[-300:]}")
     if proc.returncode != 0 or not os.path.exists(out_path):
         note = (proc.stderr or "").strip()[-500:] or "ffmpeg failed with no output"
         raise ConversionError(f"Conversion failed: {note}")
@@ -814,6 +1134,8 @@ def _ffmpeg_with_progress(in_path, args, out_path, duration: float) -> None:
         if proc.returncode != 0 or not os.path.exists(out_path):
             errors.seek(0)
             note = errors.read().decode("utf-8", "replace").strip()[-500:] or "ffmpeg failed with no output"
+            if _killed(proc.returncode):
+                raise OutOfMemory(f"ffmpeg was killed (exit {proc.returncode}), for memory: {note[-300:]}")
             raise ConversionError(f"Conversion failed: {note}")
 
 
@@ -896,6 +1218,11 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     if src_ext in formats.ANIMATED_CAPABLE:
         category = formats.category_of(src_ext, gif_is_animated(in_path))
 
+    if category == formats.IMAGE and src_ext in formats.RAW_FORMATS:
+        import raw_convert
+        raw_convert.convert(in_path, src_ext, target_ext, out_path)
+        return Result(out_path)
+
     if category == formats.IMAGE and src_ext != "svg":
         if target_ext == "pdf":
             images_to_pdf([in_path], out_path)
@@ -923,6 +1250,10 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     if category == formats.DATA:
         import data_convert
         return data_convert.convert(in_path, src_ext, target_ext, work_dir, stem)
+
+    if category == formats.ARCHIVE:
+        import archive_convert
+        return archive_convert.convert(in_path, src_ext, target_ext, work_dir, stem)
 
     raise ConversionError(f"Nothing here converts a .{src_ext} file.")
 

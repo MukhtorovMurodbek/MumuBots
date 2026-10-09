@@ -66,6 +66,8 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import psycopg
+
 import db
 import lifecycle
 
@@ -76,7 +78,7 @@ FAMILY_SCHEMA = "family"
 # Bumped with the family's version (see CHANGELOG.md) -- reported in
 # heartbeats so /status can show which bots are running stale code after a
 # partial deploy.
-VERSION = os.environ.get("FAMILY_VERSION", "2.0.0")
+VERSION = os.environ.get("FAMILY_VERSION", "2.1.0")
 
 # Before 1.7.0 a row in family.problem_reports only existed because somebody
 # tapped Report, so every row older than this is one of those and is marked
@@ -163,6 +165,29 @@ def _connect():
     return db.pooled()
 
 
+def _column_missing(conn, table: str, column: str) -> bool:
+    """True when family.<table> has no `column` yet.
+
+    init_family_schema() asks this before each ALTER TABLE and issues the ALTER
+    only when the column is missing. Every ALTER TABLE takes an ACCESS EXCLUSIVE
+    lock on its table and keeps it until the transaction ends -- even one that
+    turns out to change nothing, IF NOT EXISTS or not (measured on Postgres 17,
+    2026-10-09). All five bots run init_family_schema() at every start, on
+    tables the heartbeats and the command bus write to every few seconds, in one
+    transaction that commits at the end: so a start that only wanted to check
+    queued every other reader and writer of those tables behind it. A read of
+    the catalog takes no lock that blocks anybody, so a normal start now takes
+    none. IF NOT EXISTS stays on the statements because two bots starting
+    together can both see the column missing; the second then waits for the
+    first and finds nothing left to do (the same reason as in each bot's
+    db.py). The statements stay literals, one per column."""
+    return conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+        (FAMILY_SCHEMA, table, column),
+    ).fetchone() is None
+
+
 def init_family_schema() -> None:
     """Idempotent; every bot calls it at startup, whoever gets there first
     wins. Kept here rather than in ManagerBot alone so a bot started on its
@@ -189,8 +214,9 @@ def init_family_schema() -> None:
         # `stars`, DownloaderBot's `probe`) advertises it without anybody
         # maintaining a list. NULL for a bot older than 1.7.0, which is why
         # every reader falls back to the shared set.
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.heartbeats "
-                     f"ADD COLUMN IF NOT EXISTS commands TEXT")
+        if _column_missing(conn, "heartbeats", "commands"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.heartbeats "
+                         f"ADD COLUMN IF NOT EXISTS commands TEXT")
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.events (
@@ -271,10 +297,11 @@ def init_family_schema() -> None:
         # paths idempotent, which is what lets every bot run this on startup
         # without coordinating.
         for column in ("sleepable_seconds", "max_gap_seconds", "jobs_ok", "jobs_failed"):
-            conn.execute(
-                f"ALTER TABLE {FAMILY_SCHEMA}.usage_samples "
-                f"ADD COLUMN IF NOT EXISTS {column} INTEGER NOT NULL DEFAULT 0"
-            )
+            if _column_missing(conn, "usage_samples", column):
+                conn.execute(
+                    f"ALTER TABLE {FAMILY_SCHEMA}.usage_samples "
+                    f"ADD COLUMN IF NOT EXISTS {column} INTEGER NOT NULL DEFAULT 0"
+                )
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_usage_recent "
             f"ON {FAMILY_SCHEMA}.usage_samples (bot_id, sampled_at DESC)"
@@ -422,27 +449,34 @@ def init_family_schema() -> None:
             """
         )
         # Added in 1.7.0, to a table that held reports only before it.
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS user_id BIGINT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS username TEXT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS user_lang TEXT")
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS chat_kind TEXT")
+        if _column_missing(conn, "problem_reports", "shared_at"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ")
+        if _column_missing(conn, "problem_reports", "user_id"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS user_id BIGINT")
+        if _column_missing(conn, "problem_reports", "username"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS username TEXT")
+        if _column_missing(conn, "problem_reports", "user_lang"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS user_lang TEXT")
+        if _column_missing(conn, "problem_reports", "chat_kind"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS chat_kind TEXT")
         # How many times this exact problem was shown. An incident is one
         # occurrence, so this only moves when the same message is re-shown --
         # a status line redrawn with the failure still on it.
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS seen INTEGER NOT NULL DEFAULT 1")
+        if _column_missing(conn, "problem_reports", "seen"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS seen INTEGER NOT NULL DEFAULT 1")
         # 1 urgent, 2 fault, 3 refused -- see problems.level(). Stored rather
         # than derived on read, so that a row keeps the seriousness it had
         # when it happened: re-classifying a code later must not rewrite what
         # last month's nightly reports said.
-        conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
-                     f"ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 2")
+        if _column_missing(conn, "problem_reports", "level"):
+            conn.execute(f"ALTER TABLE {FAMILY_SCHEMA}.problem_reports "
+                         f"ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 2")
         # Everything in the table before 1.7.0 arrived through the Report
         # button, which is what `shared_at` now means. Stamped with the time
         # the report came in, which is the only time those rows carry.
@@ -455,6 +489,31 @@ def init_family_schema() -> None:
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_problem_reports_recent "
             f"ON {FAMILY_SCHEMA}.problem_reports (reported_at DESC)"
+        )
+        # What people send with /feedback (shared_features.feedback_command),
+        # added in 2.1.0.
+        #
+        # The words are what this table is for, which makes it the one place
+        # in the family schema that keeps something a person wrote -- so it
+        # keeps nothing else about them: which bot, which language, when, and
+        # when the owner was sent it. No user id and no username, on the
+        # owner's standing rule that nothing pushed at them identifies anybody.
+        # Deleted after FEEDBACK_RETENTION_DAYS whether or not it was ever read.
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.feedback (
+                id BIGSERIAL PRIMARY KEY,
+                bot_id TEXT NOT NULL,
+                lang TEXT,
+                body TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                delivered_at TIMESTAMPTZ
+            )
+            """
+        )
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_family_feedback_pending "
+            f"ON {FAMILY_SCHEMA}.feedback (delivered_at, id)"
         )
         conn.commit()
 
@@ -762,35 +821,88 @@ def spend_stars(user_id: int, amount: int, reason: str = "spend",
     return after
 
 
-def topup(user_id: int, stars_paid: int, detail: str | None = None) -> dict:
+def topup(user_id: int, stars_paid: int, detail: str | None = None,
+          charge_id: "str | None" = None) -> "dict | None":
     """The whole of the money-in path. Prices the payment on the ladder from
     what this person has paid before -- under the wallet's lock, so two
     payments at once cannot both be priced as somebody's first 500 -- and
     records the ordinary credit and the bonus as separate ledger rows, with
     the bonus in a lot of its own that expires.
 
+    `charge_id` is Telegram's own id for the payment (`telegram_payment_charge_id`),
+    which is unique to it. Given, the payment is credited ONCE however many times
+    Telegram delivers it: a claim `stars:paid:<charge_id>` is staked in
+    family.settings in the same transaction as the credit, so the two stand or
+    fall together -- a crash between them cannot leave a claim with no credit
+    behind it (the failure that grant_stars_once has to undo by hand), and two
+    deliveries at once cannot both win (the second INSERT waits for the first to
+    commit, then finds the row). Returns None for a charge that was already
+    credited; the caller then does nothing -- above all, does not start the
+    conversion a second time. Without a charge id (the sandbox, which charges
+    nobody) every call credits, as before.
+
+    A database that drops the connection mid-payment (`psycopg.OperationalError`,
+    which a pool timeout, a deadlock and a serialisation failure also are) is tried
+    again, _TOPUP_ATTEMPTS times in all: the payment has been taken by then, and the
+    handler that called this is Telegram's only delivery of it -- an error here was
+    a person who paid and got nothing. Retrying is safe only because of the claim:
+    a failed attempt rolled back whole, and an attempt whose COMMIT went through
+    but whose answer was lost finds its own claim on the next try and returns None
+    -- credited once, though the caller then stays silent (logged below). Any other
+    error is a bug, not weather, and propagates at once.
+
     Returns stars, credited (ordinary), bonus, balance and bonus_expires."""
-    with _connect() as conn:
-        _lock_wallet_in(conn, user_id)
-        _expire_in(conn, user_id)
-        lifetime = int(conn.execute(
-            f"SELECT lifetime_stars_paid FROM {FAMILY_SCHEMA}.star_balances WHERE user_id = %s",
-            (user_id,),
-        ).fetchone()[0])
-        quote = quote_credit(lifetime, stars_paid)
-        balance = _move_in(conn, user_id, quote["base"], "topup", detail, stars_paid)
-        expires = None
-        if quote["bonus"] > 0:
-            balance = _move_in(conn, user_id, quote["bonus"], "bonus",
-                               f"ladder bonus on {stars_paid} stars, expires in {BONUS_EXPIRY_DAYS} days")
-            expires = conn.execute(
-                f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
-                f"VALUES (%s, %s, %s, now() + make_interval(days => %s)) RETURNING expires_at",
-                (user_id, quote["bonus"], quote["bonus"], BONUS_EXPIRY_DAYS),
-            ).fetchone()[0]
-        conn.commit()
+    for attempt in range(1, _TOPUP_ATTEMPTS + 1):
+        try:
+            with _connect() as conn:
+                _lock_wallet_in(conn, user_id)
+                if charge_id:
+                    won = conn.execute(
+                        f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+                        f"ON CONFLICT (key) DO NOTHING RETURNING key",
+                        (f"stars:paid:{charge_id}", datetime.now(timezone.utc).isoformat()),
+                    ).fetchone()
+                    if not won:
+                        conn.rollback()
+                        if attempt > 1:
+                            logger.error("topup: charge %s was credited by an earlier attempt whose "
+                                         "answer was lost; the payer was credited but not told", charge_id)
+                        return None
+                _expire_in(conn, user_id)
+                lifetime = int(conn.execute(
+                    f"SELECT lifetime_stars_paid FROM {FAMILY_SCHEMA}.star_balances WHERE user_id = %s",
+                    (user_id,),
+                ).fetchone()[0])
+                quote = quote_credit(lifetime, stars_paid)
+                balance = _move_in(conn, user_id, quote["base"], "topup", detail, stars_paid)
+                expires = None
+                if quote["bonus"] > 0:
+                    balance = _move_in(conn, user_id, quote["bonus"], "bonus",
+                                       f"ladder bonus on {stars_paid} stars, expires in {BONUS_EXPIRY_DAYS} days")
+                    expires = conn.execute(
+                        f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
+                        f"VALUES (%s, %s, %s, now() + make_interval(days => %s)) RETURNING expires_at",
+                        (user_id, quote["bonus"], quote["bonus"], BONUS_EXPIRY_DAYS),
+                    ).fetchone()[0]
+                conn.commit()
+            break
+        except psycopg.OperationalError as exc:
+            if attempt == _TOPUP_ATTEMPTS:
+                raise
+            logger.warning("topup: database error on attempt %d of %d (%s); trying again",
+                           attempt, _TOPUP_ATTEMPTS, exc)
+            time.sleep(_TOPUP_BACKOFF_SECONDS[attempt - 1])
     return {"stars": stars_paid, "credited": quote["base"], "bonus": quote["bonus"],
             "balance": balance, "bonus_expires": expires, "lifetime_before": lifetime}
+
+
+# A payment's credit is retried through a database blip (see topup). Three tries
+# over about four seconds: long enough for a pool to replace a dead connection or a
+# managed Postgres to fail over its proxy, short enough that the person who paid
+# is not left looking at nothing. Callers run topup in a thread, so the sleep
+# never holds the event loop.
+_TOPUP_ATTEMPTS = 3
+_TOPUP_BACKOFF_SECONDS = (1.0, 3.0)
 
 
 def set_star_balance(user_id: int, target: int, reason: str = "adjustment",
@@ -1085,6 +1197,149 @@ def forget_problem_reporter(user_id: int) -> int:
         ).rowcount or 0
         conn.commit()
     return changed
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+# A public bot writes what somebody sent with /feedback; ManagerBot reads it
+# and sends it to the owner. The owner, 2026-10-03: "I don't have many users
+# so I think notifications for each feedback won't hurt for now. Then add a
+# switch for me to decide if i want each feedback to arrive to me or only
+# grouped in a nightly report." The switch is a row in family.settings, so
+# changing it needs no redeploy and every process reads the same answer.
+FEEDBACK_RETENTION_DAYS = int(os.environ.get("FEEDBACK_RETENTION_DAYS", "30"))
+FEEDBACK_DELIVERY_KEY = "feedback_delivery"
+FEEDBACK_INSTANT, FEEDBACK_NIGHTLY = "instant", "nightly"
+
+
+def save_feedback(lang: "str | None", body: str) -> int:
+    """Keep one piece of feedback for ManagerBot to deliver. Returns its id."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.feedback (bot_id, lang, body) "
+            f"VALUES (%s, %s, %s) RETURNING id",
+            (_ledger_bot(), lang, body),
+        ).fetchone()
+        conn.commit()
+    return int(row[0])
+
+
+def _feedback_row(r) -> dict:
+    return {"id": r[0], "bot_id": r[1], "lang": r[2], "body": r[3],
+            "created_at": r[4], "delivered_at": r[5]}
+
+
+def take_undelivered_feedback(limit: int = 20) -> list[dict]:
+    """The oldest feedback nobody has been sent yet, marked as sent in the same
+    statement -- so two ManagerBots overlapping in a deploy cannot both send
+    the same one. Oldest first, the order it was written in."""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"UPDATE {FAMILY_SCHEMA}.feedback SET delivered_at = now() "
+            f"WHERE id IN (SELECT id FROM {FAMILY_SCHEMA}.feedback "
+            f"             WHERE delivered_at IS NULL ORDER BY id LIMIT %s "
+            f"             FOR UPDATE SKIP LOCKED) "
+            f"RETURNING id, bot_id, lang, body, created_at, delivered_at",
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+        conn.commit()
+    return sorted((_feedback_row(r) for r in rows), key=lambda row: row["id"])
+
+
+def recent_feedback(limit: int = 10) -> list[dict]:
+    """The latest feedback, newest first, delivered or not -- for ManagerBot's
+    /feedback, which is where it can be read again after the message is gone."""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT id, bot_id, lang, body, created_at, delivered_at "
+            f"FROM {FAMILY_SCHEMA}.feedback ORDER BY id DESC LIMIT %s",
+            (max(1, min(limit, 50)),),
+        ).fetchall()
+    return [_feedback_row(r) for r in rows]
+
+
+def feedback_count_since(hours: int = 24) -> int:
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT count(*) FROM {FAMILY_SCHEMA}.feedback "
+            f"WHERE created_at > now() - make_interval(hours => %s)",
+            (max(1, min(hours, 168)),),
+        ).fetchone()
+    return int(row[0])
+
+
+def prune_feedback() -> int:
+    """Drop feedback older than FEEDBACK_RETENTION_DAYS, sent or not. Run by
+    every bot over the whole table, for the reason problem reports are: a
+    family table that is tidied only while one particular bot is up grows
+    whenever that bot is the one that is down."""
+    with _connect() as conn:
+        removed = conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.feedback "
+            f"WHERE created_at < now() - make_interval(days => %s)",
+            (FEEDBACK_RETENTION_DAYS,),
+        ).rowcount or 0
+        conn.commit()
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# Small shared memory: family.settings
+# ---------------------------------------------------------------------------
+# A key and a short text, for a fact that has to survive a redeploy and be the
+# same in every process -- "when did the route check last run", "which state
+# was Instagram in". Not for anything about a person. Without a database
+# (tests, a bot run on a laptop with persistence off) it is a dict in this
+# process, which is the right amount of memory for those.
+_local_settings: dict = {}
+
+
+def get_setting(key: str, default: "str | None" = None) -> "str | None":
+    """Blocking. Never raises: a missing database reads as "not set"."""
+    if not _enabled:
+        return _local_settings.get(key, default)
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                f"SELECT value FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (key,)).fetchone()
+        return row[0] if row and row[0] is not None else default
+    except Exception:
+        logger.debug("Could not read family setting %s", key, exc_info=True)
+        return default
+
+
+def settings_with_prefix(prefix: str) -> dict:
+    """Every setting whose key starts with `prefix`, as {key: value}. Blocking.
+    Never raises, for the same reason as get_setting: a missing database reads
+    as nothing set. (ManagerBot reads DownloaderBot's route check this way.)"""
+    if not _enabled:
+        return {key: value for key, value in _local_settings.items() if key.startswith(prefix)}
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT key, value FROM {FAMILY_SCHEMA}.settings WHERE key LIKE %s",
+                (escaped + "%",)).fetchall()
+        return {key: value for key, value in rows}
+    except Exception:
+        logger.debug("Could not read family settings %s*", prefix, exc_info=True)
+        return {}
+
+
+def set_setting(key: str, value: str) -> None:
+    """Blocking. Never raises, for the same reason."""
+    if not _enabled:
+        _local_settings[key] = value
+        return
+    try:
+        with _connect() as conn:
+            conn.execute(
+                f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, value))
+            conn.commit()
+    except Exception:
+        logger.debug("Could not write family setting %s", key, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1430,6 +1685,38 @@ async def _cmd_dbdump(context, args):
     data = await asyncio.to_thread(dump)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
     return f"{len(data)/1024:.0f} KB", f"{_bot_id}_db_{stamp}.zip", data
+
+
+def installed_versions() -> list[str]:
+    """Every distribution this process can import, as `name==version`, sorted
+    -- what `pip freeze` would print, without starting pip.
+
+    The requirements files name lower bounds (`yt-dlp[default]>=2025.11.12`),
+    so what production actually runs is whatever the last build happened to
+    resolve. This is how that list is read back, to be pinned in the next
+    release, from the process itself rather than from a guess about the image."""
+    from importlib import metadata
+    seen: dict[str, str] = {}
+    for dist in metadata.distributions():
+        name = (dist.metadata["Name"] or "").strip()
+        if name and name.lower() not in seen:
+            seen[name.lower()] = f"{name}=={dist.version}"
+    return [seen[key] for key in sorted(seen)]
+
+
+async def _cmd_versions(context, args):
+    """`versions` sends the whole list as a requirements-style file;
+    `versions <name>` answers the matching lines as text."""
+    import platform
+    lines = await asyncio.to_thread(installed_versions)
+    head = f"Python {platform.python_version()}, {len(lines)} packages"
+    if args:
+        wanted = args[0].lower()
+        found = [line for line in lines if wanted in line.lower()]
+        return f"{head}; matching '{args[0]}':\n" + ("\n".join(found) or "(none)"), None, None
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
+    data = (f"# {_bot_id} {VERSION}, {head}, read {stamp} UTC\n" + "\n".join(lines) + "\n").encode()
+    return head, f"{_bot_id}_versions_{stamp}.txt", data
 
 
 async def _cmd_whois(context, args):
@@ -1827,6 +2114,7 @@ COMMANDS = {
     "errors": _cmd_errors,
     "users": _cmd_users,
     "dbdump": _cmd_dbdump,
+    "versions": _cmd_versions,
     "whois": _cmd_whois,
     "message": _cmd_message,
     "logs": _cmd_logs,
@@ -1844,6 +2132,7 @@ COMMAND_HELP = {
     "errors": "errors since that bot last started",
     "users": "active users -- users [hours], default 24",
     "dbdump": "that bot's own tables as a zip of CSVs",
+    "versions": "versions [name] -- the installed packages as a requirements file, or the lines matching name",
     "whois": "whois <user_id> -- look a user up through that bot",
     "message": "message <user_id> <text> -- DM someone as that bot",
     "logs": "logs [n] [bot|problems] -- tail errors.log, bot.log with 'bot', problems.log with 'problems'",
@@ -2041,6 +2330,10 @@ def _prune() -> str:
         parts.append(f"{prune_problem_reports()} problem row(s)")
     except Exception:
         logger.debug("Could not prune problem reports", exc_info=True)
+    try:
+        parts.append(f"{prune_feedback()} feedback row(s)")
+    except Exception:
+        logger.debug("Could not prune feedback", exc_info=True)
     own = getattr(db, "prune_old_data", None)
     if own is not None:
         parts.append(f"{own()} activity row(s)")

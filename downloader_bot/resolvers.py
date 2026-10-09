@@ -54,6 +54,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -71,6 +72,20 @@ logger = logging.getLogger(__name__)
 # a dead provider costs more than moving on, and four providers at 15 s each
 # is still inside what a user will sit through.
 PROVIDER_TIMEOUT_S = float(os.environ.get("DBOT_PROVIDER_TIMEOUT", "20"))
+
+# ...except yt-dlp, whose route is not a lookup but the download itself: it
+# fetches the video while it resolves it, and there is no second step after it
+# (the other routes hand back a URL, and the file is fetched after the chain
+# has ended). Twenty seconds for the whole of a video was a limit no video of
+# any size could be sure to meet, and one no large download could meet at all
+# -- and a route that timed out counted as failed, so the one that was
+# working was rested. So it is given time for the download: this long for a
+# download under the free ceiling, and for one past it, this many more seconds
+# for every megabyte above the ceiling (2 MB/s is the pace it is asked to
+# keep). A route that stalls is stopped sooner than that, by yt-dlp's own
+# socket timeout.
+YTDLP_TIMEOUT_S = float(os.environ.get("DBOT_YTDLP_TIMEOUT", "90"))
+YTDLP_SECONDS_PER_MB = float(os.environ.get("DBOT_YTDLP_SECONDS_PER_MB", "0.5"))
 
 # After this many consecutive failures a provider starts being skipped -- not
 # dropped. See _ordered(): it goes to the back of the queue and is still tried
@@ -248,7 +263,33 @@ def load(rows) -> None:
 # Small shared helpers
 # ---------------------------------------------------------------------------
 
-_OG_TAG_RE = re.compile(r"<meta[^>]+>", re.IGNORECASE)
+_META_OPEN_RE = re.compile("<meta", re.IGNORECASE)
+# No real meta tag is anywhere near this long; one that is, is not read.
+_META_TAG_MAX = 4096
+
+
+def _meta_tags(html: str):
+    """Every `<meta ...>` tag of `html`, found in one pass.
+
+    This was the regex `<meta[^>]+>`, which is quadratic on a page made of
+    "<meta" with no ">" after it: each opening scans on to the end of the page,
+    and an 8 MB page (what a route may read) held the event loop, and with it
+    every bot of the combined edition, for about an hour (review, 2026-10-08).
+    Here a tag runs to the first ">" after its opening and the next one is
+    looked for only after that, so every character is looked at once; and a
+    page with no more ">" ends the scan, so the work is linear in the page."""
+    pos = 0
+    while True:
+        opening = _META_OPEN_RE.search(html, pos)
+        if opening is None:
+            return
+        start = opening.start()
+        close = html.find(">", start)
+        if close < 0:
+            return                               # no ">" left: no tag can end
+        pos = close + 1                          # nothing starts inside a tag
+        if close - start > 5 and close - start < _META_TAG_MAX:
+            yield html[start:close + 1]
 
 
 def _meta(html: str, prop: str) -> str | None:
@@ -258,19 +299,59 @@ def _meta(html: str, prop: str) -> str | None:
     `content=` before `property=` -- so this isolates the whole tag first and
     then pulls `content` out of it, rather than assuming an order.
     """
-    for tag in _OG_TAG_RE.findall(html):
-        if re.search(rf'(?:property|name)=["\']{re.escape(prop)}["\']', tag, re.I):
+    wanted = re.compile(rf'(?:property|name)=["\']{re.escape(prop)}["\']', re.I)
+    for tag in _meta_tags(html):
+        if wanted.search(tag):
             m = re.search(r'content=["\']([^"\']+)["\']', tag, re.I)
             if m:
                 return m.group(1).replace("&amp;", "&")
     return None
 
 
+# What a page or an API answer may weigh before it is refused. Every route
+# below reads a small document -- an embed page, a JSON answer -- and a
+# provider is somebody else's server: one that answers with a gigabyte would
+# otherwise be read whole into this process. Media goes through net.py's
+# streaming helpers, never through here.
+PAGE_LIMIT_BYTES = int(float(os.environ.get("DBOT_PAGE_LIMIT_MB", "8")) * 1024 * 1024)
+
+
+async def _page(method: str, url: str, **kwargs) -> httpx.Response:
+    """One small document, read under PAGE_LIMIT_BYTES (net.read_page), with
+    this module's way of failing: a ProviderFailed, kind "error", that the
+    chain moves past. The size is counted *after* decoding, and only gzip and
+    deflate are read at all -- see net.body_chunks for the 421 bytes that
+    decoded to 512 MB."""
+    netloc = urlparse(url).netloc
+
+    def declared_too_big(declared: int):
+        return ProviderFailed(f"{netloc} answered with {declared:,} bytes, "
+                              "more than a page may be", "error")
+
+    def too_big():
+        return ProviderFailed(f"{netloc} kept sending past {PAGE_LIMIT_BYTES:,} bytes", "error")
+
+    try:
+        return await net.read_page(method, url, limit=PAGE_LIMIT_BYTES, too_big=too_big,
+                                   declared_too_big=declared_too_big, **kwargs)
+    except net.Trickle:                         # before BadEncoding, which it is one of
+        raise ProviderFailed(f"{netloc} sent its answer in pieces too small to read", "error") from None
+    except net.BadEncoding:
+        raise ProviderFailed(f"{netloc} answered in an encoding this bot does not read", "error") from None
+
+
 async def _get(url: str, *, crawler: bool = False, **kwargs) -> httpx.Response:
     headers = dict(kwargs.pop("headers", {}) or {})
     if crawler:
         headers.setdefault("User-Agent", CRAWLER_UA)
-    return await net.client().get(url, headers=headers, **kwargs)
+    return await _page("GET", url, headers=headers, **kwargs)
+
+
+async def _post(url: str, **kwargs) -> httpx.Response:
+    """The same for a POST (cobalt). An instance is somebody else's server
+    like any other provider, and `client().post()` would read a 200 MB answer
+    whole: it peaked at 400 MB in the review of 2026-10-08."""
+    return await _page("POST", url, **kwargs)
 
 
 def _ext_of(name: str, default: str) -> str:
@@ -406,9 +487,12 @@ async def _ig_instafix(url: str) -> Resolved:
     target = urljoin(host, target)
 
     # Ask for one byte. Enough to read the Content-Type without pulling the
-    # file twice, and cheaper than trusting the meta tag.
-    probe = await net.client().get(target, headers={"Range": "bytes=0-0"})
-    ctype = probe.headers.get("content-type", "")
+    # file twice, and cheaper than trusting the meta tag. Streamed, so that
+    # only the headers are read: a server that ignores Range answers with the
+    # whole video, and `.get()` would hold all of it in memory to look at one
+    # header of it.
+    async with net.client().stream("GET", target, headers={"Range": "bytes=0-0"}) as probe:
+        ctype = probe.headers.get("content-type", "")
     if video and not ctype.startswith("video/"):
         raise ProviderFailed(
             f"InstaFix promised a video and served {ctype or 'nothing'}", "blocked"
@@ -683,14 +767,187 @@ async def _pin_og(url: str) -> Resolved:
 
 
 # ---------------------------------------------------------------------------
+# cobalt, for the platforms with nothing else
+# ---------------------------------------------------------------------------
+# cobalt (github.com/imputnet/cobalt) is an open-source downloader whose whole
+# product is an API: POST a link, get back a URL that serves the file. The
+# official instance wants a Turnstile token, but the project is built to be
+# self-hosted, and a number of people run public instances that answer
+# without one. Like the embed-fixers above, the fetching happens from *their*
+# address -- and the file comes back through their `/tunnel`, so the second
+# request never touches YouTube's CDN from this container either.
+#
+# Written in the cloud session of 2026-09-25 for YouTube, which had yt-dlp and
+# nothing else: a redeploy can land on an address YouTube challenges ("sign in
+# to confirm you're not a bot") and a link that downloaded the day before is
+# then DL-BLOCKED. Ported here at 2.1.0 (that branch was never merged). With
+# cobalt ahead of it, yt-dlp becomes what it is everywhere else -- the last
+# resort, and the route that gets better if cookies or a proxy are set.
+#
+# Checked 2026-10-07 from a residential address: of the three default
+# instances one answered, one said error.api.youtube.login and one
+# content.no_valid_content. Every one is somebody's hobby server, which is why
+# there are several, tried in order inside this one provider, with whichever
+# answered last going first next time -- so a dead instance costs one request
+# per restart rather than one per download. To use an instance of your own
+# (the robust answer; a cobalt container is small), put it first in
+# DBOT_COBALT_INSTANCES and its key in DBOT_COBALT_API_KEY, which is sent to
+# that first instance only: a key is a secret, and the rest are strangers.
+
+COBALT_INSTANCES = [
+    host.strip().rstrip("/") for host in os.environ.get(
+        "DBOT_COBALT_INSTANCES",
+        "https://api.cobalt.liubquanti.click,https://cobaltapi.cjs.nz,https://dwnld.nichind.dev",
+    ).split(",") if host.strip()
+]
+COBALT_API_KEY = os.environ.get("DBOT_COBALT_API_KEY") or None
+# 720p rather than "max": the bot sends through the cloud Bot API's 50 MB, and
+# a 1080p minute of video is most of that on its own.
+COBALT_QUALITY = os.environ.get("DBOT_COBALT_QUALITY", "720")
+# Per instance. Several of them fit inside PROVIDER_TIMEOUT_S that way, and an
+# instance that has not answered in this long is not going to.
+COBALT_INSTANCE_TIMEOUT_S = float(os.environ.get("DBOT_COBALT_INSTANCE_TIMEOUT", "10"))
+
+# cobalt's error codes, sorted into the verdicts the chain understands. The
+# codes are namespaced ("error.api.content.video.unavailable",
+# "error.api.youtube.login"), so these match on parts rather than whole codes
+# -- new codes under a known namespace land in the right bucket unaided.
+_COBALT_MISSING = ("content.video.unavailable", "content.post.unavailable",
+                   "content.video.private", "content.post.private",
+                   "content.video.age", "content.post.age", "link.invalid",
+                   "link.unsupported", "content.video.live")
+_COBALT_TOO_BIG = ("content.too_long", "content.too_large")
+_COBALT_BLOCKED = (".login", "auth.", "fetch.rate", "rate_exceeded",
+                   "content.video.region", "youtube.decipher", "youtube.token",
+                   "no_valid_content", "fetch.critical")
+
+_cobalt_last_good: str | None = None
+
+
+def _cobalt_verdict(code: str) -> str:
+    code = code.lower()
+    if any(part in code for part in _COBALT_MISSING):
+        return "missing"
+    if any(part in code for part in _COBALT_TOO_BIG):
+        return "too_big"
+    if any(part in code for part in _COBALT_BLOCKED):
+        return "blocked"
+    return "error"
+
+
+def _cobalt_items(data: dict, platform: str) -> list[MediaItem]:
+    status = data.get("status")
+    if status in ("tunnel", "redirect", "stream"):
+        name = str(data.get("filename") or "")
+        kind = _kind_of(name) if name else "video"
+        return [MediaItem(kind, url=data["url"],
+                          filename=f"{platform}.{_ext_of(name, 'mp4' if kind == 'video' else 'jpg')}")]
+    if status == "picker":
+        items = []
+        for entry in data.get("picker") or []:
+            url = entry.get("url")
+            if not url:
+                continue
+            # "gif" is a short muted mp4 in cobalt's vocabulary, which is a
+            # video to Telegram.
+            kind = "photo" if entry.get("type") == "photo" else "video"
+            items.append(MediaItem(kind, url=url,
+                                   filename=f"{platform}.{'jpg' if kind == 'photo' else 'mp4'}"))
+        return items
+    if status == "local-processing":
+        # Newer instances can hand back separate streams for the client to
+        # merge. One stream is already a whole file; several would need
+        # ffmpeg here, which is what yt-dlp is further down the chain for.
+        tunnels = data.get("tunnel") or []
+        if len(tunnels) == 1:
+            return [MediaItem("video", url=tunnels[0], filename=f"{platform}.mp4")]
+    return []
+
+
+async def _cobalt_one(host: str, url: str, platform: str, key: str | None) -> Resolved:
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Api-Key {key}"
+    body = {"url": url, "videoQuality": COBALT_QUALITY, "filenameStyle": "basic"}
+    resp = await _post(host + "/", json=body, headers=headers, timeout=COBALT_INSTANCE_TIMEOUT_S)
+    try:
+        data = resp.json()
+    except ValueError:
+        raise ProviderFailed(f"{urlparse(host).netloc} answered HTTP {resp.status_code}, not JSON",
+                             "blocked" if resp.status_code in (401, 403, 429) else "error")
+    if not isinstance(data, dict):
+        raise ProviderFailed(f"{urlparse(host).netloc} answered something that is not an object", "error")
+    if data.get("status") == "error":
+        code = str((data.get("error") or {}).get("code") or "unknown")
+        raise ProviderFailed(f"{urlparse(host).netloc}: {code}", _cobalt_verdict(code))
+    items = _cobalt_items(data, platform)
+    if not items:
+        raise ProviderFailed(f"{urlparse(host).netloc}: nothing usable ({data.get('status')})", "error")
+    if any(i.kind == "video" for i in items) and platform == "youtube":
+        items = [i for i in items if i.kind == "video"]
+    return Resolved(platform, "cobalt", items)
+
+
+def _cobalt_provider(platform: str):
+    async def provider(url: str) -> Resolved:
+        global _cobalt_last_good
+        if not COBALT_INSTANCES:
+            raise ProviderFailed("no cobalt instances configured", "error")
+        hosts = list(COBALT_INSTANCES)
+        if _cobalt_last_good in hosts:
+            hosts.remove(_cobalt_last_good)
+            hosts.insert(0, _cobalt_last_good)
+        failures: list[ProviderFailed] = []
+        for host in hosts:
+            key = COBALT_API_KEY if host == COBALT_INSTANCES[0] else None
+            try:
+                # A hard deadline, not httpx's: its timeout is per read, and
+                # an instance trickling bytes would never trip it.
+                resolved = await asyncio.wait_for(_cobalt_one(host, url, platform, key),
+                                                  timeout=COBALT_INSTANCE_TIMEOUT_S)
+            except ProviderFailed as exc:
+                failures.append(exc)
+                if exc.kind == "too_big":
+                    # The clip itself is the problem; another instance will
+                    # say the same thing about it. "missing" is not trusted
+                    # the same way: an instance YouTube has blocked can
+                    # report a perfectly good video as unavailable.
+                    raise
+                continue
+            except asyncio.TimeoutError:
+                failures.append(ProviderFailed(
+                    f"{urlparse(host).netloc}: no answer in {COBALT_INSTANCE_TIMEOUT_S:.0f}s", "error"))
+                continue
+            except (httpx.HTTPError, KeyError, TypeError) as exc:
+                failures.append(ProviderFailed(
+                    f"{urlparse(host).netloc}: {type(exc).__name__}: {exc}", "error"))
+                continue
+            _cobalt_last_good = host
+            return resolved
+        kinds = {f.kind for f in failures}
+        verdict = ("blocked" if "blocked" in kinds
+                   else "missing" if kinds == {"missing"} else "error")
+        raise ProviderFailed("; ".join(str(f) for f in failures), verdict)
+    return provider
+
+
+# ---------------------------------------------------------------------------
 # yt-dlp, the universal last resort
 # ---------------------------------------------------------------------------
 
 def _ytdlp_provider(platform: str):
     async def provider(url: str) -> Resolved:
         import video  # deferred with yt-dlp itself; see video.py's docstring
+        # A thread cannot be cancelled, only asked. This provider is cancelled
+        # by the chain's time limit and by the bot stopping, and the download
+        # in its thread would carry on to the end -- a file nobody collects,
+        # left on disk and paid for in bandwidth -- unless it is told.
+        stop = threading.Event()
         try:
-            path = await asyncio.to_thread(video.download_video, url, _WORK_DIR, _LIMIT_MB.get())
+            path = await asyncio.to_thread(video.download_video, url, _WORK_DIR, _LIMIT_MB.get(), stop)
+        except asyncio.CancelledError:
+            stop.set()
+            raise
         except video.BlockedBySource as exc:
             raise ProviderFailed(str(exc), "blocked") from exc
         except video.TooLarge as exc:
@@ -747,7 +1004,10 @@ PROVIDERS: dict[str, list[tuple[str, object]]] = {
     "reddit": [
         ("ytdlp:reddit", _ytdlp_provider("reddit")),
     ],
+    # cobalt first: yt-dlp asks YouTube from this container's own address,
+    # which is the address YouTube challenges. See the cobalt section.
     "youtube": [
+        ("cobalt:youtube", _cobalt_provider("youtube")),
         ("ytdlp:youtube", _ytdlp_provider("youtube")),
     ],
 }
@@ -776,6 +1036,15 @@ def _ordered(platform: str) -> list[tuple[str, object]]:
 _LIMIT_MB: contextvars.ContextVar = contextvars.ContextVar("download_limit_mb", default=None)
 
 
+def _timeout_for(name: str) -> float:
+    """How long the route called `name` gets before the chain moves on."""
+    if not name.startswith("ytdlp:"):
+        return PROVIDER_TIMEOUT_S
+    free_mb = net.MAX_RESPONSE_BYTES // (1024 * 1024)
+    over_mb = max(0, (_LIMIT_MB.get() or free_mb) - free_mb)
+    return max(PROVIDER_TIMEOUT_S, YTDLP_TIMEOUT_S + over_mb * YTDLP_SECONDS_PER_MB)
+
+
 async def resolve(platform: str, url: str, max_mb: int | None = None) -> Resolved:
     """Walk the chain until something produces media, with `max_mb` as the
     ceiling for anything downloaded on the way."""
@@ -784,6 +1053,29 @@ async def resolve(platform: str, url: str, max_mb: int | None = None) -> Resolve
         return await _resolve(platform, url)
     finally:
         _LIMIT_MB.reset(token)
+
+
+# Most files one post may deliver. The bot downloads every item of a delivery to
+# disk before it sends the first, each up to the download ceiling, and a
+# provider is somebody else's server: a cobalt picker or a resolver that lists
+# a thousand items would fill the container's disk (review, 2026-10-08). A
+# TikTok slideshow carries up to 35 photos, so the default leaves room.
+MAX_ITEMS_PER_POST = max(1, int(os.environ.get("DBOT_MAX_ITEMS_PER_POST", "40")))
+
+
+def _cut_items(resolved: Resolved) -> None:
+    """Keep the first MAX_ITEMS_PER_POST items of `resolved`. A file yt-dlp
+    already wrote for an item that is cut is deleted: nothing else knows of it."""
+    if len(resolved.items) <= MAX_ITEMS_PER_POST:
+        return
+    logger.warning("a delivery of %d items was cut to %d", len(resolved.items), MAX_ITEMS_PER_POST)
+    for item in resolved.items[MAX_ITEMS_PER_POST:]:
+        if item.path:
+            try:
+                os.remove(item.path)
+            except OSError:
+                pass
+    del resolved.items[MAX_ITEMS_PER_POST:]
 
 
 async def _resolve(platform: str, url: str) -> Resolved:
@@ -799,8 +1091,9 @@ async def _resolve(platform: str, url: str) -> Resolved:
             logger.info("provider %s skipped for %s: an earlier route ruled it out", name, platform)
             continue
         started = time.perf_counter()
+        timeout = _timeout_for(name)
         try:
-            resolved = await asyncio.wait_for(fn(url), timeout=PROVIDER_TIMEOUT_S)
+            resolved = await asyncio.wait_for(fn(url), timeout=timeout)
             if not resolved.items:
                 raise ProviderFailed("returned nothing", "missing")
         except ProviderFailed as exc:
@@ -809,7 +1102,7 @@ async def _resolve(platform: str, url: str) -> Resolved:
             _record_fail(name, str(exc))
             logger.info("provider %s failed for %s: %s", name, platform, exc)
         except asyncio.TimeoutError:
-            exc = ProviderFailed(f"timed out after {PROVIDER_TIMEOUT_S:.0f}s", "error")
+            exc = ProviderFailed(f"timed out after {timeout:.0f}s", "error")
             failures[name] = exc
             _record_fail(name, str(exc))
             logger.info("provider %s timed out for %s", name, platform)
@@ -819,6 +1112,7 @@ async def _resolve(platform: str, url: str) -> Resolved:
             _record_fail(name, str(wrapped))
             logger.warning("provider %s raised for %s", name, platform, exc_info=True)
         else:
+            _cut_items(resolved)
             _record_ok(name)
             logger.info("provider %s resolved %s in %.1fs (%d item(s))",
                         name, platform, time.perf_counter() - started,
@@ -849,15 +1143,22 @@ SAMPLES = {
     "tiktok": "https://www.tiktok.com/@scout2015/video/6718335390845095173",
     "twitter": "https://x.com/SpaceX/status/2042988940756480302",
     "pinterest": "https://www.pinterest.com/pin/27725353928390009/",
+    "youtube": "https://www.youtube.com/shorts/W05mCB2bDAU",
 }
 
 PROBE_FETCH_BYTES = 64 * 1024
+# How long the whole media fetch of a probe row may take, however many
+# addresses it tries. The route itself has its own timeout; this one is for
+# what the route *returned*: a CDN address that accepts the connection and
+# then sends a byte a minute never trips httpx's per-read timeout, and a
+# probe is reachable over the bus, where ManagerBot gives up at 90 s.
+PROBE_FETCH_TIMEOUT_S = 20.0
 
 
 async def probe_route(name, fn, url: str, fetch: bool = False,
                       timeout: float | None = None) -> dict:
     """One route, one link. Never raises."""
-    timeout = PROVIDER_TIMEOUT_S if timeout is None else timeout
+    timeout = _timeout_for(name) if timeout is None else timeout
     started = time.perf_counter()
     row = {"provider": name, "url": url, "ok": False, "detail": "", "items": 0,
            "seconds": 0.0, "fetched": None}
@@ -875,7 +1176,13 @@ async def probe_route(name, fn, url: str, fetch: bool = False,
         kinds = ", ".join(sorted({i.kind for i in resolved.items}))
         row["detail"] = f"{len(resolved.items)} item(s) [{kinds}]"
         if fetch and resolved.items:
-            row["fetched"] = await _probe_fetch(resolved.items[0])
+            try:
+                row["fetched"] = await asyncio.wait_for(_probe_fetch(resolved.items[0]),
+                                                        PROBE_FETCH_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                # "fetch failed" exactly: routewatch.check_platform reads the
+                # start of this text to tell a route whose media does not serve.
+                row["fetched"] = f"fetch failed: no media in {PROBE_FETCH_TIMEOUT_S:.0f}s"
     row["seconds"] = round(time.perf_counter() - started, 1)
     return row
 
@@ -894,15 +1201,30 @@ async def _probe_fetch(item: MediaItem) -> str:
             return f"{size:,} bytes on disk"
         except OSError as exc:
             return f"file gone: {exc}"
+    last = "no address to fetch"
+
+    class CapReached(Exception):
+        """Not an error here: the cap is what this fetch is for."""
+
     for route in [u for u in [item.url, *item.alt_urls] if u]:
         try:
             async with net.client().stream("GET", route) as resp:
                 resp.raise_for_status()
                 got = 0
-                async for chunk in resp.aiter_bytes():
-                    got += len(chunk)
-                    if got >= PROBE_FETCH_BYTES:
-                        break
+                # Through body_chunks like every other body, so that a media
+                # address which answers with a compressed bomb is stopped at the
+                # cap instead of decoded whole -- this is the one place that used
+                # to read a CDN's body without counting what it became.
+                pieces = net.body_chunks(resp, PROBE_FETCH_BYTES, CapReached)
+                try:
+                    async for chunk in pieces:
+                        got += len(chunk)
+                        if got >= PROBE_FETCH_BYTES:
+                            break
+                except CapReached:
+                    got = max(got, PROBE_FETCH_BYTES)     # more than the cap arrived: success
+                finally:
+                    await pieces.aclose()
                 return f"{got:,} bytes, {resp.headers.get('content-type', '?')}"
         except Exception as exc:
             last = f"{type(exc).__name__}: {exc}"
@@ -938,13 +1260,27 @@ async def probe_all(urls: dict[str, str] | None = None, fetch: bool = False,
 # repository with a logo (v1.1.3). A probe report can carry a dozen of those,
 # so the URLs come out and the rest is trimmed to a line.
 _URL_RE = re.compile(r"https?://\S+")
-_NOISE_RE = re.compile(
-    r"\s*;?\s*please report this issue on.*|\s*Confirm you are on the latest version.*",
-    re.IGNORECASE | re.DOTALL)
+# The two places yt-dlp's text turns to its own advice. The text is cut at the
+# first of them by a plain search for the words: the regex this replaced
+# (`\s*;?\s*please report this issue on.*|...`) backtracked cubically on a run
+# of whitespace -- 1000 spaces took a second, 10,000 about a quarter of an
+# hour -- and the text can be a hostile cobalt instance's error code, on its
+# way through a probe into the daily check's report (review, 2026-10-08).
+_NOISE_MARKERS = ((re.compile("please report this issue on", re.IGNORECASE), True),     # True: and the ";" before it
+                  (re.compile("confirm you are on the latest version", re.IGNORECASE), False))
+# More than this is never shown, and none of it needs searching.
+_TIDY_READS = 4000
 
 
 def tidy_error(text: str, limit: int = 150) -> str:
-    text = _NOISE_RE.sub("", text or "")
+    text = (text or "")[:_TIDY_READS]
+    cuts = [(m.start(), semicolon) for marker, semicolon in _NOISE_MARKERS
+            for m in [marker.search(text)] if m]
+    if cuts:
+        at, semicolon = min(cuts)
+        text = text[:at].rstrip()
+        if semicolon:                        # "...; please report this issue on ..."
+            text = text[:-1].rstrip() if text.endswith(";") else text
     text = _URL_RE.sub("<link>", text)
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -998,9 +1334,12 @@ async def download(item: MediaItem, work_dir: str | None = None, max_mb: int | N
         try:
             await net.stream_to_file(route, path, headers=headers,
                                      limit=max_mb * 1024 * 1024 if max_mb else net.MAX_RESPONSE_BYTES)
-        except FetchError:
+        except net.TooLarge:
             # Over the size ceiling. Another route to the same file will be
-            # the same size, so there is nothing to gain by trying it.
+            # the same size, so there is nothing to gain by trying it. Only
+            # this: any other FetchError (an encoding this bot does not read,
+            # a body sent in specks) is one route failing, and the next may
+            # serve the same file in a way that reads.
             if os.path.exists(path):
                 os.remove(path)
             raise

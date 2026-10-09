@@ -178,7 +178,19 @@ def _get_pool() -> ConnectionPool:
             max_idle=POOL_MAX_IDLE,
             timeout=POOL_TIMEOUT,
             kwargs={
-                "options": f"-c search_path={DB_SCHEMA},public",
+                # Nothing here may wait on the network for ever. The five bots
+                # share one process and eight threads, and a query whose
+                # packets go unacknowledged (a dead network path) otherwise
+                # waits out TCP retransmission -- minutes -- holding one of
+                # them: measured in the incident of 2026-10-09 08:40 UTC. So a
+                # connection attempt gives up after 10 s (connect_timeout),
+                # data nobody acknowledges after 30 s (tcp_user_timeout, in
+                # ms), a statement after 60 s (statement_timeout) and a
+                # transaction left open and idle after 120 s
+                # (idle_in_transaction_session_timeout).
+                "options": f"-c search_path={DB_SCHEMA},public "
+                           f"-c statement_timeout=60s -c idle_in_transaction_session_timeout=120s",
+                "connect_timeout": 10, "tcp_user_timeout": 30000,
                 # Keep an idle connection alive at the TCP level rather than
                 # discovering it is dead on the next checkout. Cheaper than
                 # the check it saves, and it happens while nobody is waiting.
@@ -257,6 +269,32 @@ def ensure_schema(dsn: str = DATABASE_URL) -> None:
         conn.commit()
 
 
+def _column(conn, table: str, column: str):
+    """(data_type, column_default) of `column` in this bot's schema, or None
+    when the table has no such column.
+
+    init_db() asks this before every ALTER TABLE and issues the ALTER only when
+    the answer says something is missing or different. Every ALTER TABLE takes
+    an ACCESS EXCLUSIVE lock on its table and keeps it until the transaction
+    ends -- even one that turns out to change nothing, IF NOT EXISTS or not
+    (measured on Postgres 17, 2026-10-09) -- and init_db() is one transaction
+    that commits at the very end. So a start that only wanted to check used to
+    queue every other reader and writer of those tables behind it for as long
+    as init_db() took, and during a deploy overlap those are the old
+    instance's, still serving. This is a read of the catalog, which takes no
+    lock that blocks anybody; a normal start now takes none of the table locks.
+    IF NOT EXISTS stays on the statements, because two instances starting
+    together can both see the column missing; the second then waits for the
+    first and finds nothing left to do. The statements are literals, one per
+    column, on purpose: tests/test_sql_safety.py allows no SQL built from
+    names."""
+    return conn.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s",
+        (table, column),
+    ).fetchone()
+
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -277,20 +315,17 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         )
         # Nullable, no default -- NULL means "hasn't picked a language yet",
         # which is what gates the first-run picker in bot.py's /start.
-        conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS language TEXT")
+        if _column(conn, "settings", "language") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS language TEXT")
         # Default 0: compressed is what Telegram does to everyone by default
         # and what almost everyone wants, since it is the form that plays
         # inline. Lossless is opt-in, per user, and remembered.
-        conn.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS "
-            "lossless_enabled INTEGER NOT NULL DEFAULT 0"
-        )
+        if _column(conn, "settings", "lossless_enabled") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS lossless_enabled INTEGER NOT NULL DEFAULT 0")
         # Default 0: a download over the free ceiling costs credit, and
         # nobody spends credit without having said yes (large_files.py).
-        conn.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS "
-            "large_files_enabled INTEGER NOT NULL DEFAULT 0"
-        )
+        if _column(conn, "settings", "large_files_enabled") is None:
+            conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS large_files_enabled INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS star_transactions (
@@ -312,8 +347,12 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # since some fiat currencies' minor-unit amounts can exceed a plain
         # INTEGER's range, and adds currency for bots migrating from
         # Stars-only donations (see shared_features.py's FIAT_CURRENCIES).
-        conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
-        conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        # Each runs only when it is needed (see _column).
+        amount = _column(conn, "star_transactions", "amount_stars")
+        if amount is not None and amount[0] != "bigint":
+            conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
+        if _column(conn, "star_transactions", "currency") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -327,11 +366,13 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # cadence is a schedule that runs out rather than a loop (see
         # DONATION_STEPS in shared_features.py), and this is the step counter
         # it reads. Safe to re-run on an existing table.
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
+        if _column(conn, "donation_prompts", "times_shown") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS times_shown INTEGER NOT NULL DEFAULT 0")
         # Set only when DONATION_PIN is on: the message this bot pinned, so
         # it can be unpinned again when they donate or when a newer nudge
         # replaces it.
-        conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
+        if _column(conn, "donation_prompts", "pinned_message_id") is None:
+            conn.execute("ALTER TABLE donation_prompts ADD COLUMN IF NOT EXISTS pinned_message_id BIGINT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS activity_events (

@@ -26,6 +26,16 @@ database, and without them there is nothing for it to watch.
   traceback.
 - **Reports donations**, which is the one unprompted interruption worth
   having.
+- **Sends a nightly report** at 22:00 Korean time (`MBOT_NIGHTLY_UTC`, 13:00
+  UTC by default): urgent problems one by one, faults grouped by code, and
+  everything the bots handled correctly by what kind of thing it was — people
+  shown how to use a bot, limits reached, old buttons and links, the other
+  person's choice, and anyone turned away during an update.
+- **Passes on feedback.** What people send with `/feedback` in the public
+  bots arrives here, each piece as it comes or all of them with the nightly
+  report; `/feedback` switches between the two. It carries the words, the bot
+  and the language, never who wrote them — so it is read only: there is
+  nobody to answer.
 - **Says when it has gone blind.** If ManagerBot's own database connection
   fails it says so over Telegram, because otherwise the one failure that
   stops every alert would be the one failure nobody hears about.
@@ -98,6 +108,8 @@ Reaching into a bot:
 - `/whois <bot> <user_id>` — look an account up through that bot
 - `/say <bot> <user_id> <text>` — message someone **as** that bot
 - `/dbdump <bot>` — that bot's own tables as a zip of CSVs
+- `/run <bot> versions [name]` — the packages that process really runs, as a requirements file
+  (`name==version`) to pin from; with a name, only the matching lines
 - `/restart <bot>` — restart its process
 - `/crashtest <bot>` — make it raise on purpose, to confirm the alert arrives
 - `/providers`, `/probe` — download-route health, and an active probe
@@ -111,7 +123,11 @@ Across the whole family:
 - `/donations` — paid donations per bot
 - `/sql <SELECT …>` — read-only query against the shared database
 - `/backup` — the entire database as one zip of CSVs
-- `/reports [n]` — the latest problem reports people sent with "Report the issue"
+- `/problems [hours] [mine]` — the nightly report, on demand (`/nightly` still answers)
+- `/reports [n] [mine]` — every problem the bots showed anybody, newest first; `mine` for the ones
+  somebody attached their own details to
+- `/feedback [instant|nightly]` — what people sent with `/feedback`, and whether each piece arrives
+  as it comes or with the nightly report; `/feedback <id>` shows one in full
 - `/decode <code>` — what an error code means: `/decode CV-TIMEOUT`, or any unambiguous part of one
 - `/start`, `/help` — the same thing: this list, printed in the chat
 

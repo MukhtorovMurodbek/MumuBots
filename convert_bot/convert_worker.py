@@ -26,6 +26,12 @@ Anything a library prints along the way is ignored.
     {"ok": false, "kind": "refused", "message": "..."}   a ConversionError
     {"ok": false, "kind": "crash",   "message": "..."}   anything else
 
+A second kind of job shares the process and the protocol: {"kind":
+"describe_raw", "path": ..., "src_ext": ...} asks for the size of a camera raw
+photo, which is LibRaw parsing a stranger's file and so is not done in the
+bot's own process. Its answer is {"ok": true, "info": {<RawInfo's fields>}} or
+one of the failures above.
+
 "refused" means the file could not be converted and saying so is the bot
 working; "crash" means the bot failed. jobs.py refunds both and tells the
 owner only about the second.
@@ -67,6 +73,55 @@ def _cap_memory(max_memory_mb: int) -> None:
         pass
 
 
+def _describe_raw(job: dict) -> int:
+    """Read a camera raw photo's size without decoding it (raw_convert.inspect)
+    and say it as JSON. Anything that goes wrong is reported as one of the
+    protocol's failures and the parent treats every one of them as "unreadable"."""
+    try:
+        import convert_utils
+        import raw_convert
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"could not load the converters: {exc}")
+        return 1
+    try:
+        info = raw_convert.inspect(job["path"], job.get("src_ext") or "dng")
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the raw photo ran out of memory")
+        return 2
+    except convert_utils.ConversionError as exc:      # the ordinary "that is not a raw photo"
+        _emit(False, kind="refused", message=str(exc))
+        return 2
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")
+        return 1
+    _emit(True, info=info._asdict())
+    return 0
+
+
+def _describe_image(job: dict) -> int:
+    """A picture's width and height from Pillow's header read, as JSON
+    (jobs.describe_image). Pillow's bomb ceiling is off: deciding it is what
+    the size is asked for. Here, in a process of its own, because some of
+    Pillow's "header reads" decode (see jobs.describe_image)."""
+    try:
+        import convert_utils
+        from PIL import Image
+        convert_utils.register_openers()
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(job["path"]) as img:
+            width, height = img.size
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the picture's size ran out of memory")
+        return 2
+    except Exception as exc:
+        _emit(False, kind="refused", message=type(exc).__name__)
+        return 2
+    _emit(True, width=int(width), height=int(height))
+    return 0
+
+
 def main(argv) -> int:
     if len(argv) < 2:
         _emit(False, kind="crash", message="no job was given to the worker")
@@ -81,6 +136,11 @@ def main(argv) -> int:
     # The size policy is decided by the parent, before anything is charged.
     # A DecompressionBombWarning here would only be noise on stderr.
     warnings.simplefilter("ignore")
+
+    if job.get("kind") == "describe_raw":
+        return _describe_raw(job)
+    if job.get("kind") == "describe_image":
+        return _describe_image(job)
 
     try:
         import convert_utils
@@ -116,12 +176,15 @@ def main(argv) -> int:
             job["in_paths"], job["src_ext"], job["target_ext"],
             job["work_dir"], job.get("stem") or "converted",
         )
+    except convert_utils.OutOfMemory as exc:
+        _emit(False, kind="no_memory", message=str(exc))
+        return 2
     except convert_utils.ConversionError as exc:
         _emit(False, kind="refused", message=str(exc))
         return 2
     except MemoryError:
-        _emit(False, kind="crash", message="the conversion ran out of memory")
-        return 1
+        _emit(False, kind="no_memory", message="the conversion ran out of memory (MemoryError)")
+        return 2
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
         _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")

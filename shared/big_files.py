@@ -390,13 +390,14 @@ def _emit(line: dict) -> None:
 
 
 def _save_session(text: str) -> None:
-    """Written whole and then renamed, so a reader never sees half a file."""
-    partial = SESSION_FILE.with_suffix(".partial")
-    partial.write_text(text, encoding="utf-8")
-    try:
-        os.chmod(partial, 0o600)
-    except OSError:
-        pass
+    """Written whole and then renamed, so a reader never sees half a file. Under
+    a name of its own, so two transfers that log in at once cannot rename each
+    other's file away, and created readable by this user alone rather than
+    made so afterwards."""
+    partial = SESSION_FILE.with_suffix(f".{os.getpid()}.partial")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
     os.replace(partial, SESSION_FILE)
 
 
@@ -415,7 +416,15 @@ async def _connect():
         await asyncio.wait_for(client.connect(), CONNECT_TIMEOUT_S)
         if not await client.is_user_authorized():
             await asyncio.wait_for(client.sign_in(bot_token=BOT_TOKEN), CONNECT_TIMEOUT_S)
-            _save_session(client.session.save())
+            try:
+                _save_session(client.session.save())
+            except OSError:
+                # Keeping the login is an economy, not a need: the next transfer
+                # logs in again. It must not turn a login that worked into "the
+                # route is down", which is what failing here did -- every big
+                # file refused for five minutes over a full or read-only /tmp.
+                logger.warning("Could not keep the MTProto login in %s; the next transfer logs in again.",
+                               SESSION_FILE, exc_info=True)
     except Exception as exc:
         try:
             await client.disconnect()

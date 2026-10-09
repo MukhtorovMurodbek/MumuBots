@@ -32,6 +32,92 @@ that goes out from the container's own address, which is the thing the sites
 object to. No network: the providers are two local functions, one that always
 works and one that never does.
 
+Five joined it in the review of 2026-09-29, each written by sending the thing
+that hurt and each checked to fail on the code as it was:
+
+- `test_public_only.py` -- DownloaderBot fetches the public internet and
+  nothing else. The address table, which links count as Pinterest, the client's
+  transport against a mock (Host, SNI, IPv6, a redirect to an internal address,
+  the next address when one does not answer), and a real socket to a server on
+  this machine, which the old client fetched.
+- `test_ytdlp_stop.py` -- a download nobody waits for stops and leaves nothing
+  on the disk: the provider's cancellation, what a yt-dlp route is given, and a
+  real yt-dlp against a server that serves a video slowly.
+- `test_hostile_files.py` -- a YAML alias bomb, deep JSON and XML, a
+  self-referencing anchor, a CSV cell over 128 KB, blank rows, a page 125 inches
+  across: each ends in a `ConversionError`, quickly, and the ordinary
+  neighbours of each still convert. It stops at seven levels of bomb on purpose
+  -- at twenty, a regression is a machine out of memory, not a failure.
+- `test_orientation.py` -- a photo comes out the way up it was taken: all seven
+  EXIF turns pixel by pixel against the specification's table, not against
+  Pillow, and HEIC, TIFF and AVIF not turned twice.
+- `test_sticker_ffmpeg.py` -- StickerBot's ffmpeg is capped before `-i` as well
+  as after, in the shape `test_conversions.py` pins ConvertBot's.
+
+`test_reactions_feedback.py` joined it on 2026-10-03, with AnonBot's
+reactions and the family's `/feedback`: what a change of reaction passes on
+and which note the reactor gets, every string either feature shows in all
+three languages of every bot that shows it, that an answer is feedback only
+when it answers the question (in AnonBot anything else is somebody's
+conversation), and that the nightly report's default is 22:00 in Korea.
+`test_reporting.py` grew the other half of that day: no line of the nightly
+report says "Refused" any more, and every problem the bots explain to people
+sits in exactly one kind (`problems.KINDS`).
+
+`test_conflict_alert.py` (2026-10-10) drives the real error handlers -- the shared one and ManagerBot's own --
+with a fake clock: one getUpdates `Conflict` is a warning with numbers only, three within 120 s are recorded once
+(a second copy polling the same token), none again until 600 s pass quietly, three spread over more than 120 s are
+nothing, and any other error is recorded exactly as before. Broken 14 ways on purpose, every one caught.
+
+Four joined it on 2026-10-07, each run against its own deliberately broken
+code (12, 10, 22 and 18 breakages, every one caught -- and several of those runs
+found checks that had passed because a *second* guard caught the same input,
+which were then made to isolate the guard they name):
+
+- `test_routewatch.py` -- DownloaderBot's daily check and what hangs off it. When
+  the owner is told (a platform going down, not it staying down; a recovery is
+  not pushed; YouTube never; a deleted sample is not an outage), yt-dlp's
+  versions, the swap that replaces yt-dlp while the bot runs (never under a
+  download that is using it; a copy that does not import as the release asked
+  for is refused, in a child process), the page cap (one answer that says it is
+  too big, refused before a byte is read, and one that never says, cut off at the
+  cap), the cobalt route against a mock transport, and cookies pasted into a
+  variable.
+- `test_bounded_bodies.py` -- every body DownloaderBot reads is counted *after*
+  decoding (2026-10-08, after a review found 421 bytes of brotli decoding to
+  512 MB): brotli, zstd and stacked encodings refused unread; gzip and deflate
+  bombs stopped at each reader's cap with the process's peak measured; honest
+  gzip, zlib and raw deflate byte for byte; a redirect's own body never read
+  (httpx would decode it whole before following); the cobalt POST, Reddit and X
+  answers capped; pasted cookies with spaces for tabs refused with a warning that
+  quotes none of them; routewatch's platforms side by side with one yt-dlp at a
+  time, and a forced run answering in time while the check carries on; yt-dlp's
+  newest release read from PyPI.
+- `test_video_fit.py` -- the rules for which videos are brought down to 1080p,
+  and real ffmpeg on small clips to see the size that comes out (and the colour
+  curve: tonemapped to BT.709). The memory numbers behind them are measurements,
+  in the test's docstring, not checks.
+- `test_archives.py` -- every archive format into every other, byte for byte;
+  then archives built to hurt: a ZIP bomb and a gzip tar bomb, 10,001 entries,
+  `..` and absolute and drive-letter and device names in ZIP and TAR, an
+  encrypted ZIP, links and devices; a RAR assembled by hand in the test (so no
+  RAR program is needed) including the one libarchive reads as its inner ZIP.
+  The "each guard on its own" block exists because the first version of this file
+  caught 9 of 22 breakages. 7z and RAR need `bsdtar` and skip without it; on
+  Windows they use an ASCII-only tree (see CHANGES, *Not done yet*).
+- `test_raw.py` -- camera raw photos, from DNGs written by hand in the test (no
+  camera sample is kept): developed, the right way up (the EXIF turn read from the
+  file), half size past `FULL_MP`, refused past `MAX_MP`, damaged and mislabelled
+  files, a MemoryError reported as that; the 16-bit TIFF is read back by an
+  independent parser and compared with LibRaw's own output value for value.
+- `test_redeliver.py` -- DownloaderBot's "get it as a file" button, tapped: a tap
+  that the download allowance refuses gives the button back (and sends the
+  allowance message, records nothing, starts nothing); a tap takes off only that
+  button; a second tap, in turn or both in flight at once, is told it has
+  expired and starts nothing. The real `redeliver_callback` with Telegram, the
+  database and the download faked; run against 12 deliberately broken copies
+  of the callback, every one caught.
+
 `test_pause_gate.py` joined it in v1.1.1 and is the odd one out: it reads the
 source rather than running it, and asks one question of each child bot --
 does `bot.py` call `refuse_new_work()` anywhere at all. AnonBot's answer had
@@ -86,6 +172,10 @@ Groups A–P, runnable one at a time (`python tests/anon_scenarios.py c f`):
 | N | a link tapped, then a reply to something else |
 | O | `/conversations`, archiving, going to the start of one, `/which` |
 | P | which bubble a delivered answer hangs under, for every content type |
+| Q | problems: always logged, a Report button only where it helps |
+| R | reactions: passed to the twin bubble as the bot's own, both ways, and what cannot be |
+| S | `/help` in two lengths, and the one-time note that reactions now travel |
+| T | `/feedback`, and the reply to a guest it must never take |
 
 Every group starts from empty tables and a fresh `Application`, so a failure
 cannot cascade and message ids start at 1 in each chat — which makes the
@@ -106,8 +196,32 @@ and from then on the two chats are different lengths. `sim.py` grew
 `Person.media()` and `sim.MEDIA_PAYLOADS` for it: before, everything that
 was not text was sent as a photo, so the case that breaks was unreachable.
 
+Groups R–T joined on 2026-10-03. `sim.py` grew reactions for them: the
+server keeps the bot's own reaction on a message and refuses what Telegram
+refuses a bot (a second one, a custom emoji, an emoji outside the standard
+set, with the real errors' names), and `Person.react()` sends a
+`message_reaction` update with the old reactions remembered, the way Telegram
+reports a change. Group J was rewritten the same day: its burst was sent
+unaddressed, every message was refused for not being a reply before the rate
+limit was ever reached, and "told to wait" passed on the word "waiting" in
+the old long `/help`. It sends the burst as replies now and reaches the limit.
+
 `sim.py` is not AnonBot-specific. Any bot in the family can be driven through
 it with `sim.build(bot_module, tele)`.
+
+**`python tests/help_scenarios.py`** — the family's `/help` template, in all
+four public bots: `/start` and `/help` show the bot's own short help with the
+full-guide button first, the button turns it into the full guide in place and
+back, and `/help full` goes straight there. Each bot runs its real `main()` on
+the simulator in a process of its own (their modules share names), with
+`ENV_FILES=off` so no bot's `.env` -- real tokens -- is read. Needs Postgres.
+
+**`python tests/feedback_scenarios.py`** — ManagerBot's half of `/feedback`,
+on the same simulator: each piece reaching the owner as it arrives and naming
+nobody, muted alerts holding it back until the 22:00 report, the switch
+moving it there, a long piece cut with a way to the rest, a long night of
+feedback in messages of its own without costing the report, and a stranger
+getting nothing. Needs Postgres.
 
 **`python tests/credit_scenarios.py`** — 78 checks on the family's only
 money arithmetic, against a real Postgres: the lifetime ladder (a person's
@@ -337,6 +451,56 @@ refused before anything is paused or the database is touched; the push
 carries the branch and the
 version's tag, and a dry run pushes nothing; and `--skip`, which held one
 bot back when each had a repository of its own, is refused.
+
+The second half of the same file (2026-10-09) is what happens once the bots
+*are* paused, against a fake `db` that records what is queued for them and
+written for the owner. A crash anywhere after the pause -- before the push,
+during it, after it, in the pause itself, Ctrl-C, even a resume that cannot
+be queued -- still resumes the bots the way the normal path does and tells the
+owner; a crash before the pause touches nothing. A git command that times out
+is a failed step (a refusal before the pause, the failed-publish road after it),
+never an unhandled crash, and a real push that hangs -- with a helper process
+that holds its pipes, as `git-remote-https` does -- is stopped at the timeout
+rather than when the helper lets go. Every git command runs without stdin and
+with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and a timeout, and none
+bypasses `run_git`. A folder that is not the release (uncommitted changes, the
+wrong tag, none) is refused before anything is paused, as well as at the
+window. And `scripts/run_release.cmd` names the TempTools python and refuses,
+exit 2, to run with no arguments.
+
+`tests/test_db_timeouts.py` is part of `run.py` and needs nothing but the
+source. It reads every `ConnectionPool(...)` with `ast`: each carries
+`connect_timeout` 10, `tcp_user_timeout` 30000, `statement_timeout=60s` and
+`idle_in_transaction_session_timeout=120s` (search_path still first), so that one
+query on a dead network path cannot hold one of the combined process's eight
+threads for minutes (the incident of 2026-10-09 08:40 UTC); the poll lease's
+connection has the keepalives and the unacknowledged-data limit and *neither*
+server-side timeout, because a server that cut it for being idle would drop the
+lease; and any other `psycopg.connect` in shipped code has to be listed with a
+reason. **`python tests/db_timeouts.py`** is the half that asks a real Postgres
+(scratch database): a pooled connection reports `1min` and `2min`, libpq was
+handed the connection settings, a statement past a lowered limit is cancelled,
+ManagerBot's `/sql` still runs under its own ten seconds and is cancelled at
+ten, and the lease connection reports `0` for both. Needs Postgres.
+
+**`python tests/init_locks.py`** -- every `ALTER TABLE` takes an ACCESS
+EXCLUSIVE lock until the transaction ends, even one that changes nothing, and
+`init_db()` is one transaction; so a start that only wanted to check used to
+queue every reader and writer of the table behind it, during a deploy overlap
+the old instance's. Now each ALTER is issued only when the catalog says it is
+needed. For each bot that migrates its own tables, and for the `family` schema
+through `family_link.init_family_schema()`: a fresh database has every column
+with the right type and default; a second start sends no ALTER (the SQL is
+recorded) but does look in the catalog; a second start finishes while a
+transaction holds an ACCESS SHARE lock on every table (under an unconditional
+ALTER it waits); and a database from before the migrations is brought forward
+by exactly the ALTERs it needs, after which the next start is quiet again.
+Needs Postgres; uses a schema of its own per bot and drops it.
+
+`tests/test_ci_workflow.py` is part of `run.py` and reads the workflow as text:
+every workflow that runs `tests/run.py` apt-installs `libarchive-tools`
+(bsdtar) after `apt-get update` and before the tests, so the 7z and RAR
+archive checks do not skip on CI.
 
 `tests/test_build_history.py` is part of `run.py` (git for its last part).
 `scripts/build_history.py` builds MumuBotsHistory -- every version folder

@@ -74,10 +74,44 @@ def _check_size(rows: int, columns: int) -> None:
 
 # ---------- reading ----------
 
+class _Budget:
+    """What has been read so far, checked as it is read.
+
+    The limits in _check_size are about what a table may be, and they used to
+    be asked after every row was already in memory: a file of a hundred million
+    blank lines was read whole -- gigabytes of empty lists -- before it was
+    told it was over 100,000 rows. Asked row by row, a file over the limit is
+    refused at the limit."""
+
+    def __init__(self):
+        self.rows = 0
+        self.cells = 0
+
+    def add(self, row) -> None:
+        self.rows += 1
+        self.cells += len(row)
+        if self.rows > formats.MAX_ROWS + 1:          # + the header row
+            raise ConversionError(
+                f"That is over the {formats.MAX_ROWS:,}-row limit for one conversion.")
+        if self.cells > formats.MAX_CELLS:
+            raise ConversionError(
+                f"That is over the {formats.MAX_CELLS:,}-cell limit for one conversion.")
+
+
 def _read_delimited(in_path, src_ext: str) -> Table:
     text = _read_text(in_path)
     reader = csv.reader(io.StringIO(text), delimiter=_DELIMITERS[src_ext])
-    rows = [row for row in reader]
+    rows = []
+    budget = _Budget()
+    try:
+        for row in reader:
+            budget.add(row)
+            rows.append(row)
+    except csv.Error as exc:
+        # A cell past the csv module's 128 KB field limit is the usual one. It
+        # is the file, not the bot: a refusal, not a fault to page the owner
+        # about.
+        raise ConversionError(f"That isn't a CSV this can read: {exc}.") from exc
     if not rows:
         raise ConversionError("That file is empty.")
     headers = [str(cell) for cell in rows[0]]
@@ -106,8 +140,16 @@ def _read_xlsx(in_path) -> list[tuple[str, Table]]:
     sheets = []
     try:
         for sheet in book.worksheets:
-            rows = [list(row) for row in sheet.iter_rows(values_only=True)]
-            rows = [row for row in rows if any(cell is not None for cell in row)]
+            # Blank rows dropped as they stream past, and the limits asked as
+            # they go: Excel reports a sheet with a formatted column as a
+            # million rows, and reading them all in first was the biggest
+            # thing this function held.
+            rows = []
+            budget = _Budget()
+            for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):
+                    budget.add(row)
+                    rows.append(list(row))
             if not rows:
                 continue
             headers = ["" if cell is None else str(cell) for cell in rows[0]]
@@ -125,6 +167,41 @@ def _read_json(in_path):
         return json.loads(_read_text(in_path))
     except json.JSONDecodeError as exc:
         raise ConversionError(f"That isn't valid JSON: line {exc.lineno}, {exc.msg}.") from exc
+    except RecursionError as exc:
+        raise ConversionError("That JSON is nested too deeply to convert.") from exc
+
+
+def _refuse_expansion(obj) -> None:
+    """Refuse a YAML document that is small on disk and enormous once read.
+
+    YAML lets a value be named once and used many times -- an anchor and its
+    aliases -- and a loader keeps one object however often it is used. That is
+    cheap to read and ruinous to write: every alias is written out in full, so
+    a nine-line file of nested lists that each name the one before nine times
+    is nine to the ninth power values once it is JSON. A file under 500 bytes
+    that way took 573 MB and five seconds to write at seven levels, and each
+    level more is nine times that. A loop -- an anchor that contains its own
+    alias -- is the same thing without end.
+
+    So the values are counted as they would be written, by walking the object
+    and not remembering what has been seen, and a document with more than the
+    limit a table has (MAX_CELLS) is refused. Anchors are still fine: the
+    ordinary use of them, a shared block in a config file, expands to a few
+    times the size of the file."""
+    seen = 0
+    stack = [obj]
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > formats.MAX_CELLS:
+            raise ConversionError(
+                "That YAML repeats itself through anchors and aliases until it "
+                f"would come to more than {formats.MAX_CELLS:,} values, which is "
+                "over the limit for one conversion.")
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
 
 
 def _read_yaml(in_path):
@@ -136,9 +213,11 @@ def _read_yaml(in_path):
         # safe_load and never load(): the full loader constructs arbitrary
         # Python objects named in the document, which from a stranger's file
         # is remote code execution.
-        return yaml.safe_load(_read_text(in_path))
+        obj = yaml.safe_load(_read_text(in_path))
     except Exception as exc:
         raise ConversionError(f"That isn't valid YAML: {exc}") from exc
+    _refuse_expansion(obj)
+    return obj
 
 
 def _element_to_object(element):
@@ -177,7 +256,10 @@ def _read_xml(in_path):
         root = parse(str(in_path)).getroot()
     except Exception as exc:
         raise ConversionError(f"That isn't XML this can read: {exc}") from exc
-    return {root.tag: _element_to_object(root)}
+    try:
+        return {root.tag: _element_to_object(root)}
+    except RecursionError as exc:
+        raise ConversionError("That XML is nested too deeply to convert.") from exc
 
 
 # ---------- the two shapes ----------
@@ -342,6 +424,16 @@ def _write_yaml(obj, out_path) -> None:
 # ---------- the dispatcher ----------
 
 def convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str = "converted") -> Result:
+    try:
+        return _convert(in_path, src_ext, target_ext, work_dir, stem)
+    except RecursionError as exc:
+        # Reading a deeply nested file is guarded where it is read; this is
+        # writing one out, which walks the same depth again. Either way it is
+        # the file's shape, not a fault in the bot.
+        raise ConversionError("That file is nested too deeply to convert.") from exc
+
+
+def _convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str) -> Result:
     src_ext = formats.normalise(src_ext)
     target_ext = formats.normalise(target_ext)
     work_dir = Path(work_dir)

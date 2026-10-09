@@ -1,7 +1,7 @@
 # Terms — ConvertBot
 
 ConvertBot converts files between formats: pictures, video, audio, documents,
-e-books, spreadsheets and subtitles. Conversions under 3 MB are free; larger
+e-books, spreadsheets, subtitles, camera raw photos and archives. Conversions under 3 MB are free; larger
 ones are priced in ⚡ credit, which is bought with Telegram Stars.
 
 Using it means accepting what follows. The short version is available inside

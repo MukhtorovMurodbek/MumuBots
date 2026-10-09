@@ -22,7 +22,9 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE / ".mirror" / "convert_bot"))
+sys.path.insert(0, str(HERE / ".mirror" / "convert_bot") if (HERE / ".mirror").exists()
+                else str(HERE.parent / "convert_bot"))
+sys.path.insert(1, str(HERE.parent / "shared"))      # a mirror has shared/'s modules copied in beside the bot's own
 sys.path.insert(0, str(HERE / "stubs"))
 # Files over 20 MB are test_big_files.py's; here the bot runs without them,
 # whatever the shell this runs from has set.
@@ -171,6 +173,9 @@ async def scenario_bot_failures():
         (jobs.TOO_SLOW, jobs.Outcome(False, jobs.TOO_SLOW, "on course for 1500s"), False),
         (jobs.REFUSED, jobs.Outcome(False, jobs.REFUSED, "not an image"), False),
         (jobs.CRASH, jobs.Outcome(False, jobs.CRASH, "killed"), True),
+        # Killed for memory: a 4K HDR video on a 1 GB host. Refunded and told
+        # as that; the host's size is known, so not an alert.
+        (jobs.NO_MEMORY, jobs.Outcome(False, jobs.NO_MEMORY, "ffmpeg was killed (exit -9), for memory"), False),
         (jobs.TOO_LARGE, "too-large", True),
         (jobs.SEND_FAILED, "send", True),
     ):
@@ -496,11 +501,127 @@ async def scenario_worker_progress():
         jobs.WORKER = original
 
 
+def make_leftovers(work_dir, stem):
+    """What an archive conversion has on the disk when it is killed before its
+    `finally` runs: the folder it unpacked into (with a read-only file and a
+    folder in it) and the padded copy bsdtar reads."""
+    work_dir = pathlib.Path(work_dir)
+    contents = work_dir / f"{stem}-contents"
+    (contents / "deep").mkdir(parents=True)
+    (contents / "deep" / "file.bin").write_bytes(b"x" * 1000)
+    (contents / "readonly.txt").write_bytes(b"r")
+    os.chmod(contents / "readonly.txt", 0o444)
+    source = work_dir / f"{stem}-source.7z"
+    source.write_bytes(b"padded copy")
+    return contents, source
+
+
+def worker_leaving(outcome, delay=0.0, made=None):
+    async def fake(job, work_dir, stem, time_limit):
+        made.append(make_leftovers(work_dir, stem))
+        await asyncio.sleep(delay)
+        return outcome
+    return fake
+
+
+def neighbours():
+    """Things in the same folder that look a little like a job's leftovers and are not."""
+    names = ["9-other-out-contents", "9-other-out-source.7z"]
+    folder = STAGE / names[0]
+    (folder / "inside").mkdir(parents=True)
+    (folder / "inside" / "kept.bin").write_bytes(b"k")
+    (STAGE / names[1]).write_bytes(b"k")
+    return folder, STAGE / names[1]
+
+
+def clear_stage():
+    import convert_utils
+    for leftover in list(STAGE.iterdir()):
+        if leftover.is_dir():
+            convert_utils.remove_tree(leftover)
+        else:
+            leftover.unlink()
+
+
+async def scenario_leftovers():
+    """A conversion that ends -- however it ends, including killed -- leaves no
+    unpacked folder and no padded copy behind. The worker that is SIGKILLed
+    never runs a `finally`; this is the part that does."""
+    print("  (leftovers of every ending)")
+    clear_stage()
+    other_folder, other_source = neighbours()
+    for label, outcome, delay in (
+            ("delivered", None, 0.0),
+            ("refused", jobs.Outcome(False, jobs.REFUSED, "not an archive"), 0.0),
+            ("timed out", jobs.Outcome(False, jobs.TIMEOUT, "ran past 600s"), 0.0),
+            ("killed for memory", jobs.Outcome(False, jobs.NO_MEMORY, "killed"), 0.0),
+            ("crashed", jobs.Outcome(False, jobs.CRASH, "killed"), 0.0),
+            ("stopped by the person", "stop", 30.0),
+            ("interrupted by the bot stopping", "interrupt", 30.0)):
+        jobs.reset()
+        runner = FakeRunner()
+        made = []
+        shipped = outcome if isinstance(outcome, jobs.Outcome) else ok_output()
+        jobs.run_worker = worker_leaving(shipped, delay=delay, made=made)
+        job = jobs.submit(None, make_job(staged()), runner)
+        if outcome in ("stop", "interrupt"):
+            await asyncio.sleep(0.2)
+            if outcome == "stop":
+                jobs.cancel(job.id, user_id=1)
+            else:
+                job.task.cancel()
+            try:
+                await job.task
+            except asyncio.CancelledError:
+                pass
+        else:
+            await job.task
+        contents, source = made[0]
+        check(f"{label}: the unpacked folder is gone", not contents.exists(), str(list(STAGE.iterdir())))
+        check(f"{label}: and so is the padded copy", not source.exists())
+        check(f"{label}: another job's folder and copy are not touched",
+              other_folder.exists() and (other_folder / "inside" / "kept.bin").exists() and other_source.exists())
+        (STAGE / "out.png").unlink(missing_ok=True)
+
+    # The names it will and will not remove, directly.
+    jobs.reset()
+    contents, source = make_leftovers(STAGE, "7-abc-out")
+    keepers = [STAGE / "7-abc-out-contentsX", STAGE / "7-abc-out.zip", STAGE / "7-abc-outer-contents",
+               STAGE / "7-abc-out-source", STAGE / "17-abc-out-contents"]
+    for keeper in keepers:
+        keeper.mkdir() if keeper.name.endswith("contentsX") else keeper.write_bytes(b"keep")
+    (STAGE / "7-abc-out-source.d").mkdir()                       # a FOLDER named like a source copy is not ours
+    removed = jobs.remove_job_leftovers(STAGE, "7-abc-out")
+    check("exactly the folder and the copy go", removed == 2 and not contents.exists() and not source.exists(), str(removed))
+    check("names that only look similar stay", all(k.exists() for k in keepers) and (STAGE / "7-abc-out-source.d").exists(),
+          str([k.name for k in keepers if not k.exists()]))
+    for hostile in ("", ".", "..", "../x", "a/b", "a\\b", "7-abc-out/.."):
+        before = sorted(p.name for p in STAGE.iterdir())
+        count = jobs.remove_job_leftovers(STAGE, hostile)
+        check(f"a stem like {hostile!r} removes nothing", count == 0 and sorted(p.name for p in STAGE.iterdir()) == before)
+    check("a folder that is not there is not an error", jobs.remove_job_leftovers(STAGE / "nowhere", "7-abc-out") == 0)
+    # a link by the folder's name is removed as a link, never followed
+    outside = pathlib.Path(tempfile.mkdtemp(prefix="convertbot-outside-"))
+    (outside / "precious.txt").write_text("precious")
+    try:
+        os.symlink(str(outside), str(STAGE / "8-link-out-contents"), target_is_directory=True)
+        removed = jobs.remove_job_leftovers(STAGE, "8-link-out")
+        check("a link named like the folder goes, and what it pointed at is untouched",
+              removed == 1 and not os.path.lexists(STAGE / "8-link-out-contents")
+              and (outside / "precious.txt").read_text() == "precious")
+    except (OSError, NotImplementedError):
+        print("  (this account cannot make symlinks: the link check is skipped)")
+    finally:
+        import convert_utils
+        convert_utils.remove_tree(outside)
+    clear_stage()
+
+
 print("\n== endings ==")
 for scenario in (scenario_success, scenario_user_stops_running, scenario_user_removes_queued,
                  scenario_bot_failures, scenario_no_credit, scenario_one_at_a_time_and_keep, scenario_paused,
                  scenario_free, scenario_progress, scenario_in_flight, scenario_live_card,
-                 scenario_worker_progress):
+                 scenario_worker_progress, scenario_leftovers):
     run(scenario())
 
 print("\n== before anything is charged ==")

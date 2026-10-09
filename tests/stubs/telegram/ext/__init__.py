@@ -6,6 +6,8 @@ class CommandHandler(_Any): pass
 class ContextTypes:
     DEFAULT_TYPE = object
 class MessageHandler(_Any): pass
+class MessageReactionHandler(_Any):
+    MESSAGE_REACTION_UPDATED, MESSAGE_REACTION_COUNT_UPDATED, MESSAGE_REACTION = 1, 2, 3
 class TypeHandler(_Any): pass
 class ConversationHandler(_Any):
     END = -1

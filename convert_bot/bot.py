@@ -90,6 +90,7 @@ from db import (
 )
 import big_files
 import convert_utils
+import raw_convert
 import formats
 import jobs
 from convert_runner import ConvertRunner, download_card
@@ -146,7 +147,12 @@ from shared_features import (
     donate_amount_chosen,
     donate_fiat_amount_chosen,
     donate_custom_button_chosen,
-    donate_custom_amount_received,
+    awaited_text_received,
+    feedback_command,
+    HELP_TOGGLE_PATTERN,
+    help_keyboard,
+    help_toggle,
+    wants_full_help,
     donation_precheckout,
     donation_payment_received,
     setup_logging,
@@ -263,14 +269,28 @@ def _discard_pending(context: ContextTypes.DEFAULT_TYPE) -> None:
             _unlink(path)
 
 
-def _sweep_uploads(max_age_seconds: float = PENDING_TTL_SECONDS, keep=()) -> int:
+def _sweep_uploads(max_age_seconds: float = PENDING_TTL_SECONDS, keep=(), busy_stems=()) -> int:
     """Anything older than the TTL is gone: either the user never chose a
     format, or the process that was handling it died. Blocking (it stats a
     directory), so it runs through asyncio.to_thread.
 
+    Folders go the same way as files. A conversion that is KILLED (its time
+    limit, Stop, the out-of-memory killer) never reaches the `finally` that
+    removes the folder an archive was unpacked into, and jobs._finish removes
+    it only for a job this process knows about -- not for one a previous
+    process was running when it died. A 2.7 MB .tgz left 629 MB (review,
+    2026-10-07), on a disk of 1 GB.
+
     At startup it is called with max_age_seconds=0 to clear the directory
     outright: whatever is in there was staged by a process that no longer
-    exists, and the user_data pointing at it went with that process."""
+    exists, and the user_data pointing at it went with that process.
+
+    `busy_stems` (jobs.active_stems) are queued or running jobs: whatever is
+    named after one is theirs and is never swept, however old it looks -- an
+    unpacked folder carries the date the archive gave its `./`, which can be
+    1970 (review, 2026-10-08). The only folders swept are those unpacked
+    folders (`*-contents`): CONVERT_UPLOAD_DIR may be pointed somewhere that
+    holds folders of its own."""
     if not UPLOAD_DIR.is_dir():
         return 0
     # A cutoff of "now" is not the same as "everything": a file written
@@ -278,6 +298,11 @@ def _sweep_uploads(max_age_seconds: float = PENDING_TTL_SECONDS, keep=()) -> int
     # timestamp granularity is coarser than time.time(). Zero means all.
     sweep_all = max_age_seconds <= 0
     cutoff = time.time() - max_age_seconds
+    # What a running conversion makes for itself -- the folder an archive is
+    # unpacked into, the padded copy bsdtar reads -- is not in `keep`, so it is
+    # given the longest a conversion can run, not the upload TTL: a time limit
+    # raised past the TTL must not have the sweeper empty a job under its feet.
+    job_cutoff = time.time() - max(max_age_seconds, jobs.TIME_LIMIT_S + 300)
     removed = 0
     for path in UPLOAD_DIR.iterdir():
         try:
@@ -287,9 +312,20 @@ def _sweep_uploads(max_age_seconds: float = PENDING_TTL_SECONDS, keep=()) -> int
                 # needed -- a job at the back of a queue can be older than the
                 # TTL and still be about to start.
                 continue
-            if path.is_file() and (sweep_all or path.stat().st_mtime < cutoff):
+            if any(path.name == stem or path.name.startswith((stem + "-", stem + "."))
+                   for stem in busy_stems):
+                continue                          # a running job's own folder, copy or result
+            made_by_a_job = path.is_dir() or "-source." in path.name
+            if path.is_file() and (sweep_all or path.stat().st_mtime < (job_cutoff if made_by_a_job else cutoff)):
                 path.unlink()
                 removed += 1
+            elif (path.is_dir() and not path.is_symlink() and path.name.endswith("-contents")
+                  and (sweep_all or path.stat().st_mtime < job_cutoff)):
+                # remove_tree makes a read-only or unreadable entry writable and
+                # retries, and a link inside is removed as a link, never followed.
+                convert_utils.remove_tree(path)
+                if not path.exists():
+                    removed += 1
         except OSError:
             continue
     return removed
@@ -297,7 +333,8 @@ def _sweep_uploads(max_age_seconds: float = PENDING_TTL_SECONDS, keep=()) -> int
 
 async def _sweep_uploads_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     removed = await asyncio.to_thread(
-        _sweep_uploads, max_age_seconds=PENDING_TTL_SECONDS, keep=jobs.active_paths())
+        _sweep_uploads, max_age_seconds=PENDING_TTL_SECONDS, keep=jobs.active_paths(),
+        busy_stems=jobs.active_stems())
     if removed:
         logger.info("Swept %d abandoned upload(s).", removed)
 
@@ -314,7 +351,12 @@ async def _conversions_in_flight_job(context: ContextTypes.DEFAULT_TYPE) -> None
         logger.warning("Refunded %d conversion(s) lost to a restart.", refunded)
 
 
-def build_help_text(lang: str) -> str:
+def build_help_text(lang: str, full: bool = False) -> str:
+    """The short version unless asked for the long one -- the family's help
+    template (shared_features, "/help in two lengths"). The long one carries
+    the price tiers and every command."""
+    if not full:
+        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
     return i18n.t(lang, "help_text", pricing=price_tiers_text(lang)) + sibling_bots_blurb(BOT_NAME, lang)
 
 
@@ -345,6 +387,7 @@ BOT_COMMANDS = [
     BotCommand("formats", "Every format I read and write"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
+    BotCommand("feedback", "Suggest something, or report a problem"),
     BotCommand("balance", "Your ⚡ credit, and where it went"),
     BotCommand("recharge", "Top up your ⚡ credit"),
     BotCommand("paysupport", "Trouble with a payment"),
@@ -366,12 +409,9 @@ ADMIN_COMMANDS = [
 ]
 
 
-def start_menu_keyboard() -> InlineKeyboardMarkup | None:
-    rows = []
-    sibling_row = sibling_bots_keyboard_row(BOT_NAME)
-    if sibling_row:
-        rows.append(sibling_row)
-    return InlineKeyboardMarkup(rows) if rows else None
+def help_rows(lang: str) -> list:
+    """What sits under /start and /help besides the full-guide button."""
+    return [sibling_bots_keyboard_row(BOT_NAME)]
 
 
 # ---------- /start ----------
@@ -395,7 +435,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=start_menu_keyboard(),
+        reply_markup=help_keyboard(lang, False, help_rows(lang)),
     )
 
 
@@ -448,7 +488,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     of /start, which stopped being a way to reach them once /start became
     the language picker."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    await update.message.reply_text(build_help_text(lang), reply_markup=start_menu_keyboard())
+    full = wants_full_help(context)
+    await update.message.reply_text(build_help_text(lang, full=full),
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
 
 
 async def _apply_language(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -500,6 +542,9 @@ def _ext_of(filename: str | None, fallback: str) -> str:
     Sanitised, not trusted: see _safe_ext. A file_name whose tail is not a
     plausible extension is treated as having none at all, which is the
     honest answer -- the bot cannot tell what it was sent."""
+    compound = formats.compound_extension(filename)
+    if compound:
+        return compound                    # photos.tar.gz is a tgz, not "a .gz"
     if filename and "." in filename:
         return formats.normalise(_safe_ext(filename.rsplit(".", 1)[-1])) or fallback
     return fallback
@@ -1132,8 +1177,26 @@ async def _present_conversion_options(
     # it can be converted at all, and which formats would come out too big
     # for a bot to send back. Read from the header, not decoded.
     megapixels = None
-    if len(paths) == 1 and formats.category_of(src_ext, animated) == formats.IMAGE:
-        megapixels = await asyncio.to_thread(jobs.image_megapixels, paths[0])
+    raw_info = None
+    if len(paths) == 1 and src_ext in formats.RAW_FORMATS:
+        # A camera raw file's size comes from LibRaw, not Pillow, and it is the
+        # size of what comes OUT -- half of each side past raw_convert.FULL_MP
+        # -- that the estimates of what is sendable are about.
+        # In a child process (jobs.describe_raw): LibRaw parses a stranger's
+        # file in C, and this is the bot's own process.
+        raw_info = await jobs.describe_raw(paths[0], src_ext)
+        if raw_info is not None:
+            megapixels = raw_info.out_megapixels
+            if raw_info.megapixels > raw_convert.MAX_MP:
+                for path in paths:
+                    _unlink(path)
+                await message.reply_text(i18n.t(lang, "raw_too_big", mp=f"{raw_info.megapixels:.0f}",
+                                                max=f"{raw_convert.MAX_MP:.0f}"))
+                return
+    elif len(paths) == 1 and formats.category_of(src_ext, animated) == formats.IMAGE:
+        # In a child process too (jobs.describe_image): some of Pillow's
+        # header reads decode, and this is the bot's own process.
+        megapixels = await jobs.describe_image(paths[0])
         if megapixels is not None and megapixels > jobs.MAX_MEGAPIXELS:
             for path in paths:
                 _unlink(path)
@@ -1160,13 +1223,25 @@ async def _present_conversion_options(
         "pages": pages,
     }
     every_target = _offered_targets(state)
-    blocked = jobs.unsendable_targets(megapixels, every_target, size, message.chat_id)
+    blocked = jobs.unsendable_targets(megapixels, every_target, size, message.chat_id,
+                                      raw=raw_info is not None)
     state["blocked"] = blocked
     notes = []
     if blocked:
         notes.append(i18n.t(lang, "too_big_to_send_note",
                             formats=", ".join(target.upper() for target in blocked),
                             mp=f"{megapixels:.0f}", limit=jobs.send_ceiling_mb(message.chat_id)))
+    if raw_info is not None and raw_info.half:
+        notes.append(i18n.t(lang, "raw_half_note", mp=f"{raw_info.megapixels:.0f}",
+                            out=f"{raw_info.out_megapixels:.0f}"))
+    # A video too big for this server's memory to convert at its own size is
+    # said so here, where the choice of format is, rather than after the fact.
+    if len(paths) == 1 and formats.category_of(src_ext, animated) == formats.VIDEO:
+        fit = await asyncio.to_thread(convert_utils.video_fit_note, paths[0])
+        if fit is not None:
+            which, width, height, fit_w, fit_h = fit
+            notes.append(i18n.t(lang, f"video_fit_{which}_note", w=width, h=height,
+                                fw=fit_w, fh=fit_h))
     state["notes"] = notes
 
     targets = _offered_targets(state)
@@ -1566,7 +1641,13 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
     # both the fix and the better answer: nothing is lost and nobody waits on
     # a refund.
     result = await asyncio.to_thread(
-        family_link.topup, user.id, sp.total_amount, "top-up for a conversion")
+        family_link.topup, user.id, sp.total_amount, "top-up for a conversion", charge_id)
+    if result is None:
+        # A payment Telegram has already delivered: credited the first time, and
+        # the conversion it paid for was started the first time. Starting it again
+        # would be a second conversion for one payment.
+        family_link.report_event_soon("warning", "payment", "A Stars payment was delivered twice and credited once.")
+        return
     paths = conv_state.get("paths") or []
     if (conv_state.get("payload") != payload or not paths
             or not all(os.path.exists(path) for path in paths)):
@@ -1778,13 +1859,18 @@ def main():
     # who was here, and /status is supposed to say so.
     attach_flood_gate(app, ADMIN_IDS)
     # Runs after track_activity but before every other handler -- a no-op
-    # unless a "Custom" donate button was just tapped, in which case it
-    # consumes the reply and stops it from also being treated as a normal
-    # message (see donate_custom_amount_received's docstring).
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, donate_custom_amount_received), group=-1)
+    # unless /feedback or a "Custom" donate button has just asked for
+    # something to be typed, in which case it takes the answer and stops it
+    # from also being treated as a file or a format name (see
+    # awaited_text_received's docstring).
+    app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
+                                   awaited_text_received), group=-1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+                                         pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("convert", convert_start))
     app.add_handler(CommandHandler("formats", formats_command))
     app.add_handler(CommandHandler("cancel", cancel_command))

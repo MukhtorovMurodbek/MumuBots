@@ -423,6 +423,23 @@ async def run():
           state["connects"] == 2 and state["logins"] == 1, (state["connects"], state["logins"]))
     bot._discard_pending(ctx)
 
+    # Keeping the login for the next transfer is an economy. When it cannot be
+    # kept -- a full or read-only /tmp -- the login that worked must still
+    # count: it used to be reported as "the route is down", and every big file
+    # was then refused for five minutes.
+    kept_at = big_files.SESSION_FILE
+    big_files.SESSION_FILE = SCRATCH / "no-such-folder" / "x.session"
+    try:
+        fresh_route()
+        ctx = context()
+        message = await send(ctx, PRIVATE, 30 * MB, message_id=17)
+        check("a login that cannot be written to a file still moves the file",
+              ctx.user_data.get("convert") is not None and telegram()["logins"] == 1, message.replies)
+        check("and does not put the route to rest", big_files._resting_until == 0.0, big_files._resting_until)
+        bot._discard_pending(ctx)
+    finally:
+        big_files.SESSION_FILE = kept_at
+
     fresh_route(noisy=True)
     ctx = context()
     began = asyncio.get_running_loop().time()

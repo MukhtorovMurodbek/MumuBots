@@ -213,12 +213,46 @@ STRINGS = {
         "cancel_button_donation": "💸 Donation amount",
         "cancel_item_donation": "the donation amount I asked you for",
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "feedback_ask": (
+            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
+            "problem, anything — write it in one message, as a reply to this one.\n"
+            "\n"
+            "Only they read it, and they can't write back: it is sent without your name or id. "
+            "/cancel to stop."
+        ),
+        "feedback_placeholder": "Your feedback",
+        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
+        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
+        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
+        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "cancel_button_feedback": "💬 Feedback",
+        "cancel_item_feedback": "the feedback I asked you for",
+        "help_brief": (
+            "How it works:\n"
+            "\n"
+            "• Paste a link and I send back what's behind it — no command needed. Instagram, TikTok, X, Pinterest and Reddit.\n"
+            "• /settings: the credit caption, the file quality, and large files over 48 MB, which cost ⚡ credit and only once you switch them on.\n"
+            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
+            "\n"
+            "Main commands: /settings · /balance · /cancel\n"
+            "Every command: the full guide, below or /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Full guide",
+        "help_brief_button": "↩️ Short version",
+        "privacy_feedback_heading": "If you send /feedback:",
+        "privacy_feedback": (
+            "What you write reaches the person who runs these bots as a Telegram message, with "
+            "which bot it came from and your language — not your name, your username or your id. "
+            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
+            "database for 30 days and then deleted."
+        ),
         # ---- downloader_bot-specific keys ----
         "start_greeting": (
             "Hey! Send me a link (Instagram, TikTok, Pinterest, Reddit, or "
             "Twitter/X) and I'll grab it for you.\n\n"
         ),
-        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
+        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
         "caption_state_on": "ON",
         "caption_state_off": "OFF",
         "settings_heading": "⚙️ Your settings. Tap to change any of them.",
@@ -366,11 +400,45 @@ STRINGS = {
         "cancel_button_donation": "💸 Xayriya miqdori",
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "feedback_ask": (
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
+            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
+            "\n"
+            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
+            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+        ),
+        "feedback_placeholder": "Fikringiz",
+        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
+        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
+        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
+        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "cancel_button_feedback": "💬 Fikr-mulohaza",
+        "cancel_item_feedback": "men so'ragan fikr-mulohaza",
+        "help_brief": (
+            "Bot qanday ishlaydi:\n"
+            "\n"
+            "• Havola yuboring — ortidagi faylni yuboraman, buyruq kerak emas. Instagram, TikTok, X, Pinterest va Reddit.\n"
+            "• /settings: «via» izohi, fayl sifati va 48 MB dan katta fayllar — ular ⚡ kredit turadi va faqat o'zingiz yoqsangiz ishlaydi.\n"
+            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
+            "\n"
+            "Asosiy buyruqlar: /settings · /balance · /cancel\n"
+            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 To'liq qo'llanma",
+        "help_brief_button": "↩️ Qisqa variant",
+        "privacy_feedback_heading": "/feedback yuborsangiz:",
+        "privacy_feedback": (
+            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
+            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
+            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
+            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+        ),
         "start_greeting": (
             "Salom! Menga havola yuboring (Instagram, TikTok, Pinterest, Reddit "
             "yoki Twitter/X) va men uni siz uchun yuklab beraman.\n\n"
         ),
-        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
+        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o\'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
         "caption_state_on": "YONIQ",
         "caption_state_off": "O'CHIQ",
         "settings_heading": "⚙️ Sozlamalaringiz. O'zgartirish uchun bosing.",
@@ -424,12 +492,12 @@ STRINGS = {
     },
     "ru": {
         "quota_hour": (
-            "За последний час ты скачал {used} — это предел этого бота ({limit} в час). "
+            "За последний час вы скачали {used} — это предел этого бота ({limit} в час). "
             "Он нужен, чтобы на маленьком сервере хватало всем. Следующая попытка "
             "освободится примерно через {minutes} минут(ы)."
         ),
         "quota_day": (
-            "Сегодня ты скачал {used} — это дневной предел бота ({limit}). Он нужен, "
+            "Сегодня вы скачали {used} — это дневной предел бота ({limit}). Он нужен, "
             "чтобы на маленьком сервере хватало всем. Снова откроется примерно через "
             "{minutes} минут(ы)."
         ),
@@ -437,8 +505,8 @@ STRINGS = {
             "Если нужно больше: у всех, кто хоть раз поддержал бота через /donate, "
             "предел заметно выше и навсегда. Сумма значения не имеет."
         ),
-        "flood_wait": "Ты отправляешь быстрее, чем я успеваю — подожди примерно {seconds} секунд(ы) и продолжай.",
-        "sibling_blurb": "Тоже часть этой семьи ботов, смотри ниже \U0001f447",
+        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
             "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
             "кто его запустил, а /donate — это совершенно необязательный способ помочь "
@@ -490,10 +558,10 @@ STRINGS = {
         "balance_recent": "Последние операции:",
         "balance_empty_hint": "/donate добавит кредит в любой момент.",
         "bot_short_description": (
-            "Пришли ссылку на пост в Instagram, TikTok, Pinterest, Reddit или X."
+            "Пришлите ссылку на пост в Instagram, TikTok, Pinterest, Reddit или X."
         ),
         "bot_description": (
-            "Пришли ссылку на открытый пост — вернётся сам файл. Команда не нужна.\n"
+            "Пришлите ссылку на открытый пост — вернётся сам файл. Команда не нужна.\n"
             "\n"
             "Instagram, TikTok, Pinterest, Reddit и X. Карусель приходит целиком, а текстовый "
             "пост возвращается аккуратной карточкой.\n"
@@ -505,16 +573,16 @@ STRINGS = {
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• твой числовой id в Telegram, язык и настройки подписи и качества\n"
+            "• ваш числовой id в Telegram, язык и настройки подписи и качества\n"
             "• присланную ссылку — на то время, пока бот достаёт то, что за ней\n"
             "• по одной записи на скачивание: с какой площадки и когда — по ним считается "
             "дневной лимит\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
-            "• то, что бот в этот момент для тебя делает — пока не закончит\n"
+            "• то, что бот в этот момент для вас делает — пока не закончит\n"
             "\n"
-            "Само видео или фото не хранится: бот его достаёт, отправляет тебе и удаляет."
+            "Само видео или фото не хранится: бот его достаёт, отправляет вам и удаляет."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
@@ -527,50 +595,50 @@ STRINGS = {
         "privacy_others": (
             "• сайт, на который ведёт ссылка, и сервисы скачивания, к которым бот обращается, "
             "когда сайт не отвечает ему напрямую. Они получают ссылку и видят запрос с сервера "
-            "бота, а не от тебя; что они у себя пишут в логи — их дело и их правила, а не эти."
+            "бота, а не от вас; что они у себя пишут в логи — их дело и их правила, а не эти."
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для тебя, остаются, пока ты их не сотрёшь или не перестанешь пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о тебе\n"
+            "/deletemydata — стереть всё, что бот хранит о вас\n"
             "/terms — для чего ботом можно пользоваться\n"
             "\n"
             "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправь /deletemydata."
+            "нужно и то и другое, сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйся ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используй его, чтобы кого-то донимать, и не нагружай сверх заданных лимитов — за то "
+            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
+            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
             "и другое аккаунт блокируется."
         ),
         "terms_specific": (
-            "О скачивании: бот достаёт то, что и так открыто, и отдаёт тебе. Это не обход "
-            "закрытого аккаунта, и он даже не пытается им быть. Что ты потом сделаешь с чужим "
-            "фото, видео или постом — это между тобой, автором и законом: скачать не значит "
+            "О скачивании: бот достаёт то, что и так открыто, и отдаёт вам. Это не обход "
+            "закрытого аккаунта, и он даже не пытается им быть. Что вы потом сделаете с чужим "
+            "фото, видео или постом — это между вами, автором и законом: скачать не значит "
             "присвоить. На каждого есть дневной лимит, чтобы один человек не сделал бота "
             "бесполезным для всех остальных."
         ),
-        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за твои первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
         "terms_no_warranty": (
             "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держи свою копию всего, что тебе важно."
+            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
-        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о тебе. Отменить будет нельзя.",
-        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда ты скачивал, будут стёрты. Дневной лимит вместе с ними обнулится. На уже скачанное это никак не влияет — здесь оно и не хранилось.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он твой, если вернёшься.',
+        "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
+        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда вы скачивали, будут стёрты. Дневной лимит вместе с ними обнулится. На уже скачанное это никак не влияет — здесь оно и не хранилось.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
             "🗑 Готово — стёрто записей: {rows}.\n"
             "\n"
-            "Отправь /start когда захочешь; бот примет тебя как нового."
+            "Отправьте /start когда захотите; бот примет вас как нового."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуй ещё раз "
+            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
             "через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
@@ -584,11 +652,44 @@ STRINGS = {
         "cancel_button_donation": "💸 Сумма пожертвования",
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
-        "start_greeting": (
-            "Привет! Пришли мне ссылку (Instagram, TikTok, Pinterest, Reddit "
-            "или Twitter/X), и я скачаю это для тебя.\n\n"
+        "feedback_ask": (
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
+            "напишите одним сообщением в ответ на это.\n"
+            "\n"
+            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
+            "имени и id. Остановить: /cancel"
         ),
-        "help_text": 'Просто пришли ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "feedback_placeholder": "Ваш отзыв",
+        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
+        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
+        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "cancel_button_feedback": "💬 Отзыв",
+        "cancel_item_feedback": "отзыв, который я просил написать",
+        "help_brief": (
+            "Как это устроено:\n"
+            "\n"
+            "• Пришлите ссылку — пришлю то, что по ней лежит, без всяких команд. Instagram, TikTok, X, Pinterest и Reddit.\n"
+            "• /settings: подпись «via», качество файлов и большие файлы больше 48 МБ — они стоят ⚡ кредит и работают, только если их включить.\n"
+            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
+            "\n"
+            "Основные команды: /settings · /balance · /cancel\n"
+            "Все команды — в полном руководстве: кнопка ниже или /help full.\n"
+            "\n"
+        ),
+        "help_full_button": "📖 Полное руководство",
+        "help_brief_button": "↩️ Кратко",
+        "privacy_feedback_heading": "Если вы отправляете /feedback:",
+        "privacy_feedback": (
+            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
+            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
+            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+        ),
+        "start_greeting": (
+            "Здравствуйте! Пришлите мне ссылку (Instagram, TikTok, Pinterest, Reddit "
+            "или Twitter/X), и я скачаю это для вас.\n\n"
+        ),
+        "help_text": 'Просто пришлите ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "caption_state_on": "ВКЛ",
         "caption_state_off": "ВЫКЛ",
         "settings_heading": "⚙️ Ваши настройки. Нажмите, чтобы изменить.",
@@ -635,17 +736,17 @@ STRINGS = {
         "twitter_fetch_failed_link": "Не удалось получить содержимое поста прямо сейчас — вот ссылка: {url}",
         "unrecognized_message": (
             "Это не похоже на ссылку, которую я узнаю — Instagram, TikTok, "
-            "Pinterest, Reddit или Twitter/X — пришли одну из них, чтобы скачать, "
+            "Pinterest, Reddit или Twitter/X — пришлите одну из них, чтобы скачать, "
             "или /help для списка команд."
         ),
         "redeliver_as_file": "📄 Получить несжатым файлом",
         "redeliver_as_compressed": "🖼 Получить сжатым",
         "redeliver_expired": (
-            "Для кнопки это уже слишком старая загрузка — пришли ссылку заново или "
-            "поменяй способ доставки через /lossless."
+            "Для кнопки это уже слишком старая загрузка — пришлите ссылку заново или "
+            "поменяйте способ доставки через /lossless."
         ),
         "album_delivered": "Выше {count} файл(ов).",
-        "unknown_command": "Я не знаю такую команду. Отправь /help, чтобы увидеть, что я умею.",
+        "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
     },
 }
 
@@ -704,6 +805,7 @@ COMMAND_MENU = {
         "settings": "Izoh va fayl sifati sozlamalari",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
+        "feedback": "Taklif yoki muammo haqida yozish",
         "balance": "⚡ kreditingiz",
         "donate": "Server xarajatlariga hissa qo'shish",
         "paysupport": "To'lov bilan muammo",
@@ -716,6 +818,7 @@ COMMAND_MENU = {
         "settings": "Подпись и качество файлов",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
+        "feedback": "Предложить идею или сообщить о проблеме",
         "balance": "Ваш ⚡ кредит",
         "donate": "Помочь с расходами на хостинг",
         "paysupport": "Проблема с оплатой",

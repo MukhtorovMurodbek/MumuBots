@@ -91,6 +91,14 @@ def _next_crf(crf: int, size: int, fps: int) -> tuple[int, int]:
 def _encode(in_path: str, out_path: str, crf: int, fps: int) -> subprocess.CompletedProcess:
     cmd = [
         "ffmpeg", "-nostdin", "-y",
+        # Before -i, where it caps the decoder and the filters; the -threads
+        # below the input caps the encoder alone. ffmpeg sizes each pool from
+        # the host's core count -- 48 on Railway, whatever the container is
+        # allowed -- and every thread holds frames: a 4K clip through this
+        # command peaked at 528 MB with the cap on the encoder only, 1.3 GB as
+        # a 48-core host would size it, and 172 MB with this. (ConvertBot found
+        # the same on 2026-09-29; see convert_utils.FFMPEG_CAP_IN.)
+        "-threads", _THREADS, "-filter_threads", _THREADS, "-filter_complex_threads", _THREADS,
         "-i", in_path,
         "-t", str(MAX_DURATION_S),
         "-an",  # video stickers must have no audio track

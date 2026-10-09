@@ -1,7 +1,7 @@
 # Privacy — ConvertBot
 
 ConvertBot converts files between formats: pictures, video, audio, documents,
-e-books, spreadsheets and subtitles. Conversions under 3 MB are free; larger
+e-books, spreadsheets, subtitles, camera raw photos and archives. Conversions under 3 MB are free; larger
 ones are priced in ⚡ credit, which is bought with Telegram Stars.
 
 This describes what the bot holds about the people who use it, who else sees
@@ -10,7 +10,7 @@ available inside the bot as `/privacy`, in English, Uzbek and Russian.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 26 September 2026._
+_Last reviewed: 3 October 2026._
 
 ---
 
@@ -20,7 +20,9 @@ _Last reviewed: 26 September 2026._
   the only thing a bot can address a person by.
 - **A chosen language**, once one is picked.
 - **The file being converted, while it is being converted.** It is written to
-  a staging directory, converted, sent back, and deleted. Anything a crash
+  a staging directory, converted, sent back, and deleted. An archive is opened
+  into a folder of its own, packed again and deleted with it; the bot never asks
+  for a password and cannot use one. Anything a crash
   leaves behind is removed by a sweeper that runs every five minutes and again
   at startup, and nothing survives longer than 15 minutes. **If you turn on
   "keep file for more formats"** under the format menu, the file is instead
@@ -69,6 +71,13 @@ _Last reviewed: 26 September 2026._
   price and its formats, so that its ⚡ can be given back even if the bot is
   stopped in the middle of it. That record goes when the conversion ends — or,
   after a restart, a day after the ⚡ has been returned.
+- **Feedback, if you send it** — what you write with `/feedback`, which bot it
+  was sent from, the language you use, and when. Not your user id, your name
+  or your username. The operator receives it as a Telegram message — straight
+  away, or with the nightly summary, as they choose — and the copy in the
+  database is **deleted after 30 days**. Because nothing in it says who sent
+  it, `/deletemydata` cannot find it to erase it sooner. For the same reason it
+  is **one-way**: only the operator reads it, and they cannot reply.
 
 ## What is not held
 
@@ -116,6 +125,7 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 | work in progress | 12 hours (`DEPLOY_STATE_TTL_HOURS`) |
 | payment ledger | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the payment ledger |
+| feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it
 

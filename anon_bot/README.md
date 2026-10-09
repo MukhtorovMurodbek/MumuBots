@@ -25,7 +25,7 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 
 | command | what it does |
 |---|---|
-| `/start` | Instructions. The first `/start` from a new user asks which language to use, once; afterwards it prints the instructions in the language on record. |
+| `/start` | Instructions, in short, with a button for the full guide. The first `/start` from a new user asks which language to use, once; afterwards it prints the instructions in the language on record. |
 | `/link` | The user's permanent inbox link. Carries Pause / Resume and New-link buttons, so the three commands below are rarely typed. |
 | `/newlink` | Issues a new link and invalidates the old one. Conversations already open keep working — they are routed by conversation, not by token. |
 | `/pause`, `/resume` | Stop or allow *new* conversations. Open ones are unaffected. |
@@ -40,7 +40,8 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/balance` | The ⚡ credit balance — one balance shared by the family's four bots — and everything it was spent on. |
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions on their own. |
+| `/help` | The instructions on their own, in short; `/help full` (or the button under them) is every command and every reaction that can be passed on. |
+| `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
 | `/deletemydata` | Erases what the bot holds about the person asking, after one confirmation. |
@@ -176,6 +177,14 @@ of a message too long for one.
 after one confirmation naming it. Archiving is reversible without doing
 anything: a thread that somebody writes into comes straight back, and the
 other side is never told it was filed.
+
+## Reactions
+
+A reaction on a message in a conversation reaches the other side: the bot puts the same reaction on that message's copy in the other person's chat. It appears beside the bot's own picture, not the reactor's, so it reveals no more than the messages do. Changing a reaction changes it on the other side, and taking it off takes it off there too.
+
+What a bot may react with is narrower than what a person may, and those limits are Telegram's: one reaction per message, from Telegram's standard set (listed in `/help full`). A Telegram Premium custom-emoji reaction cannot be passed on, and neither can a second or third reaction on the same message. Somebody who puts one of those on gets a short note that removes itself a few seconds later, and the reaction stays on their side only. Nothing about a reaction is stored.
+
+People who used the bot before reactions travelled are told once, the next time they use it; everyone since meets reactions in `/help`.
 
 ### Limits
 

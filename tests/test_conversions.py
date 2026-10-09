@@ -40,6 +40,7 @@ import formats                                          # noqa: E402
 import convert_utils                                    # noqa: E402
 import doc_convert                                      # noqa: E402
 import data_convert                                     # noqa: E402
+import archive_convert                                  # noqa: E402
 
 failures = []
 
@@ -61,6 +62,7 @@ PILLOW_WRITES = frozenset(convert_utils._IMAGE_TARGETS) | {"pdf"}
 FFMPEG_WRITES = frozenset(convert_utils._FFMPEG_ARGS)
 DOC_WRITES = doc_convert.WRITES
 DATA_WRITES = data_convert.WRITES
+ARCHIVE_WRITES = archive_convert.WRITES
 
 
 def backends_for(category, source):
@@ -76,6 +78,8 @@ def backends_for(category, source):
         return DOC_WRITES
     if category == formats.DATA:
         return DATA_WRITES
+    if category == formats.ARCHIVE:
+        return ARCHIVE_WRITES
     return frozenset()
 
 
@@ -135,7 +139,7 @@ def main() -> int:
     # 5. Every requirement named against a format is one probe() can meet, and
     #    every ffmpeg target names an encoder.
     known_requirements = {"heif", "avif", "jp2", "mupdf", "mammoth", "markdown",
-                          "openpyxl", "yaml", "xml", "ffmpeg"}
+                          "openpyxl", "yaml", "xml", "ffmpeg", "bsdtar", "rawpy"}
     for fmt, needs in formats.FORMAT_NEEDS.items():
         check(f".{fmt}'s requirements are ones probe() reports on",
               set(needs) <= known_requirements, str(needs))
@@ -324,6 +328,7 @@ def main() -> int:
         finally:
             (subprocess.run, subprocess.Popen, convert_utils._ffmpeg_available, convert_utils._is_hdr,
              convert_utils._media_duration, convert_utils.PROGRESS) = saved
+    commands = [cmd for cmd in commands if os.path.basename(str(cmd[0])).lower().startswith("ffmpeg")]
     check("ffmpeg was started both ways", len(commands) == 2, str(len(commands)))
     for cmd in commands:
         split = cmd.index("-i")
@@ -333,6 +338,46 @@ def main() -> int:
               "-threads" in before and "-filter_threads" in before and "-filter_complex_threads" in before,
               " ".join(before))
         check(f"{way}: the encoder is capped after -i", "-threads" in after, " ".join(after))
+
+    # 11. ffmpeg killed for memory is told as that, not as a file that could
+    #     not be read: its last words are a stream listing, which read as if
+    #     the file were at fault. An ordinary failure stays a refusal.
+    class Finished:
+        def __init__(self, code):
+            self.returncode, self.stdout, self.stderr = code, "", "Stream #0:0: Video: hevc (Main 10)"
+
+    class Running:
+        def __init__(self, code):
+            self.returncode, self.stdout, self._code = None, iter(()), code
+
+        def wait(self, timeout=None):
+            self.returncode = self._code
+            return self._code
+
+    for code, expected in ((-9, convert_utils.OutOfMemory), (137, convert_utils.OutOfMemory),
+                           (1, convert_utils.ConversionError)):
+        for progress in (None, lambda done, total: None):
+            with tempfile.TemporaryDirectory() as tmp:
+                source = os.path.join(tmp, "in.mov")
+                with open(source, "wb") as f:
+                    f.write(b"not empty")
+                raised = None
+                try:
+                    subprocess.run = lambda cmd, *a, **k: Finished(code)
+                    subprocess.Popen = lambda cmd, *a, **k: Running(code)
+                    convert_utils._ffmpeg_available = lambda: True
+                    convert_utils._is_hdr = lambda path: False
+                    convert_utils._media_duration = lambda path: 10.0
+                    convert_utils.PROGRESS = progress
+                    convert_utils.convert_media_ffmpeg(source, "mp4", os.path.join(tmp, "out.mp4"))
+                except Exception as exc:
+                    raised = exc
+                finally:
+                    (subprocess.run, subprocess.Popen, convert_utils._ffmpeg_available, convert_utils._is_hdr,
+                     convert_utils._media_duration, convert_utils.PROGRESS) = saved
+            way = "with progress" if progress else "without progress"
+            check(f"{way}: ffmpeg ending {code} is {expected.__name__}",
+                  type(raised) is expected, repr(raised))
 
     print()
     if failures:

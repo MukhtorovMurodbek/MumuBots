@@ -6,12 +6,17 @@ owner's phone is useful or ignorable:
   * every code lands in exactly one level, and the urgent set is the small one
   * an urgent problem alerts at once, a crash loop alerts once, and a flood of
     ordinary faults escalates by itself
-  * the nightly report lists urgent problems, groups faults, and only counts
-    refusals
+  * the nightly report lists urgent problems, groups faults, and names the
+    rest by what kind of thing happened -- never "refused" (2.1.0: two
+    AnonBot messages sent without a swipe-reply were reported as "Refused",
+    and the owner read it as people being turned away)
+  * and it carries the feedback the owner asked to get there
 
 No database and no Telegram: the alerting reads a clock it is handed and
 writes to a captured event hook, and the report builder is pure.
 """
+import html
+import inspect
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -67,6 +72,33 @@ check("a download that failed on our side is a fault",
       pr.level("DL-ALL-ROUTES") == pr.FAULT, pr.level("DL-ALL-ROUTES"))
 check("an unknown code is a fault rather than assumed harmless",
       pr.level("ZZ-NEVER-HEARD-OF-IT") == pr.FAULT)
+
+print("\n== the third level, by kind ==")
+# getattr throughout, so a version without kinds fails these checks one by
+# one rather than stopping the file at the first missing name.
+KINDS = getattr(pr, "KINDS", {})
+KIND_LABELS = getattr(pr, "KIND_LABELS", {})
+kind = getattr(pr, "kind", lambda code: None)
+in_kinds = [code for codes in KINDS.values() for code in codes]
+check("every code the bot explains itself is in a kind",
+      not (pr.SIMPLE - set(in_kinds)), sorted(pr.SIMPLE - set(in_kinds)))
+check("and only those", not (set(in_kinds) - pr.SIMPLE), sorted(set(in_kinds) - pr.SIMPLE))
+check("and each in exactly one", len(in_kinds) == len(set(in_kinds)),
+      sorted(c for c in set(in_kinds) if in_kinds.count(c) > 1))
+check("every kind has an icon, a heading and a meaning, in the order the report uses",
+      bool(KINDS) and set(getattr(pr, 'KIND_ORDER', ())) == set(KINDS) == set(KIND_LABELS)
+      and all(len(label) == 3 and all(label) for label in KIND_LABELS.values()))
+check("not swiping to reply is being shown how, not being refused",
+      kind("AN-NEEDS-REPLY") == "guided" and kind("AN-AMBIGUOUS") == "guided")
+check("an unknown command is too", kind("FM-UNKNOWN-COMMAND") == "guided")
+check("a file over the limit is a limit", kind("CV-TOO-BIG") == "limit")
+check("a reaction a bot cannot show is Telegram's limit", kind("AN-REACTION-NOT-PASSED") == "limit")
+check("being blocked is the other person's choice", kind("AN-SENDER-BLOCKED") == "other_side")
+check("an old button is out of date", kind("DL-BUTTON-EXPIRED") == "gone")
+check("a fault has no kind", bool(KINDS) and kind("DL-ALL-ROUTES") is None and kind("FM-CRASH") is None)
+check("no kind is called refused",
+      not any("refus" in (heading + meaning).lower() for _, heading, meaning in KIND_LABELS.values())
+      and "refus" not in pr.LEVEL_NAMES[pr.REFUSED])
 
 # ---------------------------------------------------------------------------
 print("\n== who gets woken up ==")
@@ -151,6 +183,9 @@ rows = [
     row("convertbot", "CV-TIMEOUT", "FFFFFF", 2, shared=True, minutes=90),
     row("convertbot", "CV-TOO-BIG", "GGGGGG", 3, seen=4, minutes=120),
     row("stickerbot", "ST-TG-PACK-FULL", "HHHHHH", 3, minutes=200),
+    # The night the owner asked about: two messages that were not replies.
+    row("anonbot", "AN-NEEDS-REPLY", "KKKKKK", 3, minutes=300),
+    row("anonbot", "AN-NEEDS-REPLY", "LLLLLL", 3, minutes=301),
 ]
 text = mb.build_problem_report(rows, 24)
 print("\n----- rendered -----\n" + text + "\n--------------------\n")
@@ -161,8 +196,19 @@ check("faults are grouped with a count rather than listed five times",
       "×5" in text and text.count("DL-ALL-ROUTES") == 1, text.count("DL-ALL-ROUTES"))
 check("the loudest fault comes first",
       text.index("DL-ALL-ROUTES") < text.index("CV-TIMEOUT"))
-check("refusals are only counted", "Refused — 2" in text, text)
-check("and never listed one by one", "GGGGGG" not in text, text)
+check("nothing is called refused any more", "refus" not in text.lower(), text)
+check("a message that was not a reply is reported as somebody shown how",
+      "Shown how to use it — 2" in text, text)
+check("by its code, its count and what it means",
+      "AN-NEEDS-REPLY</code> ×2 — Message did not say which conversation" in text, text)
+check("a file over the limit and a full pack are limits, together",
+      "Hit a limit — 2" in text and "CV-TOO-BIG" in text and "ST-TG-PACK-FULL" in text, text)
+check("each kind says what it means",
+      bool(KIND_LABELS) and html.escape(KIND_LABELS["guided"][2]) in text, text)
+check("and those are still never listed one incident at a time",
+      not any(i in text for i in ("GGGGGG", "HHHHHH", "KKKKKK", "LLLLLL")), text)
+check("faults come before the bot being right",
+      "Shown how to use it" in text and text.index("Faults") < text.index("Shown how to use it"))
 check("somebody who signed a report is marked", "🙋" in text)
 check("with the incidents to look up", "FFFFFF" in text)
 check("the bots are named the way every other message names them",
@@ -174,16 +220,83 @@ check("a quiet day still sends, and says so", "Nothing at all" in quiet, quiet)
 check("with no empty sections", "Urgent" not in quiet and "Faults" not in quiet, quiet)
 
 only_refused = mb.build_problem_report([row("convertbot", "CV-TOO-BIG", "IIIIII", 3)], 24)
-check("a day of nothing but refusals prints no urgent heading",
+check("a day of nothing but explained problems prints no urgent heading",
       "Urgent" not in only_refused, only_refused)
 check("and does not claim nothing happened",
       "Nothing at all" not in only_refused, only_refused)
+
+many = [row("anonbot", code, f"M{n:05d}", 3)
+        for n, code in enumerate(sorted(KINDS.get("guided", ()))[:9])]
+crowded = mb.build_problem_report(many, 24)
+check(f"a kind lists {getattr(mb, 'MAX_CODES_PER_KIND', '?')} codes and sums the rest into one line",
+      crowded.count("<code>AN-") + crowded.count("<code>FM-") + crowded.count("<code>ST-")
+      + crowded.count("<code>CV-") + crowded.count("<code>DL-") == getattr(mb, "MAX_CODES_PER_KIND", -1)
+      and "+3 more, under 3 other code(s)" in crowded, crowded)
+
+print("\n== feedback in the report ==")
+fb = [{"id": 7, "bot_id": "convertbot", "lang": "uz", "created_at": NOW,
+       "delivered_at": None, "body": "Make <b>HEIC</b> faster & cheaper"},
+      {"id": 8, "bot_id": "anonbot", "lang": "en", "created_at": NOW,
+       "delivered_at": None, "body": "x" * (getattr(mb, "FEEDBACK_SHOWN_CHARS", 3000) + 50)}]
+try:
+    with_fb = mb.build_problem_report([], 24, fb)
+except TypeError:
+    with_fb = ""  # a report that takes no feedback
+check("feedback asked for at night is in the report", "💬 <b>Feedback — 2</b>" in with_fb, with_fb)
+check("with where it came from and in which language", "ConvertBot · uz" in with_fb, with_fb)
+check("and its words escaped, never markup", "&lt;b&gt;HEIC&lt;/b&gt; faster &amp; cheaper" in with_fb,
+      with_fb)
+check("a long one is cut, with where to read the rest",
+      "/feedback 8</code> for the rest" in with_fb and "x" * (getattr(mb, "FEEDBACK_SHOWN_CHARS", 3000) + 1) not in with_fb)
+check("and nothing about who sent it",
+      not any(w in with_fb for w in ("user_id", "username", "@")), with_fb)
+try:
+    noted = mb.build_problem_report([], 24, feedback_note="3 feedback message(s), each sent as it came")
+except TypeError:
+    noted = ""
+check("when it already went out, a line says so instead", "💬 3 feedback message(s)" in noted, noted)
 
 # A row written before the level column existed falls back rather than failing.
 legacy = dict(row("anonbot", "AN-DELIVERY", "JJJJJJ", 2))
 legacy["level"] = None
 check("a row with no level is classified from its code",
       "Urgent" in mb.build_problem_report([legacy], 24))
+
+print("\n== download routes in the report (the owner, 2026-10-07) ==")
+T = 1_800_000_000.0
+DAY = 86400.0
+routes = {
+    "routewatch:last_run": f"{T - 5 * 3600:.0f}",
+    "routewatch:state:instagram": f"up|{T - 9 * DAY:.0f}|0",
+    "routewatch:state:tiktok": f"last_resort|{T - 2 * DAY:.0f}|{T - 2 * DAY:.0f}",
+    "routewatch:state:twitter": f"down|{T - 3600:.0f}|{T - 3600:.0f}",
+    "routewatch:state:youtube": f"down|{T - 40 * DAY:.0f}|0",
+    "routewatch:ytdlp_alerted": "2026.09.30",
+}
+with_routes = mb.build_problem_report([], 24, routes=routes, now=T)
+check("the routes are in the report, with when they were checked",
+      "Download routes</b> · checked 5h ago" in with_routes, with_routes)
+check("every platform's standing, YouTube's included (never pushed, so this is where it is seen)",
+      all(name in with_routes for name in ("Instagram ✅", "TikTok ⚠️", "X ❌", "YouTube ❌")), with_routes)
+check("trouble older than a day says for how long", "last route only for 2d" in with_routes
+      and "YouTube ❌ down for 40d" in with_routes, with_routes)
+check("trouble younger than a day does not", "X ❌ down ·" in with_routes, with_routes)
+check("in the platforms' usual order", with_routes.index("Instagram") < with_routes.index("TikTok")
+      < with_routes.index("X ❌") < with_routes.index("YouTube"), with_routes)
+check("the yt-dlp bookkeeping key is not shown as a platform", "ytdlp" not in with_routes, with_routes)
+stale = dict(routes, **{"routewatch:last_run": f"{T - 3 * DAY:.0f}"})
+check("a check that stopped running says so",
+      "has stopped running" in mb.build_problem_report([], 24, routes=stale, now=T))
+check("a check that never ran says how to run it",
+      "not checked yet" in mb.build_problem_report([], 24, routes={}, now=T))
+check("a damaged record is skipped, not a crash",
+      "Instagram ✅" in mb.build_problem_report(
+          [], 24, routes=dict(routes, **{"routewatch:state:pinterest": "garbage"}), now=T))
+check("without routes the section is left out, as before",
+      "Download routes" not in mb.build_problem_report([], 24))
+check("both the 22:00 report and /nightly pass the routes in",
+      inspect.getsource(mb.nightly_problem_report).count("routes=routes") >= 2
+      and "routes=routes" in inspect.getsource(mb.nightly_command))
 
 print()
 if failures:

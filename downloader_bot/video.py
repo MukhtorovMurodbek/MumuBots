@@ -15,7 +15,15 @@ several-hundred extractor modules, and a bot that goes a whole day without
 anyone pasting a link should not be paying that the whole time. The first
 download pays it once, and it stays loaded from then on.
 """
+import contextlib
+import glob
+import logging
 import os
+import re
+import sys
+import tempfile
+import threading
+import time
 import uuid
 
 # Telegram itself refuses uploads over 50 MB without a local Bot API server,
@@ -30,6 +38,8 @@ MAX_DOWNLOAD_MB = int(os.environ.get("DBOT_MAX_DOWNLOAD_MB", "48"))
 MAX_DURATION_S = int(os.environ.get("DBOT_MAX_DURATION_SECONDS", "1800"))
 
 SOCKET_TIMEOUT_S = int(os.environ.get("DBOT_SOCKET_TIMEOUT", "30"))
+
+logger = logging.getLogger(__name__)
 
 
 # YouTube asks a server to prove it is not a bot, and a cloud host's IP is
@@ -63,6 +73,131 @@ SITE_COOKIEFILES = {
     "twitter": os.environ.get("DBOT_TW_COOKIES_FILE") or None,
     "reddit": os.environ.get("DBOT_RD_COOKIES_FILE") or None,
 }
+
+# The same cookies.txt, pasted into a variable instead of left in a file. A
+# host like Railway has environment variables and no convenient place to put a
+# file, so a path-only setting meant cookies were, in practice, not an option
+# there -- and cookies are the one thing that reliably gets YouTube to stop
+# asking a datacenter address to sign in. The text is written to a file only
+# this process can read, once, the first time a download needs it; the
+# *_COOKIES_FILE settings win where both are set. (From the unmerged cloud
+# session of 2026-09-25, rewritten here.)
+_COOKIE_TEXT_VARS = {"youtube": "DBOT_YT_COOKIES", "instagram": "DBOT_IG_COOKIES",
+                     "tiktok": "DBOT_TT_COOKIES", "twitter": "DBOT_TW_COOKIES",
+                     "reddit": "DBOT_RD_COOKIES", "other": "DBOT_COOKIES"}
+_cookie_text_files: dict = {}
+# Sites whose variable was read, found not to be a cookies.txt, and refused:
+# site -> the text that was refused. Remembered so that the answer does not
+# cost a re-check and a log line on every download, and keyed on the text so
+# that a changed value is looked at again.
+_cookie_text_refused: dict = {}
+
+
+def _cookie_text_problem(text: str) -> "str | None":
+    """Why `text` is not a cookies.txt, or None if it is one.
+
+    yt-dlp reads every line that is not blank or a comment as a cookie of
+    exactly seven tab-separated fields -- and when one is not, its error
+    quotes the line, and the line is a session secret, and the error goes
+    into the log (review, 2026-10-08). Pasting is how it happens: a browser
+    or a form turns the tabs into spaces. So the check is made here first,
+    and what it says contains no part of the text: numbers only.
+
+    "#HttpOnly_" lines are cookies (the prefix is how the format marks
+    them), not comments.
+
+    Seven fields is not enough: confirmed with yt-dlp's own loader (the
+    2026.08.19 release), a domain whose flag disagrees with it, or an expiry
+    that is not plain digits (-1, 1.89e9), makes the loader print the whole
+    line, secret and all, in a warning or an exception. So each field is
+    checked against what that loader accepts silently. A few of these
+    (path, secure, name) would not print anything; they are refused anyway,
+    because a line like that is not a cookie any site would take."""
+    # Read the way yt-dlp reads the file: universal newlines, so a lone "\r"
+    # ends a line too; and a byte-order mark at the start is not part of it.
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    for number, line in enumerate(lines, 1):
+        if not line.strip() or (line.strip().startswith("#") and not line.startswith("#HttpOnly_")):
+            continue
+        line = line.removeprefix("#HttpOnly_")
+        fields = line.split("\t")
+        if len(fields) != 7:
+            return (f"line {number} of {len(lines)} has {len(fields)} tab-separated field(s), not 7 "
+                    "(were the tabs pasted as spaces?)")
+        domain, flag, path, secure, expires, name, _value = fields
+        # Fixed words only, never the field itself: it is part of a secret's line.
+        if not domain:
+            what = "an empty domain"
+        elif flag != ("TRUE" if domain.startswith(".") else "FALSE"):
+            what = "a subdomains flag (field 2) that does not match its domain"
+        elif not path.startswith("/"):
+            what = "a path (field 3) that does not start with /"
+        elif secure not in ("TRUE", "FALSE"):
+            what = "a secure flag (field 4) that is not TRUE or FALSE"
+        elif not re.fullmatch(r"[0-9]*", expires):
+            what = "an expiry (field 5) that is not digits"
+        elif not name:
+            what = "an empty name (field 6)"
+        else:
+            continue
+        return f"line {number} of {len(lines)} has {what}"
+    return None
+
+
+# The header http.cookiejar looks for on a cookies.txt's first line.
+_COOKIE_HEADER_RE = re.compile(r"#( Netscape)? HTTP Cookie File")
+
+
+def _cookiefile_from_text(site: str) -> "str | None":
+    var = _COOKIE_TEXT_VARS.get(site)
+    text = os.environ.get(var) if var else None
+    if not text or not text.strip():
+        return None
+    # A byte-order mark (a Windows editor's, a form's) in front of the first
+    # line makes yt-dlp read that line as malformed: dropped, with a warning.
+    text = text.removeprefix("\ufeff")
+    if not text.strip():
+        return None
+    path = _cookie_text_files.get(site)
+    if path and os.path.exists(path):
+        return path
+    if _cookie_text_refused.get(site) == os.environ.get(var):
+        return None
+    # Some hosts flatten a pasted multi-line value into one line with literal
+    # "\n" and "\t" in it; yt-dlp would read that as one malformed cookie.
+    if "\\n" in text and "\n" not in text:
+        text = text.replace("\\n", "\n").replace("\\t", "\t")
+    problem = _cookie_text_problem(text)
+    if problem:
+        _cookie_text_refused[site] = os.environ.get(var)
+        logger.warning("%s is not a cookies.txt: %s. Those cookies are not used.", var, problem)
+        return None
+    # yt-dlp refuses the WHOLE file, quietly as far as the owner can tell, unless
+    # its very first line is the format's header (checked with its own loader,
+    # 2026.08.19: no header, or a blank line before it, and no cookie is read).
+    # A paste often starts at the first cookie, or with an empty line.
+    text = text.lstrip("\r\n \t")
+    if not _COOKIE_HEADER_RE.match(text):
+        text = "# Netscape HTTP Cookie File\n" + text
+    fd, path = tempfile.mkstemp(prefix=f"cookies-{site}-", suffix=".txt")   # mode 0600
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text if text.endswith("\n") else text + "\n")
+    _cookie_text_files[site] = path
+    return path
+
+
+def cookiefile_for(site: str) -> "str | None":
+    """The cookie jar for this site: its own file, its own pasted text, then
+    the every-site file, then the every-site text. None if there is none."""
+    for candidate in (SITE_COOKIEFILES.get(site), _cookiefile_from_text(site),
+                      COOKIEFILE, _cookiefile_from_text("other")):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
 
 # Where the request goes out from. The reason cookies are not always enough:
 # these sites rate-limit by IP as well as by session, every cloud host's
@@ -188,25 +323,150 @@ def _format_selector(max_mb: int | None = None) -> str:
     )
 
 
-def download_video(url: str, out_dir: str, max_mb: int | None = None) -> str:
+def _remove_leftovers(out_dir: str, unique_id: str, keep: str | None = None) -> None:
+    """Everything yt-dlp wrote for this download except `keep`.
+
+    A download that does not finish leaves what it had: `<id>.mp4.part`, the
+    video and audio halves of a merge (`<id>.f137.mp4`, `<id>.f140.m4a`), a
+    `.ytdl` state file. Nothing else knows those names, so nothing else
+    removed them -- and a container that runs for months on an ephemeral disk
+    is filled by the ones a failed or timed-out download left behind."""
+    for path in glob.glob(os.path.join(glob.escape(out_dir), f"{unique_id}.*")):
+        if keep is not None and os.path.abspath(path) == os.path.abspath(keep):
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Replacing yt-dlp while the bot runs
+# ---------------------------------------------------------------------------
+# yt-dlp is the route that rots: the sites change under it every few weeks and
+# the image has whatever version its last build installed (routewatch.py says
+# when that is behind, and can fetch the newer one). Putting a newer copy in
+# place means swapping modules in a process that may be using the old ones --
+# harmless between downloads, a mixed-version crash in the middle of one. So a
+# download holds a *slot* for as long as it runs, and a swap waits until none
+# is held and keeps new ones out while it happens.
+_slots = threading.Condition()
+_slots_held = 0
+_swapping = False
+SWAP_WAIT_S = 300.0
+
+
+@contextlib.contextmanager
+def _slot():
+    global _slots_held
+    with _slots:
+        while _swapping:
+            _slots.wait(timeout=5.0)
+        _slots_held += 1
+    try:
+        yield
+    finally:
+        with _slots:
+            _slots_held -= 1
+            _slots.notify_all()
+
+
+def use_ytdlp_from(path: str) -> bool:
+    """Make `path` (a folder holding a newer yt_dlp package) the one every
+    later download imports. Blocking. Returns False, and changes nothing, if
+    downloads did not finish within SWAP_WAIT_S -- the caller tries again the
+    next day."""
+    global _swapping
+    with _slots:
+        _swapping = True
+        try:
+            deadline = time.monotonic() + SWAP_WAIT_S
+            while _slots_held:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                _slots.wait(timeout=min(left, 5.0))
+            if path in sys.path:
+                sys.path.remove(path)
+            sys.path.insert(0, path)
+            # What the old copy had imported must go, or the next `import
+            # yt_dlp` is satisfied from sys.modules and nothing has changed.
+            for name in [n for n in sys.modules if n == "yt_dlp" or n.startswith("yt_dlp.")]:
+                del sys.modules[name]
+            return True
+        finally:
+            _swapping = False
+            _slots.notify_all()
+
+
+def ytdlp_version() -> "str | None":
+    """The version a download would use right now, without importing it."""
+    for entry in sys.path:
+        candidate = os.path.join(entry, "yt_dlp", "version.py")
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("__version__"):
+                            return line.split("=", 1)[1].strip().strip("'\"")
+            except OSError:
+                return None
+    return None
+
+
+def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=None) -> str:
     """Downloads the video at `url` into `out_dir`, returns the local file path.
     `max_mb` is the ceiling for this one download -- MAX_DOWNLOAD_MB unless
     somebody has switched on large files (large_files.py).
 
+    `cancel` is a threading.Event: set it and the download stops at its next
+    chunk and removes what it had written. A thread cannot be cancelled, only
+    asked, and a caller that stops waiting (resolvers.py gives a route a time
+    limit) would otherwise leave the download running to its end, holding
+    bandwidth and disk for a file nobody will collect.
+
+    Whatever ends the download -- it finishing, failing or being stopped --
+    leaves only the file it returns.
+
     Blocking -- call it through asyncio.to_thread.
     """
     mb = MAX_DOWNLOAD_MB if max_mb is None else max_mb
-    import yt_dlp  # deferred: see the module docstring
+    with _slot():
+        import yt_dlp  # deferred: see the module docstring
 
-    os.makedirs(out_dir, exist_ok=True)
-    unique_id = uuid.uuid4().hex
-    outtmpl = os.path.join(out_dir, f"{unique_id}.%(ext)s")
+        os.makedirs(out_dir, exist_ok=True)
+        unique_id = uuid.uuid4().hex
+        outtmpl = os.path.join(out_dir, f"{unique_id}.%(ext)s")
 
+        def stop_if_asked(*_ignored):
+            if cancel is not None and cancel.is_set():
+                raise yt_dlp.utils.DownloadCancelled("nobody is waiting for this download any more")
+
+        def match_filter(info, *, incomplete):
+            # Asked once the page has been read and before any media is fetched: a
+            # request that is already abandoned stops there.
+            stop_if_asked()
+            return _reject_long(info, incomplete=incomplete)
+
+        path = None
+        try:
+            path = _download(yt_dlp, url, mb, outtmpl, stop_if_asked, match_filter)
+            stop_if_asked()          # finished, but too late for anyone to use it
+            return path
+        except BaseException:
+            path = None
+            raise
+        finally:
+            _remove_leftovers(out_dir, unique_id, keep=path)
+
+
+def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filter) -> str:
     ydl_opts = {
         "outtmpl": outtmpl,
         "format": _format_selector(mb),
         "max_filesize": mb * 1024 * 1024,
-        "match_filter": _reject_long,
+        "match_filter": match_filter,
+        "progress_hooks": [progress_hook],
         "socket_timeout": SOCKET_TIMEOUT_S,
         "retries": 2,
         "quiet": True,
@@ -220,8 +480,8 @@ def download_video(url: str, out_dir: str, max_mb: int | None = None) -> str:
         "extractor_args": {"youtube": {"player_client": YT_PLAYER_CLIENTS}},
     }
     site = _site_of(url)
-    cookiefile = SITE_COOKIEFILES.get(site) or COOKIEFILE
-    if cookiefile and os.path.exists(cookiefile):
+    cookiefile = cookiefile_for(site)
+    if cookiefile:
         ydl_opts["cookiefile"] = cookiefile
     proxy = SITE_PROXIES.get(site) or PROXY
     if proxy:

@@ -6,9 +6,11 @@
 # On Railway: the service's Settings -> Config-as-code -> /convert_bot/railway.json,
 # which names this file, and rebuilds only when convert_bot/ or shared/ changes.
 FROM python:3.11-slim-bookworm
-# ffmpeg is a system program this bot shells out to.
+# ffmpeg and bsdtar (libarchive's tar: it reads 7z and RAR and writes 7z) are
+# system programs this bot shells out to. Without bsdtar the bot starts and
+# simply does not offer 7z or RAR -- formats.probe() notices.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg libarchive-tools \
  && rm -rf /var/lib/apt/lists/*
 
 # The running-cost settings the Nixpacks build had in nixpacks.toml: glibc's
