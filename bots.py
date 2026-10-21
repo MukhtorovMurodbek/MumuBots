@@ -43,11 +43,14 @@ from telegram.ext import (
     filters,
 )
 
+import emoji_utils
 import family_link
 import i18n
+import import_utils
 import problems
 import lifecycle
 import live_message
+import video_sticker
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -117,8 +120,14 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    NO_PREVIEW,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout_callback,
@@ -150,11 +159,32 @@ POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT", "30"))
 
 TITLE, EDITING, RENAME = range(3)
 
+PACK_TITLE_MAX = 64
+
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help template (shared_features, "/help in two lengths")."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text") + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text").rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+def _help_page_newpack(lang: str) -> str:
+    return i18n.t(lang, "helppage_newpack",
+                  title_max=PACK_TITLE_MAX, emoji=emoji_utils.DEFAULT_EMOJI,
+                  emoji_max=emoji_utils.MAX_EMOJI_PER_STICKER, side=video_sticker.STICKER_SIDE,
+                  seconds=video_sticker.MAX_DURATION_S, fps=video_sticker.MAX_FPS,
+                  kb=video_sticker.MAX_BYTES // 1024)
+
+def _help_page_addsticker(lang: str) -> str:
+    return i18n.t(lang, "helppage_addsticker", emoji=emoji_utils.DEFAULT_EMOJI)
+
+def _help_page_import(lang: str) -> str:
+    return i18n.t(lang, "helppage_import", max=import_utils.MAX_IMPORT_PER_RUN)
+
+HELP_PAGES = {"newpack": _help_page_newpack, "addsticker": _help_page_addsticker, "import": _help_page_import}
+HELP_ALIASES = {}
 
 def build_start_text(lang: str) -> str:
     return i18n.t(lang, "start_intro") + build_help_text(lang)
@@ -210,7 +240,7 @@ def help_rows(lang: str) -> list:
     ]]
 
 def start_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)])
+    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES)
 
 def packs_keyboard(packs: list[tuple[str, str]], lang: str) -> InlineKeyboardMarkup:
     """One button per pack (tap opens its menu), fStik-style."""
@@ -539,14 +569,19 @@ async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.callback_query.answer()
     await edit_in_place(update.callback_query.message, context.bot, build_help_text(lang, full=True),
-                        reply_markup=help_keyboard(lang, True, help_rows(lang)))
+                        reply_markup=help_keyboard(lang, True, help_rows(lang), HELP_PAGES))
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES))
 
 async def menu_mypacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -658,7 +693,7 @@ async def receive_new_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     pack_name = context.user_data.get("rename_pack")
     prompt = LiveMessage.restore(context.user_data.get("rename_prompt"))
-    new_title = update.message.text.strip()[:64]
+    new_title = update.message.text.strip()[:PACK_TITLE_MAX]
     if not pack_name or prompt is None:
         await update.message.reply_text(i18n.t(lang, "rename_broken_state"))
         return ConversationHandler.END
@@ -769,8 +804,8 @@ async def receive_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not title:
         await update.message.reply_text(i18n.t(lang, "title_empty"))
         return TITLE
-    if len(title) > 64:
-        title = title[:64]
+    if len(title) > PACK_TITLE_MAX:
+        title = title[:PACK_TITLE_MAX]
         await update.message.reply_text(i18n.t(lang, "title_truncated", title=title))
 
     intro = i18n.t(lang, "editing_intro_new")
@@ -1417,8 +1452,12 @@ def main():
     app.add_handler(CommandHandler("mypacks", mypacks_command))
     app.add_handler(CommandHandler("addsticker", addsticker_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES),
                                          pattern=HELP_TOGGLE_PATTERN))
+
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("whomade", whomade_command))
     app.add_handler(CommandHandler("whois", whois_command))
@@ -1501,6 +1540,7 @@ from telegram.ext import (
 import family_link
 import i18n
 import lifecycle
+import shared_features
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -1515,6 +1555,7 @@ from db import (
 import big_files
 import convert_utils
 import raw_convert
+import ocr_convert
 import formats
 import jobs
 from convert_runner import ConvertRunner, download_card
@@ -1549,6 +1590,7 @@ from shared_features import (
     problem_report_callback,
     refuse_new_work,
     attach_flood_gate,
+    attach_promo_claim,
     attach_maintenance,
     CANCEL_PICK_ALL,
     CANCEL_PICK_NONE,
@@ -1573,8 +1615,14 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    NO_PREVIEW,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout,
@@ -1689,8 +1737,61 @@ async def _conversions_in_flight_job(context: ContextTypes.DEFAULT_TYPE) -> None
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help template (shared_features, "/help in two lengths")."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text", pricing=price_tiers_text(lang)) + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", pricing=price_tiers_text(lang)).rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+def _help_page_convert(lang: str) -> str:
+    return i18n.t(lang, "helppage_convert",
+                  max_mb=convert_utils.MAX_FILE_MB, pricing=price_tiers_text(lang),
+                  free_mb=convert_utils.FREE_UNDER_MB, batch=formats.MAX_BATCH,
+                  ocr_pages=ocr_convert.OCR_MAX_PAGES, ocr_free_pages=ocr_convert.OCR_FREE_PAGES,
+                  minutes=max(1, PENDING_TTL_SECONDS // 60), least=convert_utils.least_paid_price())
+
+def _help_topup_ladder(lang: str) -> tuple[str, str]:
+    """(the ladder as lines, the sentence about the bonus) -- walked the way family_link.quote_credit prices a payment, from family_link.TOPUP_LADDER as it is now."""
+
+    per_star = family_link.TOPUP_MULTIPLIER
+    rate = f"{per_star:g}"
+    if not family_link.TOPUP_LADDER:
+        return i18n.t(lang, "helppage_recharge_flat", rate=rate), ""
+    lines = []
+    for number, (stars, multiplier) in enumerate(family_link.TOPUP_LADDER):
+        extra = per_star * multiplier - per_star
+        split = i18n.t(lang, "helppage_recharge_bonus_part", rate=rate, bonus=f"{extra:g}") if extra > 0 else ""
+        lines.append(i18n.t(lang, "helppage_recharge_step_next" if number else "helppage_recharge_step_first",
+                            stars=stars, each=f"{per_star * multiplier:g}", split=split))
+    lines.append(i18n.t(lang, "helppage_recharge_step_after", rate=rate))
+    return "\n".join(lines), i18n.t(lang, "helppage_recharge_bonus_rule", rate=rate,
+                                    days=family_link.BONUS_EXPIRY_DAYS)
+
+def _help_page_recharge(lang: str) -> str:
+    ladder, bonus_rule = _help_topup_ladder(lang)
+    quote = family_link.quote_credit(0, shared_features.DONATE_STAR_OPTIONS[0])
+    if quote["bonus"] > 0:
+        example = i18n.t(lang, "helppage_recharge_example", stars=quote["stars"], total=quote["total"],
+                         base=quote["base"], bonus=quote["bonus"])
+    else:
+        example = i18n.t(lang, "helppage_recharge_example_flat", stars=quote["stars"], total=quote["total"])
+    text = i18n.t(lang, "helppage_recharge", options=" · ".join(str(n) for n in shared_features.DONATE_STAR_OPTIONS),
+                  ladder=ladder, bonus_rule=bonus_rule, example=example)
+
+    return text if bonus_rule else text.replace(ladder + "\n\n", ladder + "\n", 1)
+
+def _help_page_balance(lang: str) -> str:
+    quote = family_link.quote_credit(0, shared_features.DONATE_STAR_OPTIONS[0])
+    if quote["bonus"] > 0:
+        example = i18n.t(lang, "helppage_balance_example", stars=quote["stars"], base=quote["base"],
+                         bonus=quote["bonus"])
+    else:
+        example = i18n.t(lang, "helppage_balance_example_one", stars=quote["stars"], total=quote["total"])
+    return i18n.t(lang, "helppage_balance", rows=shared_features.BALANCE_RECENT_ROWS,
+                  days=family_link.BONUS_EXPIRY_DAYS, example=example)
+
+HELP_PAGES = {"convert": _help_page_convert, "recharge": _help_page_recharge, "balance": _help_page_balance}
+HELP_ALIASES = {"donate": "recharge", "mystars": "balance"}
 
 BOT_COMMANDS = [
 
@@ -1730,7 +1831,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, help_rows(lang)),
+        reply_markup=help_keyboard(lang, False, help_rows(lang), HELP_PAGES),
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1753,9 +1854,14 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The instructions on their own."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES))
 
 async def _apply_language(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     """The single path every language change goes through -- /en, /uz, /rus and a tap on the picker alike -- so all four end the same way: with the instructions, printed in the language just chosen."""
@@ -1822,7 +1928,7 @@ def _formats_overview(lang: str) -> tuple[str, InlineKeyboardMarkup]:
 def _formats_category(lang: str, category: str) -> tuple[str, InlineKeyboardMarkup]:
     label = i18n.t(lang, f"category_{category}")
     reads = ", ".join(ext.upper() for ext in formats.supported_sources(category))
-    writes = ", ".join(ext.upper() for ext in formats.supported_targets(category))
+    writes = ", ".join(i18n.target_label(lang, ext) for ext in formats.supported_targets(category))
     text = joined(
         heading(i18n.t(lang, "formats_category_title", category=label.title())),
         lead_in(f"{i18n.t(lang, 'formats_reads')}: {reads}"),
@@ -1844,7 +1950,7 @@ def _format_lookup(lang: str, word: str) -> str | None:
     return i18n.t(
         lang, "formats_lookup", ext=ext,
         category=i18n.t(lang, f"category_{formats.category_of(ext)}"),
-        targets=", ".join(target.upper() for target in targets),
+        targets=", ".join(i18n.target_label(lang, target) for target in targets),
     )
 
 async def formats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1888,9 +1994,9 @@ async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
         items.append(CancelItem(
             f"job_{job.id}",
             i18n.t(lang, "cancel_item_job_running" if job.state == "running" else "cancel_item_job_queued",
-                   target=job.target_ext.upper(), src=job.src_ext.upper(),
+                   target=i18n.target_label(lang, job.target_ext), src=job.src_ext.upper(),
                    size=f"{job.size / 1024 / 1024:.1f}"),
-            i18n.t(lang, "cancel_button_job", target=job.target_ext.upper()),
+            i18n.t(lang, "cancel_button_job", target=i18n.target_label(lang, job.target_ext)),
         ))
     state = context.user_data.get("convert")
     if state:
@@ -2116,8 +2222,7 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
         await status.delete(context.bot)
 
     if joining:
-        state["paths"].append(str(path))
-        state["size"] += path.stat().st_size
+        _join_album(state, path)
         _schedule_batch(context, msg, update.effective_user, group_id)
         return
 
@@ -2135,6 +2240,13 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await _present_conversion_options(msg, context, update.effective_user, [path], ext)
+
+def _join_album(state: dict, path: Path) -> None:
+    """A file joins the pending conversion of its album."""
+    state["paths"].append(str(path))
+    state["size"] += path.stat().st_size
+    state["ocr_pages"] = 0
+    state["pages"] = None
 
 def _schedule_batch(context: ContextTypes.DEFAULT_TYPE, message, user, group_id: str) -> None:
     """(Re)arm the job that draws the menu once the album has stopped arriving."""
@@ -2178,15 +2290,18 @@ def _what_formats_keyboard(lang: str) -> InlineKeyboardMarkup:
     ]])
 
 def _format_rows(lang: str, targets: list[str], expanded: bool, total: int,
-                 keep: bool | None = None) -> list[list]:
+                 keep: bool | None = None, ocr: str | None = None) -> list[list]:
     """Three formats to a row, then whatever navigation the list needs."""
-    buttons = [InlineKeyboardButton(target.upper(), callback_data=f"convfmt:{target}")
+    buttons = [InlineKeyboardButton(i18n.target_label(lang, target), callback_data=f"convfmt:{target}")
                for target in targets]
     rows = [buttons[index:index + 3] for index in range(0, len(buttons), 3)]
     if total > len(targets):
         rows.append([InlineKeyboardButton(i18n.t(lang, "btn_more_formats"), callback_data="convmore")])
     elif expanded:
         rows.append([InlineKeyboardButton(i18n.t(lang, "btn_fewer_formats"), callback_data="convless")])
+    if ocr is not None:
+        rows.append([InlineKeyboardButton(
+            i18n.t(lang, "ocr_lang_toggle", name=i18n.t(lang, f"ocr_lang_{ocr}")), callback_data="convocr")])
     if keep is not None:
 
         rows.append([InlineKeyboardButton(
@@ -2219,7 +2334,7 @@ def _quote_text(lang: str, src_ext: str, target_ext: str, in_bytes: int,
                 out_bytes: int, price: int, balance: int | None,
                 send_limit: int = jobs.SEND_LIMIT_BYTES) -> str:
     """What this conversion will cost, and what it is costing for."""
-    lines = [f"{src_ext.upper()} → {target_ext.upper()}",
+    lines = [f"{src_ext.upper()} → {i18n.target_label(lang, target_ext)}",
              i18n.t(lang, "quote_line_sizes", in_size=human_size(in_bytes),
                     out_size=human_size(out_bytes))]
     if price == 0:
@@ -2247,13 +2362,36 @@ def _quote_keyboard(lang: str, price: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(i18n.t(lang, "btn_cancel_conversion"), callback_data="convcancel")],
     ])
 
+def _ocr_withheld(state: dict) -> set[str]:
+    """The targets that read text which THIS file must not be offered, though the host can write them (formats.targets_for says only that it can)."""
+    if len(state["paths"]) > 1:
+        if formats.category_of(state["src_ext"], state.get("animated")) == formats.IMAGE:
+            return {"txt", "ocrpdf"}
+        return {"ocrpdf"}
+    if state["src_ext"] != "pdf":
+        return set()
+    pages = state.get("ocr_pages") or 0
+    return set() if 0 < pages <= ocr_convert.OCR_MAX_PAGES else {"ocrpdf"}
+
 def _offered_targets(state: dict) -> list[str]:
-    """What the menu offers for a pending conversion, computed one way for every redraw: the menu, More/Less, and the keep toggle."""
+    """What the menu offers for a pending conversion, computed one way for every redraw: the menu, More/Less, the keep toggle and the text language."""
     targets = formats.targets_for(state["src_ext"], state.get("animated"))
     if len(state["paths"]) > 1:
         targets = [target for target in targets if target != state["src_ext"]]
-    blocked = set(state.get("blocked") or ())
+    blocked = set(state.get("blocked") or ()) | _ocr_withheld(state)
     return [target for target in targets if target not in blocked]
+
+def _ocr_choice(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    """The language text is read in: the person's choice, remembered for their next file, or until they make one, the language they use the bot in."""
+    choice = context.user_data.get("ocr_lang")
+    return choice if choice in ocr_convert.CHOICES else ocr_convert.default_choice(lang)
+
+def _ocr_row(context: ContextTypes.DEFAULT_TYPE, lang: str, state: dict, shown) -> str | None:
+    """The text language for the menu's toggle row -- None unless one of the buttons on the screen being drawn reads text: the row changes how those are read, so it is not on a screen that has none (a picture's TXT and searchable PDF are under More formats, so its first screen has no row)."""
+    pages = state.get("ocr_pages") or 0
+    if any(convert_utils.ocr_job_pages(state["src_ext"], target, pages, len(state["paths"])) for target in shown):
+        return _ocr_choice(context, lang)
+    return None
 
 async def _present_conversion_options(
     message, context: ContextTypes.DEFAULT_TYPE, user, paths, src_ext: str,
@@ -2308,8 +2446,20 @@ async def _present_conversion_options(
             return
 
     pages = None
-    if len(paths) == 1 and formats.category_of(src_ext, animated) == formats.DOCUMENT:
+
+    ocr_pages = 0
+    if len(paths) == 1 and src_ext == "pdf" and formats.category_of(src_ext, animated) == formats.DOCUMENT:
+        counted = await jobs.describe_pdf(paths[0])
+        if counted is not None:
+            pages = counted["pages"]
+
+            if formats.met("ocr") and counted["scanned"] is not None:
+                ocr_pages = counted["scanned"]
+    elif len(paths) == 1 and formats.category_of(src_ext, animated) == formats.DOCUMENT:
         pages = await asyncio.to_thread(document_pages, paths[0], src_ext)
+    elif (len(paths) == 1 and formats.category_of(src_ext, animated) == formats.IMAGE
+          and src_ext not in formats.RAW_FORMATS and src_ext != "svg" and formats.met("ocr")):
+        ocr_pages = 1
 
     state = {
         "state": "awaiting_format",
@@ -2321,6 +2471,7 @@ async def _present_conversion_options(
         "animated": animated,
         "megapixels": megapixels,
         "pages": pages,
+        "ocr_pages": ocr_pages,
     }
     every_target = _offered_targets(state)
     blocked = jobs.unsendable_targets(megapixels, every_target, size, message.chat_id,
@@ -2341,6 +2492,8 @@ async def _present_conversion_options(
             which, width, height, fit_w, fit_h = fit
             notes.append(i18n.t(lang, f"video_fit_{which}_note", w=width, h=height,
                                 fw=fit_w, fh=fit_h))
+    if ocr_pages > ocr_convert.OCR_MAX_PAGES:
+        notes.append(i18n.t(lang, "ocr_too_many_pages_note", max=ocr_convert.OCR_MAX_PAGES))
     state["notes"] = notes
 
     targets = _offered_targets(state)
@@ -2357,7 +2510,8 @@ async def _present_conversion_options(
     shown = [target for target in shown if target in targets] or targets
     await message.reply_text(
         _options_text(lang, paths, src_ext, size, animated, notes),
-        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep)),
+        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep,
+                                                       ocr=_ocr_row(context, lang, state, shown))),
     )
 
 async def convert_keep_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2376,11 +2530,39 @@ async def convert_keep_callback(update: Update, context: ContextTypes.DEFAULT_TY
     targets = _offered_targets(state)
     shown = [target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
              if target in targets] or targets
+    state["expanded"] = False
     await edit_in_place(
         query.message, context.bot,
         _options_text(lang, state["paths"], state["src_ext"], state["size"],
                       state.get("animated"), state.get("notes") or ()),
-        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep)),
+        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep,
+                                                       ocr=_ocr_row(context, lang, state, shown))),
+    )
+
+async def convert_ocr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The text-language toggle under the format menu: English, Russian, Uzbek, and round again."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    state = context.user_data.get("convert")
+    if not state or state.get("state") != "awaiting_format":
+        await query.answer(i18n.t(lang, "conversion_expired"), show_alert=True)
+        return
+    choices = ocr_convert.CHOICES
+    chosen = choices[(choices.index(_ocr_choice(context, lang)) + 1) % len(choices)]
+    context.user_data["ocr_lang"] = chosen
+    await query.answer(i18n.t(lang, "ocr_lang_set", name=i18n.t(lang, f"ocr_lang_{chosen}")))
+    targets = _offered_targets(state)
+    expanded = bool(state.get("expanded"))
+    shown = targets if expanded else [
+        target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
+        if target in targets] or targets
+    await edit_in_place(
+        query.message, context.bot,
+        _options_text(lang, state["paths"], state["src_ext"], state["size"],
+                      state.get("animated"), state.get("notes") or ()),
+        reply_markup=InlineKeyboardMarkup(_format_rows(
+            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 async def convert_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2396,6 +2578,7 @@ async def convert_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
     animated = state.get("animated")
     targets = _offered_targets(state)
     expanded = query.data == "convmore"
+    state["expanded"] = expanded
     shown = targets if expanded else [
         target for target in formats.popular_targets(src_ext, animated) if target in targets
     ] or targets
@@ -2404,7 +2587,8 @@ async def convert_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _options_text(lang, state["paths"], src_ext, state["size"], animated,
                       state.get("notes") or ()),
         reply_markup=InlineKeyboardMarkup(_format_rows(
-            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")))),
+            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 def _result_caption(lang: str, result, src_ext: str, target_ext: str, stars_paid: int) -> str:
@@ -2447,6 +2631,18 @@ async def _enqueue(context: ContextTypes.DEFAULT_TYPE, message, user, lang: str,
     """Hand a chosen conversion to the queue and return straight away."""
     keep = bool(context.user_data.get("keep_files"))
     paths = list(conv_state["paths"])
+
+    reading = convert_utils.ocr_job_pages(conv_state["src_ext"], target_ext, conv_state.get("ocr_pages") or 0,
+                                          len(paths))
+    if reading:
+        time_limit = convert_utils.ocr_limit(conv_state["src_ext"], target_ext, conv_state["size"],
+                                             conv_state.get("est_out") or 0, reading,
+                                             paid=conv_state["price"] > 0, pages=conv_state.get("pages"))
+    else:
+        time_limit = jobs.time_limit_for(
+            convert_utils.billable_bytes(conv_state["size"], conv_state.get("est_out") or 0),
+            convert_utils.work_factor(conv_state["src_ext"], target_ext),
+            paid=conv_state["price"] > 0)
     job = jobs.Job(
         user_id=user.id, chat_id=message.chat_id, paths=paths,
         src_ext=conv_state["src_ext"], target_ext=target_ext,
@@ -2454,17 +2650,15 @@ async def _enqueue(context: ContextTypes.DEFAULT_TYPE, message, user, lang: str,
         username=user.username, keep_file=keep,
         send_limit=jobs.send_limit_for(conv_state["size"], conv_state.get("est_out"),
                                        message.chat_id),
-        time_limit=jobs.time_limit_for(
-            convert_utils.billable_bytes(conv_state["size"], conv_state.get("est_out") or 0),
-            convert_utils.work_factor(conv_state["src_ext"], target_ext),
-            paid=conv_state["price"] > 0),
+        time_limit=time_limit,
+        ocr_lang=_ocr_choice(context, lang) if reading else "", ocr_pages=reading,
     )
     ahead = sum(1 for other in jobs._jobs.values() if other.state in ("queued", "running"))
     if ahead:
-        text = i18n.t(lang, "job_queued", src=job.src_ext.upper(), target=target_ext.upper(),
+        text = i18n.t(lang, "job_queued", src=job.src_ext.upper(), target=i18n.target_label(lang, target_ext),
                       ahead=ahead, price=job.price)
     else:
-        text = i18n.t(lang, "job_starting", src=job.src_ext.upper(), target=target_ext.upper())
+        text = i18n.t(lang, "job_starting", src=job.src_ext.upper(), target=i18n.target_label(lang, target_ext))
     runner = _runner(context.application)
 
     if keep:
@@ -2515,6 +2709,10 @@ async def convert_format_chosen(update: Update, context: ContextTypes.DEFAULT_TY
                                   limit=jobs.send_ceiling_mb(query.message.chat_id)),
                            show_alert=True)
         return
+    if target_ext not in _offered_targets(conv_state):
+
+        await query.answer(i18n.t(lang, "not_for_this_file"), show_alert=True)
+        return
 
     in_paths = conv_state["paths"]
     src_ext = conv_state["src_ext"]
@@ -2526,7 +2724,8 @@ async def convert_format_chosen(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     price, est_out = price_for_job(src_ext, target_ext, conv_state["size"],
-                                   conv_state.get("pages"))
+                                   conv_state.get("pages"), conv_state.get("ocr_pages") or 0,
+                                   len(in_paths))
     conv_state["price"] = price
     conv_state["est_out"] = est_out
     conv_state["target_ext"] = target_ext
@@ -2557,12 +2756,14 @@ async def convert_quote_back(update: Update, context: ContextTypes.DEFAULT_TYPE)
     targets = _offered_targets(state)
     shown = [target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
              if target in targets] or targets
+    state["expanded"] = False
     await edit_in_place(
         query.message, context.bot,
         _options_text(lang, state["paths"], state["src_ext"], state["size"],
                       state.get("animated"), state.get("notes") or ()),
         reply_markup=InlineKeyboardMarkup(_format_rows(
-            lang, shown, False, len(targets), keep=bool(context.user_data.get("keep_files")))),
+            lang, shown, False, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 async def convert_quote_go(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2616,15 +2817,19 @@ async def _start_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE,
             conv_state["state"] = "awaiting_payment"
             await asyncio.to_thread(
                 record_star_invoice, user.id, user.username, stars,
-                f"top-up for a {src_ext}->{target_ext} conversion", payload)
+                f"top-up for a {src_ext}->{'searchable-pdf' if target_ext == 'ocrpdf' else target_ext} conversion",
+                payload)
             await context.bot.send_invoice(
                 chat_id=query.message.chat_id,
-                title=i18n.t(lang, "convert_invoice_title", src=src_ext.upper(), target=target_ext.upper()),
+                title=i18n.t(lang, "convert_invoice_title", src=src_ext.upper(),
+                             target=i18n.target_label(lang, target_ext)),
                 description=i18n.t(lang, "convert_invoice_description", size_kb=f"{conv_state['size'] / 1024:.0f}"),
                 payload=payload,
                 provider_token="",
                 currency="XTR",
-                prices=[LabeledPrice(i18n.t(lang, "convert_invoice_label", src=src_ext, target=target_ext), stars)],
+                prices=[LabeledPrice(i18n.t(lang, "convert_invoice_label", src=src_ext,
+                                           target=target_ext if target_ext != "ocrpdf" else i18n.target_label(lang, target_ext)),
+                                     stars)],
             )
             await edit_in_place(query.message, context.bot,
                                 i18n.t(lang, "topup_needed", price=needed, balance=max(balance, 0),
@@ -2821,13 +3026,17 @@ def main():
 
     attach_flood_gate(app, ADMIN_IDS)
 
+    attach_promo_claim(app)
+
     app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
                                    awaited_text_received), group=-1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES),
                                          pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("convert", convert_start))
     app.add_handler(CommandHandler("formats", formats_command))
@@ -2846,6 +3055,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_conversion_callback, pattern="^convcancel$"))
     app.add_handler(CallbackQueryHandler(convert_stop_callback, pattern="^convstop:"))
     app.add_handler(CallbackQueryHandler(convert_keep_callback, pattern="^convkeep$"))
+    app.add_handler(CallbackQueryHandler(convert_ocr_callback, pattern="^convocr$"))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"))
     app.add_handler(CallbackQueryHandler(language_chosen, pattern="^setlang:"))
     app.add_handler(CommandHandler("language", language_command))
@@ -2909,7 +3119,7 @@ import os
 import shutil
 import uuid
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -2923,6 +3133,7 @@ from telegram import (
     BotCommand, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
     LinkPreviewOptions, Update, InlineKeyboardButton, InlineKeyboardMarkup,
 )
+from telegram.error import BadRequest
 
 NO_PREVIEW = {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
 from telegram.ext import (
@@ -2937,6 +3148,8 @@ from telegram.ext import (
 )
 
 import cards
+import db
+import delivery_cache
 import family_link
 import i18n
 import problems
@@ -2945,8 +3158,12 @@ import net
 import platforms
 import resolvers
 import routewatch
+import sent_files
+import shared_features
 import big_files
 import large_files
+import merge
+import video
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -2964,9 +3181,15 @@ from db import (
     save_provider_health,
     download_allowance,
     record_download,
+    sent_files_get,
+    sent_files_put,
+    sent_files_confirmed,
+    sent_files_used,
+    sent_files_drop,
 )
 from shared_features import (
     note_job,
+    note_tap,
     publish_profile,
     publish_commands,
     refresh_chat_menu,
@@ -2980,6 +3203,7 @@ from shared_features import (
     problem_report_callback,
     refuse_new_work,
     attach_flood_gate,
+    attach_promo_claim,
     attach_maintenance,
     CANCEL_PICK_ALL,
     CANCEL_PICK_NONE,
@@ -3004,8 +3228,13 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout_callback,
@@ -3026,6 +3255,8 @@ BOT_TOKEN = os.environ.get("DBOT_TOKEN")
 BOT_USERNAME = (os.environ.get("DBOT_USERNAME") or "").strip().lstrip("@") or None
 
 BOT_NAME = "downloaderbot"
+
+sent_files.configure(BOT_TOKEN)
 
 ADMIN_IDS = {int(x) for x in os.environ.get("DBOT_ADMIN_ID", "").split(",") if x.strip()}
 
@@ -3048,14 +3279,55 @@ def _slots() -> asyncio.Semaphore:
         _download_slots = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
     return _download_slots
 
+MAX_CONCURRENT_LOOKUPS = 2
+
+_lookup_slots: asyncio.Semaphore | None = None
+
+def _lookups() -> asyncio.Semaphore:
+    global _lookup_slots
+    if _lookup_slots is None:
+        _lookup_slots = asyncio.Semaphore(MAX_CONCURRENT_LOOKUPS)
+    return _lookup_slots
+
 MAX_PER_USER = max(1, int(os.environ.get("DBOT_MAX_PER_USER") or 2))
 
 MAX_PENDING_PER_USER = max(1, int(os.environ.get("DBOT_MAX_PENDING_PER_USER") or 5))
 
 MIN_FREE_MB = int(os.environ.get("DBOT_MIN_FREE_MB") or 300)
 
+delivery_cache.configure(resolvers._WORK_DIR)
+
+def _cache_floor_mb() -> int:
+    return MIN_FREE_MB + MAX_CONCURRENT_DOWNLOADS * video.MAX_DOWNLOAD_MB
+
+def _make_room(mb: int) -> None:
+    """A download is about to take up to `mb` MB: kept files go first, until the disk has that and MIN_FREE_MB more, or none are left."""
+    delivery_cache.make_room(mb, MIN_FREE_MB)
+
+MERGE_MAX_ITEMS = int(os.environ.get("DBOT_MERGE_MAX_ITEMS") or 20)
+MERGE_MAX_MB = int(os.environ.get("DBOT_MERGE_MAX_MB") or 48)
+
 _user_slots: "dict[int, asyncio.Semaphore]" = {}
 _user_pending: "dict[int, int]" = {}
+
+_in_flight: "dict[tuple[int, int, str, str], float]" = {}
+IN_FLIGHT_MAX_SECONDS = 3600
+
+def _already_in_flight(key) -> bool:
+    marked = _in_flight.get(key)
+    return marked is not None and time.monotonic() - marked < IN_FLIGHT_MAX_SECONDS
+
+def _clear_in_flight(key, stamp) -> None:
+    """Take a link's mark down, only if it is still the one this job made: a job that ran past IN_FLIGHT_MAX_SECONDS may find its mark replaced by a newer copy of the link, and that mark is the newer job's to clear."""
+    if _in_flight.get(key) == stamp:
+        _in_flight.pop(key, None)
+
+async def _answer_duplicate(update: Update) -> None:
+    """The one answer to a link that is already being fetched: a 👌 on the copy."""
+    try:
+        await update.effective_message.set_reaction("👌")
+    except Exception as exc:
+        logger.debug("Couldn't react to a repeated link (%s)", type(exc).__name__)
 
 @asynccontextmanager
 async def _user_slot(user_id: int):
@@ -3080,10 +3352,11 @@ def _free_mb() -> "int | None":
     except OSError:
         return None
 
-def _spawn_download(context, update, work) -> None:
+def _spawn_download(context, update, work, in_flight=None) -> None:
     """Run one link's whole download in a task of its own."""
     user_id = update.effective_user.id
     _user_pending[user_id] = _user_pending.get(user_id, 0) + 1
+    stamp = _in_flight.get(in_flight) if in_flight is not None else None
 
     async def run():
         try:
@@ -3094,14 +3367,51 @@ def _spawn_download(context, update, work) -> None:
                 _user_pending[user_id] = left
             else:
                 _user_pending.pop(user_id, None)
+            if in_flight is not None:
+                _clear_in_flight(in_flight, stamp)
 
     context.application.create_task(run(), update=update)
 
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help template (shared_features, "/help in two lengths")."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text", username=BOT_USERNAME or "this_bot") + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", username=BOT_USERNAME or "this_bot").rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+def _help_large_prices(lang: str, key: str) -> str:
+    return i18n.t(lang, key, free_mb=large_files.FREE_MAX_MB, max=large_files.LARGE_MAX_MB,
+                  first=large_files.first_price(), top=large_files.top_price())
+
+def _help_page_download(lang: str) -> str:
+
+    if db.DOWNLOADS_PER_DAY > 0 and db.DOWNLOADS_PER_HOUR > 0:
+
+        quota = i18n.t(lang, "helppage_download_quota",
+                       per_day=db.DOWNLOADS_PER_DAY, per_hour=db.DOWNLOADS_PER_HOUR,
+                       donor_day=int(db.DOWNLOADS_PER_DAY * db.DONOR_MULTIPLIER),
+                       donor_hour=int(db.DOWNLOADS_PER_HOUR * db.DONOR_MULTIPLIER))
+    else:
+        quota = i18n.t(lang, "helppage_download_quota_off")
+    if large_files.CONFIGURED:
+        large = i18n.t(lang, "helppage_download_large", max=large_files.LARGE_MAX_MB,
+                       first=large_files.first_price(), top=large_files.top_price())
+    else:
+        large = i18n.t(lang, "helppage_download_large_off")
+    return i18n.t(lang, "helppage_download", quota=quota, at_once=MAX_PER_USER, waiting=MAX_PENDING_PER_USER,
+                  free_mb=large_files.FREE_MAX_MB, large=large,
+                  merge_items=MERGE_MAX_ITEMS, merge_mb=MERGE_MAX_MB)
+
+def _help_page_settings(lang: str) -> str:
+    large = _help_large_prices(lang, "helppage_settings_large") + "\n" if large_files.CONFIGURED else ""
+    return i18n.t(lang, "helppage_settings", username=BOT_USERNAME or "this_bot", large=large)
+
+HELP_PAGES = {"download": _help_page_download, "settings": _help_page_settings}
+HELP_ALIASES = {}
+
+HELP_LABELS = {"download": "help_btn_download"}
 
 BOT_COMMANDS = [
 
@@ -3136,7 +3446,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES, HELP_LABELS),
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3158,9 +3468,14 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=shared_features.NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full))
+                                    reply_markup=help_keyboard(lang, full, (), HELP_PAGES, HELP_LABELS))
 
 async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> list[CancelItem]:
     """Everything this bot could be waiting on -- which is only ever the shared donation prompt."""
@@ -3383,7 +3698,26 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(timezone.utc)
     users_hour = await asyncio.to_thread(count_active_users_since, now - timedelta(hours=1))
     users_since_start = await asyncio.to_thread(count_active_users_since, START_TIME)
-    await update.message.reply_text(build_status_text(START_TIME, users_hour, users_since_start))
+    await update.message.reply_text(
+        build_status_text(START_TIME, users_hour, users_since_start) + "\n" + _cache_status_line()
+        + "\n" + _sent_files_status_line())
+
+def _cache_status_line() -> str:
+    """One line for the owner: counts only, never whose or what."""
+    stats = delivery_cache.stats()
+    if not stats["enabled"]:
+        return "Delivery cache: off"
+    return (f"Delivery cache: {stats['entries']} kept ({stats['bytes'] / (1024 * 1024):.1f} MB), "
+            f"{stats['hits']} hits / {stats['misses']} misses since start")
+
+def _sent_files_status_line() -> str:
+    """The file-id store (sent_files.py), for the owner: counts since the bot started, never whose or what."""
+    stats = sent_files.stats()
+    if not stats["enabled"]:
+        return "Sent-file store: off"
+    return (f"Sent-file store: rows read {stats['hit']} fresh / {stats['stale']} stale / {stats['miss']} none; "
+            f"lookups {stats['present']} present / {stats['missing']} missing / {stats['unknown']} unknown; "
+            f"{stats['invalid']} invalid ids, {stats['stored']} stored since start")
 
 PROVIDER_HEALTH_FLUSH_SECONDS = int(
     os.environ.get("DBOT_PROVIDER_FLUSH_SECONDS", "60"))
@@ -3473,45 +3807,85 @@ def _ago(seconds: float) -> str:
 REDELIVER_PREFIX = "redo:"
 REDELIVER_MEMORY = 5
 
+MERGE_PREFIX = "merge:"
+
 def _remember_delivery(context, platform: str, url: str, lossless: bool) -> str:
     memory = context.user_data.setdefault("redeliver", {})
     while len(memory) >= REDELIVER_MEMORY:
         memory.pop(next(iter(memory)))
     token = uuid.uuid4().hex[:10]
-    memory[token] = {"platform": platform, "url": url, "lossless": lossless}
+
+    memory[token] = {"platform": platform, "url": url, "lossless": lossless, "at": time.time()}
     return token
 
-def _spend_redo(remembered: dict) -> bool:
-    """True the first time the button is taken from this delivery, False every time after."""
-    if remembered.get("spent"):
+REDO_DELAY_BUCKETS = (
+    (60, "lt1m"), (120, "1-2m"), (300, "2-5m"), (900, "5-15m"), (3600, "15-60m"),
+)
+
+def _redo_delay_key(remembered: dict) -> str:
+    at = remembered.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return "redo.after.unknown"
+    seconds = time.time() - at
+    for limit, name in REDO_DELAY_BUCKETS:
+        if seconds < limit:
+            return f"redo.after.{name}"
+    return "redo.after.gt60m"
+
+def _spend_action(remembered: dict, action: str) -> bool:
+    """True the first time `action` ("redo", "pdf" or "zip") is taken from this delivery, False every time after."""
+    spent = remembered.setdefault("spent", [])
+    if not isinstance(spent, list):
+
+        spent = remembered["spent"] = ["redo"]
+    if action in spent:
         return False
-    remembered["spent"] = True
+    spent.append(action)
     return True
 
-def _unspend_redo(remembered: dict) -> None:
-    """Give the button back: the tap that spent it came to nothing (the person was out of downloads), so it is theirs to tap again."""
-    remembered.pop("spent", None)
+def _unspend_action(remembered: dict, action: str) -> None:
+    """Give `action` back: the tap that spent it came to nothing (the person was out of downloads), so the button is theirs to tap again."""
+    spent = remembered.get("spent", [])
+    if isinstance(spent, list) and action in spent:
+        spent.remove(action)
+
+def _remembered_kb(lang: str, token: str, remembered: dict):
+    """The keyboard of a delivered album as it stands now: the same buttons it was first sent with (the counts are kept in `remembered` by _send_media), less every action already taken."""
+    return _nudge_kb(lang, token, remembered.get("lossless", False),
+                     photos=remembered.get("photos", 0), items=remembered.get("items", 0),
+                     spent=remembered.get("spent") if isinstance(remembered.get("spent"), (list, tuple))
+                     else ("redo",) if remembered.get("spent") else ())
 
 def _nudge_kb(lang: str | None = None, token: str | None = None,
-              lossless: bool = False) -> InlineKeyboardMarkup | None:
+              lossless: bool = False, photos: int = 0,
+              items: int = 0, spent=()) -> InlineKeyboardMarkup | None:
 
     rows = []
     if lang is not None and token is not None:
 
-        rows.append([InlineKeyboardButton(
-            i18n.t(lang, "redeliver_as_compressed" if lossless else "redeliver_as_file"),
-            callback_data=f"{REDELIVER_PREFIX}{token}")])
+        if "redo" not in spent:
+            rows.append([InlineKeyboardButton(
+                i18n.t(lang, "redeliver_as_compressed" if lossless else "redeliver_as_file"),
+                callback_data=f"{REDELIVER_PREFIX}{token}")])
+
+        merge_row = []
+        if photos >= merge.MIN_PDF_PHOTOS and "pdf" not in spent:
+            merge_row.append(InlineKeyboardButton("📄 PDF", callback_data=f"{MERGE_PREFIX}pdf:{token}"))
+        if items >= merge.MIN_ZIP_ITEMS and "zip" not in spent:
+            merge_row.append(InlineKeyboardButton("🗜 ZIP", callback_data=f"{MERGE_PREFIX}zip:{token}"))
+        if merge_row:
+            rows.append(merge_row)
     kb_row = sibling_bots_keyboard_row(BOT_NAME, only="convertbot")
     if kb_row:
         rows.append(kb_row)
     return InlineKeyboardMarkup(rows) if rows else None
 
-async def _set_buttons(query, markup) -> None:
-    """Put `markup` under the message the tapped button was on."""
+async def _take_button_off(query, lang: str, token: str, remembered: dict) -> None:
+    """Put the delivery's keyboard under the message as it now stands (see _remembered_kb): the buttons of the actions spent are gone, the rest stay."""
     try:
-        await query.edit_message_reply_markup(reply_markup=markup)
+        await query.edit_message_reply_markup(reply_markup=_remembered_kb(lang, token, remembered))
     except Exception:
-        logger.debug("Couldn't change the delivery's button", exc_info=True)
+        logger.debug("Couldn't change the delivery's buttons", exc_info=True)
 
 async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The button under a finished download."""
@@ -3519,18 +3893,25 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = await i18n.get_lang(update.effective_user.id, context)
     token = query.data[len(REDELIVER_PREFIX):]
     remembered = context.user_data.get("redeliver", {}).get(token)
-    if not remembered or not _spend_redo(remembered):
+    if not remembered or not _spend_action(remembered, "redo"):
+
+        note_tap("redo.spent" if remembered else "redo.expired")
         await query.answer(i18n.t(lang, "redeliver_expired"), show_alert=True)
         return
     await query.answer()
 
-    await _set_buttons(query, _nudge_kb())
+    note_tap("redo.to_compressed" if remembered.get("lossless") else "redo.to_file")
+    note_tap(_redo_delay_key(remembered))
+
+    delivery_cache.note_link(update.effective_user.id, remembered["platform"], remembered["url"])
+
+    await _take_button_off(query, lang, token, remembered)
 
     allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
     if not allowance["allowed"]:
 
-        _unspend_redo(remembered)
-        await _set_buttons(query, _nudge_kb(lang, token, remembered["lossless"]))
+        _unspend_action(remembered, "redo")
+        await _take_button_off(query, lang, token, remembered)
         await query.message.reply_text(_allowance_message(lang, allowance))
         return
     await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
@@ -3538,10 +3919,167 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     async def work():
         await _resolve_and_send(
             update, context, remembered["platform"], remembered["url"],
-            lossless_override=not remembered["lossless"],
+            lossless_override=not remembered["lossless"], from_redo=True,
         )
 
     _spawn_download(context, update, work)
+
+class _MergeStop(Exception):
+    """The merge ends here, with this message (an i18n key) to the person."""
+
+    def __init__(self, key: str):
+        super().__init__(key)
+        self.key = key
+
+def _merge_text(lang: str, key: str) -> str:
+
+    return i18n.t(lang, key, items=MERGE_MAX_ITEMS, mb=MERGE_MAX_MB, mp=merge.MAX_MEGAPIXELS)
+
+def _remove_files(paths) -> None:
+    for path in paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            logger.warning("couldn't remove %s", path)
+
+async def merge_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The 📄 PDF and 🗜 ZIP buttons under a delivered album."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    kind, _, token = query.data[len(MERGE_PREFIX):].partition(":")
+
+    remembered = context.user_data.get("redeliver", {}).get(token) if kind in ("pdf", "zip") else None
+    if not remembered or not _spend_action(remembered, kind):
+        if not remembered:
+            note_tap("merge.expired")
+        await query.answer(i18n.t(lang, "redeliver_expired"), show_alert=True)
+        return
+    await query.answer()
+
+    await _take_button_off(query, lang, token, remembered)
+
+    allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
+    if not allowance["allowed"]:
+
+        _unspend_action(remembered, kind)
+        await _take_button_off(query, lang, token, remembered)
+        await query.message.reply_text(_allowance_message(lang, allowance))
+        return
+
+    await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
+
+    async def work():
+        await _merge_and_send(update, context, kind, remembered["platform"], remembered["url"])
+
+    _spawn_download(context, update, work)
+
+async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          kind: str, platform: str, url: str) -> bool:
+    """Fetch the post again, build one PDF (its photos) or one ZIP (all of it), send it as a document, delete everything."""
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    user_id, chat_id = update.effective_user.id, update.effective_chat.id
+    message = update.effective_message
+    refusal = await refuse_new_work(lang, user_id, chat_id)
+    if refusal:
+        await message.reply_text(refusal)
+        return False
+
+    status = await LiveMessage.reply_to(message, i18n.t(lang, "fetching"))
+    if _slots().locked() or _user_slots_full(user_id):
+        await status.set(context.bot, i18n.t(lang, "queued"))
+
+    paths: list[str] = []
+    resolved = None
+
+    out_path = os.path.join(resolvers._WORK_DIR, f"{uuid.uuid4().hex}.{kind}")
+    async with _user_slot(user_id), _slots(), lifecycle.busy(
+            chat_id, i18n.t(lang, "restarting_send_again")):
+
+        _make_room(MERGE_MAX_MB * 2)
+        free = _free_mb()
+        if free is not None and free < MIN_FREE_MB:
+            await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
+            return False
+        try:
+            try:
+                resolved = await resolvers.resolve(platform, url)
+            except resolvers.NothingWorked as exc:
+                logger.info("no route worked for %s (merge): %s", platform, exc)
+                if exc.kind not in ("missing", "too_big"):
+                    note_job(False)
+                raise _MergeStop({
+                    "missing": "download_missing",
+                    "blocked": "download_blocked",
+                    "too_big": "merge_too_big",
+                }.get(exc.kind, "download_all_routes_failed"))
+
+            wanted = [item for item in resolved.items if item.kind == "photo"] \
+                if kind == "pdf" else list(resolved.items)
+            if kind == "pdf" and len(wanted) < merge.MIN_PDF_PHOTOS:
+                raise _MergeStop("merge_no_photos")
+            if len(wanted) > MERGE_MAX_ITEMS:
+                raise _MergeStop("merge_too_big")
+
+            await status.set(context.bot, i18n.t(lang, "downloading"))
+            total = 0
+            for item in wanted:
+                paths.append(await resolvers.download(item))
+                total += os.path.getsize(paths[-1])
+                if total > MERGE_MAX_MB * 1024 * 1024:
+                    raise _MergeStop("merge_too_big")
+
+            if kind == "pdf":
+
+                try:
+                    await merge.build_pdf_queued(paths, out_path)
+                except (merge.NothingToMerge, merge.NotAPhoto):
+
+                    raise _MergeStop("merge_no_photos")
+            else:
+                await asyncio.to_thread(merge.build_zip, paths, out_path)
+            if os.path.getsize(out_path) > large_files.BOT_API_SEND_BYTES:
+
+                raise _MergeStop("merge_too_big")
+
+            caption = None
+            if await asyncio.to_thread(get_caption_enabled, user_id):
+                caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+            with open(out_path, "rb") as handle:
+
+                await message.reply_document(
+                    handle, filename=merge.output_name(platform, kind),
+                    caption=caption, read_timeout=120, write_timeout=120,
+                    disable_content_type_detection=True,
+                )
+            await status.delete(context.bot)
+            note_job(True)
+        except _MergeStop as stop:
+            await status.set(context.bot, _merge_text(lang, stop.key), **NO_PREVIEW)
+            return False
+        except net.TooLarge:
+            await status.set(context.bot, _merge_text(lang, "merge_too_big"), **NO_PREVIEW)
+            return False
+        except merge.PictureTooLarge as exc:
+            logger.info("merge refused a picture: %s", exc)
+            await status.set(context.bot, _merge_text(lang, "merge_picture_too_big"), **NO_PREVIEW)
+            return False
+        except net.FetchError as exc:
+            note_job(False)
+            await status.set(context.bot, str(exc), **NO_PREVIEW)
+            return False
+        except Exception:
+            note_job(False)
+            logger.exception("Merging %s (%s) failed", platform, kind)
+            await status.set(context.bot, _merge_text(lang, "merge_failed"), **NO_PREVIEW)
+            return False
+        finally:
+
+            _remove_files(paths + [item.path for item in (resolved.items if resolved else [])]
+                          + [out_path])
+
+    await _after_send(update, context, lang)
+    return True
 
 async def _after_send(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     nudge = await maybe_donation_nudge(
@@ -3588,44 +4126,98 @@ async def _reply_image(update: Update, data: bytes, stem: str, reply_markup=None
     return await update.effective_message.reply_photo(
         BytesIO(data), reply_markup=reply_markup)
 
+@contextmanager
+def _media_source(item, path):
+    """What goes to Telegram for one file: its stored file id (sent_files.StoredFile), or the file on disk, opened to be streamed."""
+    stored = getattr(item, "file_id", None)
+    if stored:
+        yield stored
+    else:
+        with open(path, "rb") as handle:
+            yield handle
+
+def _file_id_of(sent, kind: str, lossless: bool) -> "str | None":
+    """The file id Telegram gave the message `sent`, or None when it does not carry the kind of file the form expects: a clip with no sound that Telegram turned into an animation, say."""
+    try:
+        if lossless:
+            attached = sent.document
+        elif kind == "video":
+            attached = sent.video
+        else:
+            photos = sent.photo
+            attached = photos[-1] if photos else None
+        file_id = attached.file_id if attached is not None else None
+    except (AttributeError, IndexError, TypeError):
+        return None
+    return file_id if isinstance(file_id, str) and file_id else None
+
 async def _send_media(update, context, items_with_paths, lang,
-                      lossless: bool | None = None, redeliver_token: str | None = None) -> None:
+                      lossless: bool | None = None, redeliver_token: str | None = None,
+                      probing: "video.ProbeRun | None" = None) -> "list[tuple[str, str]] | None":
     """Put what was resolved into the chat."""
     caption = None
     if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
     if lossless is None:
         lossless = await asyncio.to_thread(get_lossless_enabled, update.effective_user.id)
-    keyboard = _nudge_kb(lang, redeliver_token, lossless)
+    if probing is None:
+        probing = video.ProbeRun()
+
+    async def shape_of(path: str) -> dict:
+        """The keyword arguments that give a video its shape; none when it could not be measured."""
+        if probing.exhausted:
+            return {}
+        shape = await video.probe(path, probing)
+        if shape is None:
+            return {}
+        fields = {"width": shape.width, "height": shape.height}
+        if shape.duration is not None:
+            fields["duration"] = shape.duration
+        return fields
+
+    photos = sum(1 for item, _ in items_with_paths if item.kind == "photo")
+
+    remembered = context.user_data.get("redeliver", {}).get(redeliver_token)
+    if remembered is not None:
+        remembered["photos"], remembered["items"] = photos, len(items_with_paths)
+    keyboard = _nudge_kb(lang, redeliver_token, lossless, photos=photos, items=len(items_with_paths))
 
     message = update.effective_message
 
     if len(items_with_paths) == 1:
         item, path = items_with_paths[0]
+        shape = (await shape_of(path) if item.kind == "video" and not lossless
+                 and not getattr(item, "file_id", None) else {})
 
-        with open(path, "rb") as f:
+        with _media_source(item, path) as f:
             if lossless:
-                await message.reply_document(
+                sent = await message.reply_document(
                     f, filename=os.path.basename(item.filename or path),
                     caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                     disable_content_type_detection=True,
                 )
             elif item.kind == "video":
-                await message.reply_video(
+                sent = await message.reply_video(
                     f, caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
+                    **shape,
                 )
             else:
-                await message.reply_photo(
+                sent = await message.reply_photo(
                     f, caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                 )
-        return
+        file_id = _file_id_of(sent, item.kind, lossless)
+        return [(item.kind, file_id)] if file_id else None
 
+    sent_ids: "list[tuple[str, str]] | None" = []
     for chunk_start in range(0, len(items_with_paths), 10):
         chunk = items_with_paths[chunk_start:chunk_start + 10]
-        handles = [open(path, "rb") for _, path in chunk]
+        shapes = [await shape_of(path) if item.kind == "video" and not lossless
+                  and not getattr(item, "file_id", None) else {}
+                  for item, path in chunk]
+        handles = [getattr(item, "file_id", None) or open(path, "rb") for item, path in chunk]
         try:
             group = []
             for n, ((item, path), handle) in enumerate(zip(chunk, handles)):
@@ -3635,24 +4227,125 @@ async def _send_media(update, context, items_with_paths, lang,
                         handle, filename=os.path.basename(item.filename or path),
                         caption=cap, disable_content_type_detection=True))
                 elif item.kind == "video":
-                    group.append(InputMediaVideo(handle, caption=cap))
+                    group.append(InputMediaVideo(handle, caption=cap, **shapes[n]))
                 else:
                     group.append(InputMediaPhoto(handle, caption=cap))
-            await message.reply_media_group(
+            sent_group = await message.reply_media_group(
                 group, read_timeout=120, write_timeout=120)
         finally:
             for handle in handles:
-                handle.close()
+                if not isinstance(handle, str):
+                    handle.close()
+        try:
+            sent_group = list(sent_group)
+        except TypeError:
+            sent_group = []
+        file_ids = [_file_id_of(sent, item.kind, lossless) for (item, _), sent in zip(chunk, sent_group)]
+        if sent_ids is not None and len(sent_group) == len(chunk) and all(file_ids):
+            sent_ids += [(item.kind, file_id) for (item, _), file_id in zip(chunk, file_ids)]
+        else:
+            sent_ids = None
 
     if keyboard is not None:
         await message.reply_text(
             i18n.t(lang, "album_delivered", count=len(items_with_paths)),
             reply_markup=keyboard)
+    return sent_ids
+
+async def _store_sent_files(user_id: int, platform: str, url: str, lossless: bool, sent) -> None:
+    """After a delivery from bytes: keep the file ids Telegram gave (sent_files.py), so the next person who sends this post gets it without a download."""
+    if not sent_files.usable(user_id) or not sent:
+        return
+    try:
+        text = sent_files.encode_items(sent)
+        if text is None:
+            return
+        await asyncio.to_thread(sent_files_put, sent_files.post_key(platform, url, lossless), text)
+        sent_files.note("stored")
+    except Exception as exc:
+        logger.warning("The sent-file store could not be written (%s)", type(exc).__name__)
+
+async def _forget_sent_files(key: str) -> None:
+    try:
+        await asyncio.to_thread(sent_files_drop, key)
+    except Exception as exc:
+        logger.warning("The sent-file store could not drop a row (%s)", type(exc).__name__)
+
+async def _resend_by_file_id(update, context, lang, status, platform: str, url: str,
+                             lossless_override: "bool | None") -> "bool | None":
+    """Send this post again from the file ids stored when it was last delivered (sent_files.py), if there are any and the post is known to be public still."""
+    user_id = update.effective_user.id
+    if not sent_files.usable(user_id):
+        return None
+    try:
+        if lossless_override is None:
+            lossless = await asyncio.to_thread(get_lossless_enabled, user_id)
+        else:
+            lossless = lossless_override
+        key = sent_files.post_key(platform, url, lossless)
+        row = await asyncio.to_thread(sent_files_get, key)
+    except Exception as exc:
+
+        logger.warning("The sent-file store could not be read (%s)", type(exc).__name__)
+        sent_files.note("miss")
+        return None
+    pairs = sent_files.decode_items(row[0]) if row else None
+    if pairs is None:
+        sent_files.note("miss")
+        return None
+    fresh = sent_files.is_fresh(row[1])
+    sent_files.note("hit" if fresh else "stale")
+
+    async with lifecycle.busy(update.effective_chat.id, i18n.t(lang, "restarting_send_again")):
+        if not fresh:
+            try:
+                async with _lookups():
+                    verdict = await resolvers.lookup(platform, url)
+            except Exception as exc:
+                logger.warning("The post could not be looked up (%s)", type(exc).__name__)
+                verdict = "unknown"
+            sent_files.note(verdict if verdict in ("present", "missing") else "unknown")
+            if verdict == "missing":
+                await _forget_sent_files(key)
+                return None
+            if verdict != "present":
+                return None
+        token = _remember_delivery(context, platform, url, lossless)
+        try:
+            await _send_media(update, context, [(file, None) for file in sent_files.stored_files(pairs)], lang,
+                              lossless=lossless, redeliver_token=token)
+            await status.delete(context.bot)
+            note_job(True)
+        except Exception as exc:
+            if isinstance(exc, BadRequest):
+
+                await _forget_sent_files(key)
+            if sent_files.is_invalid_file_id(exc):
+
+                sent_files.note("invalid")
+                logger.info("A stored file id was refused (%s)", type(exc).__name__)
+                context.user_data.get("redeliver", {}).pop(token, None)
+                return None
+            note_job(False)
+
+            logger.warning("Delivering %s from the stored file ids failed (%s)", platform,
+                           type(exc).__name__)
+            await status.set(context.bot,
+                             i18n.t(lang, "download_failed", error=type(exc).__name__),
+                             **NO_PREVIEW)
+            return False
+    try:
+
+        await asyncio.to_thread(sent_files_used if fresh else sent_files_confirmed, key)
+    except Exception as exc:
+        logger.warning("The sent-file store could not be updated (%s)", type(exc).__name__)
+    return True
 
 async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                             platform: str, url: str, status=None,
                             quiet_if_missing: bool = False,
-                            lossless_override: bool | None = None) -> bool:
+                            lossless_override: bool | None = None,
+                            from_redo: bool = False) -> bool:
     """The whole download path: pick a route that is working, fetch, send."""
     lang = await i18n.get_lang(update.effective_user.id, context)
 
@@ -3672,77 +4365,120 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
     else:
         await status.set(context.bot, i18n.t(lang, "fetching"))
 
+    resent = await _resend_by_file_id(update, context, lang, status, platform, url, lossless_override)
+    if resent is not None:
+        if resent:
+            await _after_send(update, context, lang)
+        return resent
+
     if _slots().locked() or _user_slots_full(update.effective_user.id):
         await status.set(context.bot, i18n.t(lang, "queued"))
 
     paths: list[str] = []
     async with _user_slot(update.effective_user.id), _slots(), lifecycle.busy(
             update.effective_chat.id, i18n.t(lang, "restarting_send_again")):
-        free = _free_mb()
-        if free is not None and free < MIN_FREE_MB:
-            await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
-            return False
-        try:
-            resolved = await resolvers.resolve(platform, url)
-        except resolvers.NothingWorked as exc:
-            logger.info("no route worked for %s: %s", platform, exc)
-            if exc.kind == "missing" and quiet_if_missing:
-                return False
 
-            if exc.kind == "too_big" and large_files.CONFIGURED:
-                return await _large_download(update, context, status, lang, platform, url)
-            if exc.kind not in ("missing", "too_big"):
+        cached = delivery_cache.take(update.effective_user.id, platform, url)
+        if from_redo and delivery_cache.usable(update.effective_user.id):
+            note_tap("redo.cache.hit" if cached is not None else "redo.cache.miss")
+        if cached is not None:
+            try:
+                if lossless_override is None:
+                    delivered_lossless = await asyncio.to_thread(
+                        get_lossless_enabled, update.effective_user.id)
+                else:
+                    delivered_lossless = lossless_override
+                token = _remember_delivery(context, platform, url, delivered_lossless)
+
+                await _send_media(update, context, list(cached.items), lang,
+                                  lossless=delivered_lossless, redeliver_token=token)
+                await status.delete(context.bot)
+                note_job(True)
+            except Exception as exc:
                 note_job(False)
-            key = {
-                "missing": "download_missing",
-                "blocked": "download_blocked",
-                "too_big": "download_too_big",
-            }.get(exc.kind, "download_all_routes_failed")
 
-            await status.set(context.bot, i18n.t(lang, key), **NO_PREVIEW)
-            return False
-
-        try:
-            await status.set(context.bot, i18n.t(lang, "downloading"))
-            items = resolved.items
-            for item in items:
-                paths.append(await resolvers.download(item))
-            if lossless_override is None:
-                delivered_lossless = await asyncio.to_thread(
-                    get_lossless_enabled, update.effective_user.id)
-            else:
-                delivered_lossless = lossless_override
-            token = _remember_delivery(context, platform, url, delivered_lossless)
-            await _send_media(update, context, list(zip(items, paths)), lang,
-                              lossless=delivered_lossless, redeliver_token=token)
-            await status.delete(context.bot)
-            note_job(True)
-        except net.TooLarge as exc:
-            if not large_files.CONFIGURED:
-                await status.set(context.bot, str(exc), **NO_PREVIEW)
+                logger.warning("Delivering %s from the kept files failed (%s)", platform,
+                               type(exc).__name__)
+                await status.set(context.bot,
+                                 i18n.t(lang, "download_failed", error=type(exc).__name__),
+                                 **NO_PREVIEW)
                 return False
-            for path in paths:
-                if path and os.path.exists(path):
-                    os.remove(path)
-            paths.clear()
-            return await _large_download(update, context, status, lang, platform, url)
-        except net.FetchError as exc:
-            note_job(False)
-            await status.set(context.bot, str(exc), **NO_PREVIEW)
-            return False
-        except Exception as exc:
-            note_job(False)
-            logger.exception("Delivering %s via %s failed", platform, resolved.provider)
-            await status.set(context.bot, i18n.t(lang, "download_failed", error=exc),
-                             **NO_PREVIEW)
-            return False
-        finally:
-            for path in paths:
-                try:
+            finally:
+                delivery_cache.release(cached)
+        else:
+            free = _free_mb()
+            if free is not None and free < MIN_FREE_MB:
+                await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
+                return False
+            try:
+                resolved = await resolvers.resolve(platform, url)
+            except resolvers.NothingWorked as exc:
+                logger.info("no route worked for %s: %s", platform, exc)
+                if exc.kind == "missing" and quiet_if_missing:
+                    return False
+
+                if exc.kind == "too_big" and large_files.CONFIGURED:
+                    return await _large_download(update, context, status, lang, platform, url)
+                if exc.kind not in ("missing", "too_big"):
+                    note_job(False)
+                key = {
+                    "missing": "download_missing",
+                    "blocked": "download_blocked",
+                    "too_big": "download_too_big",
+                }.get(exc.kind, "download_all_routes_failed")
+
+                await status.set(context.bot, i18n.t(lang, key), **NO_PREVIEW)
+                return False
+
+            try:
+                await status.set(context.bot, i18n.t(lang, "downloading"))
+                items = resolved.items
+                for item in items:
+                    paths.append(await resolvers.download(item))
+                if lossless_override is None:
+                    delivered_lossless = await asyncio.to_thread(
+                        get_lossless_enabled, update.effective_user.id)
+                else:
+                    delivered_lossless = lossless_override
+                token = _remember_delivery(context, platform, url, delivered_lossless)
+                sent = await _send_media(update, context, list(zip(items, paths)), lang,
+                                         lossless=delivered_lossless, redeliver_token=token)
+                await status.delete(context.bot)
+                note_job(True)
+
+                kept = delivery_cache.keep(update.effective_user.id, platform, url,
+                                           list(zip(items, paths)), _cache_floor_mb())
+                if delivery_cache.usable(update.effective_user.id):
+                    note_tap("cache.kept" if kept else "cache.not_kept")
+                if kept:
+                    paths.clear()
+                await _store_sent_files(update.effective_user.id, platform, url, delivered_lossless, sent)
+            except net.TooLarge as exc:
+                if not large_files.CONFIGURED:
+                    await status.set(context.bot, str(exc), **NO_PREVIEW)
+                    return False
+                for path in paths:
                     if path and os.path.exists(path):
                         os.remove(path)
-                except OSError:
-                    logger.warning("couldn't remove %s", path)
+                paths.clear()
+                return await _large_download(update, context, status, lang, platform, url)
+            except net.FetchError as exc:
+                note_job(False)
+                await status.set(context.bot, str(exc), **NO_PREVIEW)
+                return False
+            except Exception as exc:
+                note_job(False)
+                logger.exception("Delivering %s via %s failed", platform, resolved.provider)
+                await status.set(context.bot, i18n.t(lang, "download_failed", error=exc),
+                                 **NO_PREVIEW)
+                return False
+            finally:
+                for path in paths:
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except OSError:
+                        logger.warning("couldn't remove %s", path)
 
     await _after_send(update, context, lang)
     return True
@@ -3764,6 +4500,7 @@ async def _large_download(update, context, status, lang, platform: str, url: str
         await status.set(context.bot, i18n.t(lang, "large_files_no_credit", free=free, per=per, balance=balance))
         return False
 
+    _make_room(large_files.LARGE_MAX_MB)
     await status.set(context.bot, i18n.t(lang, "large_files_fetching", free=free, per=per))
     paths: list[str] = []
     try:
@@ -3818,12 +4555,13 @@ async def _send_large(update, context, items_with_paths, lang) -> None:
     caption = None
     if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+    probing = video.ProbeRun()
     for item, path in items_with_paths:
         if os.path.getsize(path) > large_files.BOT_API_SEND_BYTES:
             await big_files.send_document(update.effective_chat.id, path,
                                           os.path.basename(item.filename or path), caption or "")
         else:
-            await _send_media(update, context, [(item, path)], lang)
+            await _send_media(update, context, [(item, path)], lang, probing=probing)
 
 async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     """Reddit is the one platform where the *text* is often the point, so the post is read first and only media posts go near the download path."""
@@ -3908,31 +4646,50 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     platform, url = detected
 
-    lang = await i18n.get_lang(update.effective_user.id, context)
-    refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
-    if refusal:
-        await update.message.reply_text(refusal)
-        return
+    found = delivery_cache.note_link(update.effective_user.id, platform, url)
+    if found == delivery_cache.NOTED_AGAIN_CACHED:
+        note_tap("link.again.cached")
+    elif found == delivery_cache.NOTED_AGAIN_NOT_CACHED:
+        note_tap("link.again.not_cached")
 
-    if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
-        await update.message.reply_text(
-            i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
+    key = (update.effective_chat.id, update.effective_user.id, platform, url)
+    if _already_in_flight(key):
+        await _answer_duplicate(update)
         return
-    allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
-    if not allowance["allowed"]:
-        await update.message.reply_text(_allowance_message(lang, allowance))
-        return
-    await asyncio.to_thread(record_download, update.effective_user.id, platform)
+    stamp = _in_flight[key] = time.monotonic()
+    spawned = False
+    try:
 
-    async def work():
-        if platform == "reddit":
-            await _handle_reddit(update, context, url)
-        elif platform == "twitter":
-            await _handle_twitter(update, context, url)
-        else:
-            await _resolve_and_send(update, context, platform, url)
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
+        if refusal:
+            await update.message.reply_text(refusal)
+            return
 
-    _spawn_download(context, update, work)
+        if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
+            await update.message.reply_text(
+                i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
+            return
+        allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
+        if not allowance["allowed"]:
+            await update.message.reply_text(_allowance_message(lang, allowance))
+            return
+        await asyncio.to_thread(record_download, update.effective_user.id, platform)
+
+        async def work():
+            if platform == "reddit":
+                await _handle_reddit(update, context, url)
+            elif platform == "twitter":
+                await _handle_twitter(update, context, url)
+            else:
+                await _resolve_and_send(update, context, platform, url)
+
+        _spawn_download(context, update, work, in_flight=key)
+        spawned = True
+    finally:
+
+        if not spawned:
+            _clear_in_flight(key, stamp)
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Catches anything that isn't a recognized link and isn't a known command -- registered last, so it only fires when nothing else already handled the update."""
@@ -3942,6 +4699,14 @@ async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYP
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.message.reply_text(i18n.t(lang, "unknown_command"))
+
+async def _delete_my_data_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The shared erase button, and what only this bot holds on top of what it erases: the person's kept delivery (delivery_cache.py), and the memory the redo buttons read their links from."""
+    query = update.callback_query
+    if query is not None and query.data == ERASE_PREFIX + "yes":
+        delivery_cache.forget_user(update.effective_user.id)
+        context.user_data.pop("redeliver", None)
+    return await delete_my_data_chosen(update, context)
 
 async def _post_init(application):
     await tune_runtime(application)
@@ -3961,12 +4726,26 @@ async def _post_init(application):
     routewatch.schedule(application)
 
     await lifecycle.on_start(BOT_NAME)
+
+    delivery_cache.wipe()
+    if application.job_queue is not None:
+        application.job_queue.run_repeating(
+            _sweep_delivery_cache, interval=DELIVERY_CACHE_SWEEP_SECONDS,
+            first=DELIVERY_CACHE_SWEEP_SECONDS)
     await publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS)
     await publish_profile(application)
     if big_files.CONFIGURED:
         task = asyncio.get_running_loop().create_task(_check_big_files())
         _background.add(task)
         task.add_done_callback(_background.discard)
+
+DELIVERY_CACHE_SWEEP_SECONDS = 15
+
+async def _sweep_delivery_cache(_context=None) -> None:
+    try:
+        delivery_cache.sweep()
+    except Exception as exc:
+        logger.warning("The delivery cache sweep failed (%s)", type(exc).__name__)
 
 async def _check_big_files() -> None:
     """In the background, as the bot starts: an API id and hash that are set but wrong turn large files off here -- no switch, 48 MB, as if they were not set -- instead of failing the first person who asks for one."""
@@ -4008,12 +4787,17 @@ def main():
 
     attach_flood_gate(app, ADMIN_IDS)
 
+    attach_promo_claim(app)
+
     app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
                                    awaited_text_received), group=-1)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, None, HELP_PAGES, HELP_LABELS)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, None, HELP_PAGES, HELP_LABELS),
+                                         pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("settings", settings_command))
@@ -4027,6 +4811,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lossless_toggle_callback, pattern="^lossless:"))
     app.add_handler(CallbackQueryHandler(large_toggle_callback, pattern="^large:"))
     app.add_handler(CallbackQueryHandler(redeliver_callback, pattern="^redo:"))
+    app.add_handler(CallbackQueryHandler(merge_callback, pattern="^merge:"))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"))
     app.add_handler(CallbackQueryHandler(language_chosen, pattern="^setlang:"))
     app.add_handler(CommandHandler("language", language_command))
@@ -4040,7 +4825,7 @@ def main():
     app.add_handler(CommandHandler("paysupport", paysupport_command))
     app.add_handler(CallbackQueryHandler(problem_report_callback, pattern=r"^rpt"))
     app.add_handler(CommandHandler("deletemydata", delete_my_data_command))
-    app.add_handler(CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
+    app.add_handler(CallbackQueryHandler(_delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(platforms.ANY_LINK_RE), handle_link))
 
     app.add_handler(CommandHandler("balance", balance_command))
@@ -4113,10 +4898,12 @@ from telegram.ext import (
     filters,
 )
 
+import db
 import family_link
 import i18n
 import lifecycle
 import live_message
+import shared_features
 import transcript
 from live_message import LiveMessage, edit_in_place
 from anon_logic import (
@@ -4131,6 +4918,7 @@ from anon_logic import (
 from db import (
     CONVERSATIONS_PER_PAGE,
     RELAY_RETENTION_DAYS,
+    claim_promo_seen,
     claim_reactions_note,
     clear_follower_state,
     count_owner_conversation_states,
@@ -4181,7 +4969,12 @@ from shared_features import (
     awaited_text_received,
     feedback_command,
     FORCE_REPLY_KEY,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    full_help_command,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_keyboard,
     help_toggle,
     wants_full_help,
@@ -4244,9 +5037,24 @@ async def _reply(update: Update, text: str, **kwargs):
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help template (shared_features, "/help in two lengths")."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return (i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS))
-            + sibling_bots_blurb(BOT_NAME, lang))
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS)).rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+def _help_page_link(lang: str) -> str:
+    return i18n.t(lang, "helppage_link")
+
+def _help_page_export(lang: str) -> str:
+    return i18n.t(lang, "helppage_export", max=transcript.MAX_MESSAGES, days=db.RELAY_RETENTION_DAYS)
+
+def _help_page_which(lang: str) -> str:
+
+    return i18n.t(lang, "helppage_which", example=i18n.t(lang, "which_owner", conv_number=4))
+
+HELP_PAGES = {"link": _help_page_link, "export": _help_page_export, "which": _help_page_which}
+HELP_ALIASES = {}
 
 BOT_COMMANDS = [
 
@@ -4301,7 +5109,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES),
     )
 
     await _knows_reactions(context, update.effective_user.id)
@@ -4407,9 +5215,22 @@ async def start_follow_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=shared_features.NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full))
+                                    reply_markup=help_keyboard(lang, full, (), HELP_PAGES))
+    await _knows_reactions(context, update.effective_user.id)
+
+_full_help = full_help_command(build_help_text, None, HELP_PAGES)
+
+async def fullhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/fullhelp: what /help full gives -- which lists every reaction, so whoever reads it has been told about reactions too."""
+    await _full_help(update, context)
     await _knows_reactions(context, update.effective_user.id)
 
 def _link_message(token: str, paused: bool, lang: str, note: str = "",
@@ -5514,6 +6335,69 @@ async def reactions_update_note(update: Update, context: ContextTypes.DEFAULT_TY
         await context.bot.send_message(chat_id=chat.id, text=i18n.t(lang, "reactions_update_note"))
     except Exception:
         logger.debug("Could not send the reactions note", exc_info=True)
+        return
+
+    context.user_data[NOTE_UPDATE_KEY] = update.update_id
+
+PROMO_AD_KEY = "_promo_ad"
+
+NOTE_UPDATE_KEY = "_note_update"
+
+_NO_AD_COMMANDS = {"/deletemydata", "/privacy", "/terms"}
+
+def _no_ad_after(message) -> bool:
+    """Is this one of the commands the gift's ad never follows?"""
+    words = (message.text or "").split(None, 1)
+    return bool(words) and words[0].split("@", 1)[0].lower() in _NO_AD_COMMANDS
+
+async def promo_ad_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After whatever somebody came to do, and after the reactions note: if the gift is open and they have not had it nor been shown this ad, show it once."""
+    message, user, chat = update.message, update.effective_user, update.effective_chat
+    if message is None or user is None or chat is None or chat.type != "private":
+        return
+    if getattr(user, "is_bot", False):
+        return
+
+    words = (message.text or "").split(None, 1)
+    if len(words) == 2 and words[0].split("@", 1)[0].lower() == "/start":
+        return
+
+    if _no_ad_after(message):
+        return
+    if FORCE_REPLY_KEY in context.user_data:
+        return
+    if context.user_data.get(NOTE_UPDATE_KEY) == update.update_id:
+        return
+    if context.user_data.get(PROMO_AD_KEY) == family_link.PROMO_KEY:
+        return
+    try:
+        window = await asyncio.to_thread(family_link.promo_window)
+
+        if window is None or not window[0] <= datetime.now(timezone.utc) < window[1]:
+            return
+
+        row = (sibling_bots_keyboard_row(BOT_NAME, only="downloaderbot")
+               + sibling_bots_keyboard_row(BOT_NAME, only="convertbot"))
+        if not row:
+            return
+
+        lang = await asyncio.to_thread(get_user_language, user.id)
+        if not lang:
+            return
+        if await asyncio.to_thread(family_link.promo_given_to, user.id):
+            context.user_data[PROMO_AD_KEY] = family_link.PROMO_KEY
+            return
+        shown_now = await asyncio.to_thread(claim_promo_seen, user.id, family_link.PROMO_KEY)
+        context.user_data[PROMO_AD_KEY] = family_link.PROMO_KEY
+        if not shown_now:
+            return
+        await context.bot.send_message(
+            chat_id=chat.id, text=family_link.promo_ad(lang, window[1]),
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([row]), **NO_PREVIEW,
+        )
+    except Exception as exc:
+
+        logger.debug("The gift ad was not shown (%s)", type(exc).__name__)
 
 async def _route_into(update: Update, context: ContextTypes.DEFAULT_TYPE,
                       conversation_id: int, conv: dict | None = None,
@@ -5615,6 +6499,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("fullhelp", fullhelp_command))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("link", link_command))
@@ -5644,7 +6529,8 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
 
     app.add_handler(CallbackQueryHandler(language_chosen, pattern=r"^setlang:"))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, None, HELP_PAGES), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern=r"^cancelpick:"))
     app.add_handler(CallbackQueryHandler(anonlink_toggle_callback, pattern=r"^anonlink:toggle$"))
     app.add_handler(CallbackQueryHandler(anonlink_newlink_callback, pattern=r"^anonlink:newlink$"))
@@ -5676,6 +6562,8 @@ def main():
 
     app.add_handler(TypeHandler(Update, reactions_update_note), group=1)
 
+    app.add_handler(TypeHandler(Update, promo_ad_note), group=2)
+
     family_link.attach(app, BOT_NAME, "AnonBot", START_TIME)
     attach_maintenance(app)
 
@@ -5696,16 +6584,18 @@ if __name__ == "__main__":
 # ─── module: manager_bot.bot ─────────────────────────────────────────────────
 """ManagerBot -- the private one, for the owner only."""
 import asyncio
+import functools
 import hashlib
 import html
 import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 import time as time_module
 import zipfile
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from itertools import takewhile
 from datetime import datetime, time, timedelta, timezone
 from io import BytesIO
@@ -5719,7 +6609,7 @@ except ImportError:
 
 from telegram import (
     BotCommand, BotCommandScopeChat, InlineKeyboardButton,
-    InlineKeyboardMarkup, Update,
+    InlineKeyboardMarkup, LinkPreviewOptions, Update,
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -5856,12 +6746,16 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         await update.message.reply_text("This is a private bot.")
     return False
 
-async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """Never raises."""
+    delivered = False
     for admin_id in ADMIN_IDS:
         try:
             await context.bot.send_message(chat_id=admin_id, text=text, parse_mode=ParseMode.HTML)
+            delivered = True
         except Exception:
             logger.exception("Couldn't deliver an alert to %s", admin_id)
+    return delivered
 
 async def send_long(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, filename: str = "output.txt") -> None:
     """Anything past Telegram's message ceiling goes as a file instead of being silently cut in half -- a truncated log tail is worse than useless when you are trying to work out what broke."""
@@ -5886,7 +6780,7 @@ def format_delta(seconds: float) -> str:
         return f"{minutes}m"
     return f"{secs}s"
 
-def _build_board() -> str:
+def _build_board(sweep_line: str = "") -> str:
     """Runs entirely in a worker thread (it is all blocking SQL), so the caller wraps it in asyncio.to_thread."""
     now = datetime.now(timezone.utc)
     snapshot = db.status_snapshot([b["schema"] for b in ALL_BOTS], now - timedelta(hours=1))
@@ -5927,6 +6821,7 @@ def _build_board() -> str:
     alerts = "on" if snapshot["alerts"] == "on" else "OFF"
     stamp = now.strftime("%H:%M:%S UTC")
     return "\n".join([header, "", *lines, "", db_line,
+                      *([sweep_line] if sweep_line else []),
                       f"🔔 Alerts: {alerts} · 🕐 {stamp}"])
 
 def _board_keyboard() -> InlineKeyboardMarkup:
@@ -5941,7 +6836,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
         await update.message.reply_text(
             f"⚠️ Couldn't read the family database: {exc}\n\n"
@@ -6070,6 +6965,71 @@ async def usage_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(report, parse_mode=ParseMode.HTML)
 
+BUTTONS_DEFAULT_DAYS = 7
+BUTTONS_MAX_DAYS = 90
+BUTTONS_MAX_LINES = 25
+BUTTONS_USAGE = f"Usage: /buttons [days] -- from 1 to {BUTTONS_MAX_DAYS} days, {BUTTONS_DEFAULT_DAYS} if not said."
+
+_REDO_KEYS = ("redo.to_file", "redo.to_compressed", "redo.expired", "redo.spent")
+_REDO_AFTER = (("lt1m", "<1m"), ("1-2m", "1-2m"), ("2-5m", "2-5m"), ("5-15m", "5-15m"),
+               ("15-60m", "15-60m"), ("gt60m", ">60m"), ("unknown", "unknown"))
+_DOWNLOADER_BLOCK = (set(_REDO_KEYS) | {f"redo.after.{name}" for name, _ in _REDO_AFTER}
+                     | {"redo.cache.hit", "redo.cache.miss", "cache.kept", "cache.not_kept",
+                        "link.again.cached", "link.again.not_cached"})
+
+def _downloader_block(counts: dict) -> list[str]:
+    n = lambda key: counts.get(key, 0)
+    return [
+        f"  Redo taps: {n('redo.to_file') + n('redo.to_compressed')} (to file {n('redo.to_file')}, "
+        f"to compressed {n('redo.to_compressed')}); expired {n('redo.expired')}, double {n('redo.spent')}",
+        "  Tap after: " + " \u00b7 ".join(f"{label} {n('redo.after.' + name)}" for name, label in _REDO_AFTER),
+        f"  Redo from cache: hit {n('redo.cache.hit')} \u00b7 miss {n('redo.cache.miss')}; "
+        f"deliveries kept {n('cache.kept')} \u00b7 not kept {n('cache.not_kept')}",
+        f"  Same link again: cached {n('link.again.cached')} \u00b7 not cached {n('link.again.not_cached')}",
+    ]
+
+def _buttons_report(days: int) -> str:
+    rows = family_link.button_taps_history(days)
+    if not rows:
+        return "No button taps recorded yet."
+    per_bot: dict[str, dict[str, int]] = {}
+    for row in rows:
+        per_bot.setdefault(row["bot_id"], {})[row["button"]] = int(row["taps"])
+    names = {child["id"]: child["name"] for child in CHILDREN}
+    order = [child["id"] for child in CHILDREN if child["id"] in per_bot]
+    order += sorted(bot_id for bot_id in per_bot if bot_id not in names)
+    lines = [f"Button taps, last {days} days (counts only, nothing about who)"]
+    for bot_id in order:
+        counts = per_bot[bot_id]
+        lines += ["", names.get(bot_id, bot_id)]
+        if bot_id == "downloaderbot":
+            lines += _downloader_block(counts)
+            counts = {key: taps for key, taps in counts.items() if key not in _DOWNLOADER_BLOCK}
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        lines += [f"  {key}: {taps}" for key, taps in ranked[:BUTTONS_MAX_LINES]]
+        if len(ranked) > BUTTONS_MAX_LINES:
+            lines.append(f"  +{len(ranked) - BUTTONS_MAX_LINES} more")
+    return "\n".join(lines)
+
+async def buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await guard(update, context):
+        return
+    days = BUTTONS_DEFAULT_DAYS
+    if context.args:
+        try:
+            days = int(context.args[0])
+        except ValueError:
+            days = 0
+        if len(context.args) > 1 or not 1 <= days <= BUTTONS_MAX_DAYS:
+            await update.message.reply_text(BUTTONS_USAGE)
+            return
+    try:
+        report = await asyncio.to_thread(_buttons_report, days)
+    except Exception as exc:
+        await update.message.reply_text(f"\u26a0\ufe0f Couldn't read the button taps: {exc}")
+        return
+    await send_long(context, update.effective_chat.id, report, "buttons.txt")
+
 async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The three buttons under the /status board."""
     if not await guard(update, context):
@@ -6094,7 +7054,7 @@ async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
 
         await query.message.reply_text(
@@ -6122,6 +7082,7 @@ COMMAND_SINCE = {
     "providers": "1.2.3",
     "stars": "1.2.3",
     "crashtest": "1.2.3",
+    "gift": "2.2.0",
 }
 
 def _version_key(version: str | None):
@@ -6682,6 +7643,12 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"  {bot['name']}: — (no tables yet)")
         else:
             lines.append(f"  {bot['name']}: {counts[0]}  [{counts[1]}]")
+
+    try:
+        people = await asyncio.to_thread(db.unique_people, [b["schema"] for b in CHILDREN])
+        lines.append(f"👤 Unique people across all bots: {people} (the gift's mark is {family_link.PROMO_USERS})")
+    except Exception as exc:
+        lines.append(f"👤 Unique people across all bots: could not count ({type(exc).__name__})")
     await update.message.reply_text("\n".join(lines))
 
 async def donations_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6729,6 +7696,9 @@ def _ledger_lines(rows) -> list:
                    f"  [{row['reason']} via {row['bot_id']}{paid}]{detail}")
     return out
 
+BALANCE_OVERVIEW_ROWS = 20
+BALANCE_HISTORY_ROWS = 12
+
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/balance                -- the family-wide picture /balance <user_id>      -- one person, with their last movements /balance <user_id> +100 -- give them 100 credits /balance <user_id> -100 -- take 100 away (may go negative) /balance <user_id> =0   -- set it to exactly 0"""
     if not await guard(update, context):
@@ -6736,7 +7706,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
 
     if not args:
-        totals, rows = await asyncio.to_thread(family_link.star_balance_overview, 20)
+        totals, rows = await asyncio.to_thread(family_link.star_balance_overview, BALANCE_OVERVIEW_ROWS)
         lines = [
             "⚡ Credit balances, whole family",
             "",
@@ -6797,7 +7767,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚡ <code>{user_id}</code>: {what}", parse_mode=ParseMode.HTML)
 
     totals = await asyncio.to_thread(family_link.star_totals, user_id)
-    rows = await asyncio.to_thread(family_link.star_ledger_for, user_id, 12)
+    rows = await asyncio.to_thread(family_link.star_ledger_for, user_id, BALANCE_HISTORY_ROWS)
     lines = [
         f"⚡ <code>{user_id}</code>",
         "",
@@ -6838,14 +7808,17 @@ async def addcredit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚡ +{amount} added to <code>{user_id}</code>. Balance now {after} ⚡.",
         parse_mode=ParseMode.HTML)
 
+EVENTS_DEFAULT = 15
+EVENTS_MAX = 60
+
 async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
-    limit = 15
+    limit = EVENTS_DEFAULT
     bot_id = None
     for arg in context.args:
         if arg.isdigit():
-            limit = min(int(arg), 60)
+            limit = min(int(arg), EVENTS_MAX)
         else:
             match = resolve_bot(arg)
             if match:
@@ -6884,7 +7857,7 @@ async def sql_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     body = [" | ".join(cols), "-" * 40]
     body += [" | ".join("NULL" if v is None else str(v) for v in row) for row in rows]
-    body.append(f"\n({len(rows)} row(s), capped at 50)")
+    body.append(f"\n({len(rows)} row(s), capped at {db.SQL_MAX_ROWS})")
     await send_long(context, update.effective_chat.id, "\n".join(body), "query.txt")
 
 BACKUP_PART_BYTES = int(os.environ.get("MBOT_BACKUP_PART_MB") or 49) * 1024 * 1024
@@ -7247,6 +8220,9 @@ async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
 FEEDBACK_READ_ONLY = "read only: it names nobody, so there is nobody to answer"
 
 FEEDBACK_SHOWN_CHARS = 3000
+
+FEEDBACK_LIST_ROWS = 10
+FEEDBACK_SEARCH_ROWS = 50
 _feedback_mode_cache = {"value": None, "read_at": 0.0}
 
 async def _feedback_mode() -> str:
@@ -7307,7 +8283,7 @@ def _feedback_mode_line(mode: str) -> str:
             else "🌙 It reaches you with the 22:00 report.")
 
 async def _feedback_overview(mode: str) -> str:
-    items = await asyncio.to_thread(family_link.recent_feedback, 10)
+    items = await asyncio.to_thread(family_link.recent_feedback, FEEDBACK_LIST_ROWS)
     lines = ["💬 <b>Feedback</b>", f"<i>{FEEDBACK_READ_ONLY}.</i>", _feedback_mode_line(mode), ""]
     if not items:
         lines.append("Nobody has sent any yet.")
@@ -7330,10 +8306,11 @@ async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if args and args[0].lstrip("#").isdigit():
         wanted = int(args[0].lstrip("#"))
-        items = await asyncio.to_thread(family_link.recent_feedback, 50)
+        items = await asyncio.to_thread(family_link.recent_feedback, FEEDBACK_SEARCH_ROWS)
         item = next((i for i in items if i["id"] == wanted), None)
         if item is None:
-            await update.message.reply_text(f"No feedback #{wanted} among the latest 50.")
+            await update.message.reply_text(
+                f"No feedback #{wanted} among the latest {FEEDBACK_SEARCH_ROWS}.")
             return
         await _send_feedback_one(context, update.effective_chat.id, item)
         return
@@ -7363,13 +8340,15 @@ async def feedback_mode_button(update: Update, context: ContextTypes.DEFAULT_TYP
     await edit_in_place(query.message, context.bot, await _feedback_overview(mode),
                         parse_mode=ParseMode.HTML, reply_markup=_feedback_keyboard(mode))
 
+PROBLEMS_MAX_HOURS = 168
+
 async def nightly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/nightly [hours] -- the report the owner gets at 22:00, on demand."""
     if not await guard(update, context):
         return
     hours = int(context.args[0]) if context.args and context.args[0].isdigit() \
         else NIGHTLY_REPORT_HOURS
-    hours = max(1, min(hours, 168))
+    hours = max(1, min(hours, PROBLEMS_MAX_HOURS))
     rows = await asyncio.to_thread(family_link.recent_problem_reports_since, hours)
 
     note = None
@@ -7600,13 +8579,62 @@ async def event_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 _last_pumped = {"result": 0.0, "event": 0.0}
 
-async def _pump_if_due(context, key: str, pump, fast: int, idle: int) -> None:
-    due = fast if family_link.bus_is_active() else idle
+_pump_tasks: dict[str, "asyncio.Task"] = {}
+_pump_started: dict[str, float] = {}
+_pump_stall_logged: set[str] = set()
+PUMP_STALL_WARN_SECONDS = int(os.environ.get("MBOT_PUMP_STALL_WARN_SECONDS", "60"))
+
+SWEEP_WINDOW_SECONDS = 900
+_sweep_recent: dict[str, "deque[tuple[float, float]]"] = {}
+_sweep_slowest: dict[str, float] = {}
+
+def _note_sweep(key: str, started: float, task=None) -> None:
+    """Done callback of a sweep task: it ended, however it ended (finished, raised or was cancelled), so it is counted."""
+    try:
+        now = time_module.monotonic()
+        seconds = max(0.0, now - started)
+        recent = _sweep_recent.setdefault(key, deque())
+        recent.append((now, seconds))
+        while recent and now - recent[0][0] > SWEEP_WINDOW_SECONDS:
+            recent.popleft()
+        _sweep_slowest[key] = max(_sweep_slowest.get(key, 0.0), seconds)
+    except Exception as exc:
+        logger.debug("Could not note how long the %s sweep took (%s).", key, type(exc).__name__)
+
+def _sweep_line(key: str = "event") -> str:
+    """The /status line about how long the sweeps take."""
     now = time_module.monotonic()
+    name = key.capitalize()
+    if key not in _sweep_slowest:
+        return f"⏱ {name} sweep: none finished yet since start"
+    since_start = f"{_sweep_slowest[key]:.2f} s"
+    window = f"{SWEEP_WINDOW_SECONDS // 60} min"
+    recent = [seconds for finished, seconds in _sweep_recent.get(key, ())
+              if now - finished <= SWEEP_WINDOW_SECONDS]
+    if not recent:
+        return f"⏱ {name} sweep: none in the last {window} · slowest since start {since_start}"
+    return (f"⏱ {name} sweep: slowest {max(recent):.2f} s in the last {window} "
+            f"({len(recent)} sweep{'' if len(recent) == 1 else 's'}) · {since_start} since start")
+
+async def _pump_if_due(context, key: str, pump, fast: int, idle: int) -> None:
+    now = time_module.monotonic()
+    task = _pump_tasks.get(key)
+    if task is not None and not task.done():
+
+        if (now - _pump_started[key] > PUMP_STALL_WARN_SECONDS
+                and key not in _pump_stall_logged):
+            _pump_stall_logged.add(key)
+            logger.warning("The %s sweep has been running for %d s.", key, now - _pump_started[key])
+        return
+    _pump_stall_logged.discard(key)
+    due = fast if family_link.bus_is_active() else idle
     if now - _last_pumped[key] < due:
         return
     _last_pumped[key] = now
-    await pump(context)
+    _pump_started[key] = now
+
+    _pump_tasks[key] = context.application.create_task(pump(context), name=f"{key}-sweep")
+    _pump_tasks[key].add_done_callback(functools.partial(_note_sweep, key, now))
 
 async def _result_backstop(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _pump_if_due(context, "result", result_pump,
@@ -7674,27 +8702,31 @@ async def result_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
         await notify_owner(context, f"🚨 Daily check failed: {html.escape(str(exc))}")
         return
     await notify_owner(context, "🌅 <b>Daily check</b>\n\n" + board)
 
-HELP = """👪 <b>ManagerBot</b> — the family's manager.
+HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Is everything alright</b>
 /status — every bot: up/down, uptime, host, errors, users (with Refresh /
     Alerts / Ping buttons under it)
-/problems [hours] [mine] — what the bots showed people, laid out: urgent
+/problems [hours] — what the bots showed people, laid out: urgent
     listed, faults grouped, the rest by what kind of thing it was. The 22:00
     report, on demand
+/reports [n] [mine] — the latest problems, newest first, each with its
+    incident code; mine: only those somebody attached their details to
 /report &lt;incident&gt; — one problem in full, with whoever volunteered to be named
 /errors — what each bot has hit since it started (live; a redeploy clears it)
 /events [bot] [n] — recent crashes, startups, payments
 /ping [bot] — no bot named pings all of them, fastest first
-/logs [bot] [n] — tail a log; say "bot" or "problems" for the other two
+/logs &lt;bot&gt; [n] [bot|problems] — tail a log: errors by default, "bot" or
+    "problems" for the other two
 /usage [bot] — memory, peaks, and what they cost
 /idle [bot] — how quiet each bot is, and whether sleeping would pay
+/buttons [days] — how often each button is tapped, per bot (counts only)
 /providers — which of DownloaderBot's download routes work, which rest
 /probe — test every download route, from DownloaderBot's container
 /alerts on|off — mute or unmute unprompted alerts
@@ -7711,7 +8743,7 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Talking to people</b>
 /say &lt;bot&gt; &lt;user_id&gt; &lt;text&gt; — DM someone <i>as</i> that bot
-/broadcast &lt;bot|all&gt; &lt;text&gt; — one message to everyone, <i>as</i> that bot
+/broadcast &lt;bot|all&gt; [--active] &lt;text&gt; — one message to everyone, <i>as</i> that bot
 /whois &lt;bot&gt; &lt;user_id&gt; — look someone up through that bot
 /users [hours] — active users per bot, default 24h
 /feedback [instant|nightly] — what people sent with /feedback (read only: it
@@ -7721,6 +8753,10 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 <b>Money</b>
 /balance [id] [±n|=n] — see or change a credit balance
 /addcredit &lt;id&gt; &lt;amount&gt; — put ⚡ into an account
+/gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day&gt; — bonus ⚡ for everyone,
+    once each: each bot counts first, and nothing is given until you say so
+/promo [stop] — the {family_link.PROMO_CREDITS} ⚡ gift: start it (once), see how it
+    goes, end it early
 /donations — paid donations per bot
 /stars — ConvertBot's Stars: paid, refunded, recent
 
@@ -7732,18 +8768,310 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Still works, not in the menu</b>
 Renamed in 1.7.0, with the old names kept so a habit does not break:
-/nightly and /reports → /problems · /finishupdates → /resume ·
+/nightly → /problems · /finishupdates → /resume ·
 /errorlog, /botlog and /problemlog → /logs · /me → /status
 /crashtest &lt;bot&gt; makes a bot raise on purpose, to check the alert arrives
     (no bot named crashes ManagerBot itself)
 
-Bots: <code>{bots}</code>
+Bots: <code>{{bots}}</code>
 Any unambiguous prefix works — <code>/logs stick</code> is fine."""
+
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
+def _help_page_pause() -> str:
+    minutes = lifecycle.DEFAULT_MAINTENANCE_MINUTES
+    timeout = COMMAND_TIMEOUT_SECONDS
+    return f"""⏸ Updating the bots: /pause, /warn, /resume
+
+In this order:
+1. /pause — the bots stop starting new long work, the kind an update would cut off. Whoever asks for some is told to come back in about {minutes} minutes, and written down. Work already running carries on.
+2. /warn — only the people in the middle of something right now are told it is about to be reset. It changes nothing, and you can send it again.
+3. Deploy, as many times as it takes. The pause survives restarts and redeploys, and it never ends by itself: the minutes are only what people are told.
+4. /resume — the bots take work again, and everyone who was turned away is told they can try again (each person once).
+
+Forms:
+/pause — all four bots, people told {minutes} minutes
+/pause 30 — all four, 30 minutes
+/pause convert — one bot (any unambiguous start of its name)
+/pause convert 30 — one bot, 30 minutes
+/warn [bot|all] and /resume [bot|all] — the same choice of bots
+/finishupdates is the old name of /resume.
+
+Each bot answers for itself: how many people it warned, or that it is open again and how many it told. A bot that is down gets nothing: after {timeout} seconds without an answer you are told it looks down; send the command again once it is up. ManagerBot itself is never paused.
+
+Example: /pause 20, then /warn, deploy, check /status, then /resume.
+"""
+
+def _help_page_gift() -> str:
+    key_rule = family_link.GIFT_KEY_RULE
+    max_credit = family_link.GIFT_MAX_CREDIT
+    days = family_link.GIFT_MAX_DAYS
+    return f"""🎁 /gift — bonus ⚡ for everyone a bot knows, once each
+
+/gift <bot|all> <key> <credits> <last day>
+• bot|all — one bot (any unambiguous start of its name) or all four. Somebody who uses two bots still gets it once.
+• key — names this gift. {key_rule} A key is given at most once per person, across the whole family, for ever: sending the same /gift twice is safe, and a new gift needs a new key.
+• credits — a whole number from 1 to {max_credit}.
+• last day — YYYY-MM-DD, from tomorrow up to {days} days ahead. The credit is bonus: spent before ordinary credit, and whatever is left disappears at the end of that day, UTC.
+
+What happens:
+1. Each bot first only counts, and says so in a message of its own: how many people it knows, how many would get it, how much ⚡ in all, and the notice they will read. Nothing is given.
+2. A card names the amount, the last day and the key, with "Give it" and "Cancel". Nothing is given until you press Give it, and that cannot be taken back. Only the newest /gift can be given; an older card's buttons give nothing.
+3. Each bot goes through its people and reports how many it gave it to. Each person is told, in their own language. If a bot fails partway, send the same /gift again: those who already have it are skipped.
+
+/run <bot> gift … --go gives at once, with no count and no card.
+
+Example: /gift all welcome-200 200 2027-01-15
+"""
+
+def _help_page_promo() -> str:
+    amount = family_link.PROMO_CREDITS
+    users = family_link.PROMO_USERS
+    claim_days = family_link.PROMO_CLAIM_DAYS
+    spend_days = family_link.PROMO_SPEND_DAYS
+    minutes = PROMO_COUNT_SECONDS // 60
+    return f"""🎉 /promo — the {amount} ⚡ gift for everyone who writes to ConvertBot or DownloaderBot
+
+/promo
+/promo stop
+
+The count and the notice:
+• Every {minutes} minutes ManagerBot counts the unique people across all the bots, each person once however many bots they use. The first time the count reaches {users} it messages you, once. /users shows the count too.
+
+What /promo shows depends on where the gift stands:
+• Not started, under {users} people: the count so far. Nothing to do; you will be told when it is reached.
+• Not started, {users} reached: a card with the ad people will see and two buttons, Start the gift and Cancel. Starting can be done once, ever, and it cannot be undone. Only the newest card works.
+• Started: when it started, when claiming closes, how many people claimed it, and how many people AnonBot showed the ad to.
+
+Once started:
+• Claiming stays open for {claim_days} days: until midnight UTC at the end of the {claim_days}th day after the start.
+• The first message a person sends to ConvertBot or DownloaderBot in that time gives them {amount} ⚡ of bonus credit, once in all, not once per bot. They are told in their own language.
+• Each gift can be spent for {spend_days} days from the day it was claimed. What is left then disappears at the end of that day, UTC.
+• AnonBot shows the ad once to each person who writes to it and does not have the gift yet: not on the first /start of an inbox link, not in the middle of a question, and not again after a restart.
+
+/promo stop ends the claiming at once. Credit already given stays and can be spent until it runs out. Before the start, or after the end, there is nothing to stop.
+
+/gift is the separate, general tool for any gift under its own key. /promo is this one gift only.
+
+Example: /promo stop
+"""
+
+def _help_page_broadcast() -> str:
+    active_days = family_link.BROADCAST_ACTIVE_DAYS
+    per_second = f"{family_link.BROADCAST_PER_SECOND:g}"
+    return f"""📢 /broadcast — one message to everyone a bot knows, as that bot
+
+/broadcast <bot|all> <text>
+/broadcast <bot|all> --active <text>
+• The first word must be a bot (any unambiguous start of its name) or all: "/broadcast hello there" is refused, because "hello" is not a bot.
+• --active, right after the bot: only people who used that bot in the last {active_days} days. A bot that cannot tell who is active sends nothing, and says so.
+• The text goes as plain text, with no formatting. Line breaks and double spaces are not kept: it arrives as one paragraph.
+• First you get a card with the text and "Send it" / "Cancel". Nothing is sent before Send it, and nothing can be taken back after. A newer /broadcast replaces the one waiting.
+• Each bot sends at most {per_second} messages a second, skips people who blocked it, and reports how many it reached.
+
+/run <bot> broadcast … sends at once, with no card.
+
+Example: /broadcast all --active The bots stop for an update at 22:00 UTC, for about 10 minutes.
+"""
+
+def _help_page_balance() -> str:
+    top = BALANCE_OVERVIEW_ROWS
+    rows = BALANCE_HISTORY_ROWS
+    return f"""⚡ /balance — see or change one person's credit
+
+/balance — the family's overview, with the {top} largest balances.
+/balance <id> — that person's balance, what they paid and spent, their bonus and when it runs out, and their last {rows} movements.
+/balance <id> +100 — add 100 ⚡
+/balance <id> -100 — take 100 ⚡ away (the balance may go below zero)
+/balance <id> =0 — set it to exactly 0
+• id is the person's numeric Telegram id. Not sure who it is? /whois <bot> <id>.
+• A bare number ("/balance 123 500") is refused on purpose: say +, - or =.
+• A change happens at once, with no confirmation. The person's /balance shows it as "adjustment", and it is in /events.
+• It is one wallet for the whole family: the same balance in every bot.
+• /addcredit is the short way to add credit that never expires; /gift is for everyone at once.
+
+Example: /balance 123456789 +50
+"""
+
+def _help_page_addcredit() -> str:
+    return """➕ /addcredit — put ⚡ into one account
+
+/addcredit <id> <amount>
+• id: the person's numeric Telegram id. amount: a whole number above 0.
+• It is ordinary credit: it never expires. The person's /balance shows it as "grant".
+• It happens at once, with no confirmation, and nothing checks that the id is somebody a bot knows: check with /whois <bot> <id> first.
+• To take credit away or set an exact amount: /balance <id> -n or =n.
+
+Example: /addcredit 123456789 100
+"""
+
+def _help_page_run() -> str:
+    timeout = COMMAND_TIMEOUT_SECONDS
+    return f"""🛠 /run — any command, inside one bot
+
+/run <bot> <command> [args]
+• /run on its own lists the bots and every command, with the ones only one bot has.
+• bot: any unambiguous start of its name. ManagerBot itself is refused; use its own commands.
+• The bot must know the command: one its version doesn't have is refused before anything is sent.
+• You see "queued as #n" at once; the bot's answer comes as a second message. No answer in {timeout} seconds means the bot looks down.
+• No confirmation: /run <bot> broadcast … sends at once, and /run <bot> gift … --go gives at once. /broadcast and /gift are the ones that ask first.
+• Shortcuts for the usual ones: /logs, /say, /stars, /probe, /providers.
+
+Example: /run convert status
+"""
+
+def _help_page_logs() -> str:
+    default = family_link.LOG_TAIL_DEFAULT
+    most = family_link.LOG_TAIL_MAX
+    return f"""📜 /logs — the end of one bot's log
+
+/logs <bot> [lines] [bot|problems]
+• bot: any unambiguous start of its name. One bot at a time.
+• lines: how many from the end, {default} if not said, at most {most}. It must come straight after the bot's name.
+• The last word picks the log: nothing (or anything else) — errors.log, its errors; "bot" or "all" — bot.log, everything it logged; "problems" — problems.log, what it showed people. ("all" means all of bot.log, not all bots.)
+• If the bot's host keeps no log files, you get its in-memory copy since it started, and it says so.
+• /errorlog, /botlog and /problemlog ask which bot with buttons.
+
+Example: /logs convert 100 problems
+"""
+
+REPORTS_LINE = ("/reports [n] lists the latest problems, newest first, each with its "
+                "incident code; /reports mine only the ones somebody attached their "
+                "details to.")
+
+def _help_page_problems() -> str:
+    default = NIGHTLY_REPORT_HOURS
+    most = PROBLEMS_MAX_HOURS
+
+    daily = (f"The same report arrives by itself every day at {NIGHTLY_REPORT_AT_UTC} UTC."
+             if NIGHTLY_REPORT_AT_UTC else "The daily report is off (MBOT_NIGHTLY_UTC is blank).")
+    reports_line = REPORTS_LINE
+    return f"""🩺 /problems — the 22:00 report, on demand
+
+/problems [hours]
+• hours: how far back, {default} if not said, from 1 to {most}.
+• What the bots showed people in that time, laid out: urgent ones listed, faults grouped, the rest by what kind of thing it was. A note says how many /feedback messages came in.
+• Too long for one message: the start comes here, and the whole of it as problems.txt.
+• {daily} /nightly is the same command.
+• One problem in full: /report <incident>. {reports_line}
+
+Example: /problems 72
+"""
+
+def _help_page_events() -> str:
+    default = EVENTS_DEFAULT
+    most = EVENTS_MAX
+    return f"""🗒 /events — crashes, startups and payments, as they happened
+
+/events [bot] [n]
+• n: how many, {default} if not said, at most {most}. bot: only that bot's events (any unambiguous start of its name). Either order.
+• A word that is not a bot is ignored, so a typo shows every bot's events: check that the heading says "from" the bot you meant.
+• Each line: date and time, the bot, what happened, with an icon for how serious it was.
+• Too long for one message: the start comes here, and the whole of it as events.txt.
+
+Example: /events convert 30
+"""
+
+def _help_page_feedback() -> str:
+    latest = FEEDBACK_LIST_ROWS
+    search = FEEDBACK_SEARCH_ROWS
+    days = family_link.FEEDBACK_RETENTION_DAYS
+    return f"""💬 /feedback — what people sent with /feedback
+
+/feedback — the latest {latest}, newest first, with two buttons: 🔔 As it arrives / 🌙 With the 22:00 report (✓ on the one in force).
+/feedback instant — each one reaches you the moment it is sent.
+/feedback nightly — they wait for the 22:00 report.
+/feedback <n> or #<n> — one in full (among the latest {search}).
+• Read only. A message carries the bot it came from and the language, never who sent it, so there is nobody to answer.
+• Each is kept {days} days, then deleted.
+
+Example: /feedback nightly
+"""
+
+def _help_page_sql() -> str:
+    timeout = db.SQL_TIMEOUT_SECONDS
+    rows = db.SQL_MAX_ROWS
+    return f"""🔎 /sql — a read-only query on the shared database
+
+/sql SELECT …
+• It must start with SELECT, WITH, TABLE, EXPLAIN or SHOW, and be one statement.
+• The database itself keeps it read-only, and stops it after {timeout} seconds.
+• At most {rows} rows come back, as text with | between the columns. Longer than a message: the start comes here, and all of it as query.txt.
+• Every bot's tables are there, each bot in its own schema.
+• An error comes back as ⚠️ and the database's own message.
+
+Example: /sql SELECT count(*) FROM sticker_bot.packs
+"""
+
+def _help_page_say() -> str:
+    return """✉️ /say — a message to one person, as one of the bots
+
+/say <bot> <user_id> <text>
+• One bot (any unambiguous start of its name), never all, and the person's numeric Telegram id.
+• Plain text, no formatting; line breaks and double spaces are not kept.
+• It goes at once: no confirmation, and it cannot be taken back. It arrives from that bot, as if the bot wrote it.
+• "Sent." means Telegram took it. If the person blocked the bot or never started it, you get Telegram's refusal instead.
+
+Example: /say convert 123456789 The fix is live — try your file again.
+"""
+
+HELP_PAGES = {
+    "pause": _help_page_pause,
+    "gift": _help_page_gift,
+    "promo": _help_page_promo,
+    "broadcast": _help_page_broadcast,
+    "balance": _help_page_balance,
+    "addcredit": _help_page_addcredit,
+    "run": _help_page_run,
+    "logs": _help_page_logs,
+    "problems": _help_page_problems,
+    "events": _help_page_events,
+    "feedback": _help_page_feedback,
+    "sql": _help_page_sql,
+    "say": _help_page_say,
+}
+HELP_ALIASES = {"warn": "pause", "resume": "pause", "finishupdates": "pause", "nightly": "problems"}
+
+def help_page_name(context) -> "str | None":
+    """The page `/help <word>` asks for, or None."""
+    if not context.args:
+        return None
+    word = context.args[0].lower().lstrip("/").split("@", 1)[0].removeprefix("help_")
+    word = HELP_ALIASES.get(word, word)
+    return word if word in HELP_PAGES else None
+
+def help_page_text(name: str) -> str:
+    """One page, then the way back to /help."""
+    return HELP_PAGES[name]().rstrip() + "\n\nEverything: /help"
+
+def _help_keyboard() -> InlineKeyboardMarkup:
+    """One button per page, two to a row, under /help and /start -- the way /ping has one per bot."""
+    buttons = [InlineKeyboardButton("/" + name, callback_data=f"helpdet:{name}") for name in HELP_PAGES]
+    return InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)])
+
+async def help_page_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on one of those buttons: the page arrives as a new message, so the help above it stays to be tapped again."""
+    if not await guard(update, context):
+        return
+    query = update.callback_query
+    name = query.data.split(":", 1)[1]
+    if name not in HELP_PAGES:
+
+        await query.answer("That help page no longer exists. Send /help.", show_alert=True)
+        return
+    await query.answer()
+    await context.bot.send_message(chat_id=query.message.chat_id, text=help_page_text(name),
+                                   link_preview_options=NO_PREVIEW)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
-    await update.message.reply_text(HELP.format(bots=bot_list_hint()), parse_mode=ParseMode.HTML)
+    page = help_page_name(context)
+    if page:
+        await update.message.reply_text(help_page_text(page), link_preview_options=NO_PREVIEW)
+        return
+    await update.message.reply_text(
+        HELP.format(bots=bot_list_hint()), parse_mode=ParseMode.HTML, reply_markup=_help_keyboard())
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
@@ -7807,7 +9135,7 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _fan_out(
         update, context, targets, "pause", minutes or "",
         f"⏸ Paused — telling users to come back in about {promised} minute(s).\n"
-        f"They stay paused until /finishupdates, however many deploys that takes.",
+        f"They stay paused until /resume, however many deploys that takes.",
     )
 
 async def warn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7830,7 +9158,7 @@ async def finish_updates_command(update: Update, context: ContextTypes.DEFAULT_T
     targets = _targets(context.args[0] if context.args else None)
     if targets is None:
         await update.message.reply_text(
-            f"Usage: /finishupdates [bot|all]. Known: {bot_list_hint()}"
+            f"Usage: /resume [bot|all]. Known: {bot_list_hint()}"
         )
         return
     await _fan_out(
@@ -7847,7 +9175,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if len(context.args) < 2:
         await update.message.reply_text(
-            f"Usage: /broadcast &lt;bot|all&gt; &lt;text&gt;\nKnown: {bot_list_hint()}",
+            f"Usage: /broadcast &lt;bot|all&gt; [--active] &lt;text&gt;\nKnown: {bot_list_hint()}",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -7858,7 +9186,10 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     text = " ".join(context.args[1:]).strip()
-    if not text:
+
+    aimed = text.split(" ", 1)[0] == "--active"
+    shown = text.partition(" ")[2].strip() if aimed else text
+    if not shown:
         await update.message.reply_text("Nothing to say — give it some text.")
         return
 
@@ -7867,13 +9198,15 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "text": text,
     }
     names = ", ".join(b["name"] for b in targets)
+    audience = (f"active in the last {family_link.BROADCAST_ACTIVE_DAYS} day(s)"
+                if aimed else "they know")
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("Send it", callback_data="upd:send"),
         InlineKeyboardButton("Cancel", callback_data="upd:cancel"),
     ]])
     await update.message.reply_text(
-        f"📢 <b>Send as {html.escape(names)}, to everyone they know?</b>\n\n"
-        f"<pre>{html.escape(text[:BROADCAST_PREVIEW])}</pre>\n"
+        f"📢 <b>Send as {html.escape(names)}, to everyone {audience}?</b>\n\n"
+        f"<pre>{html.escape(shown[:BROADCAST_PREVIEW])}</pre>\n"
         f"This cannot be taken back.",
         parse_mode=ParseMode.HTML, reply_markup=kb,
     )
@@ -7906,11 +9239,292 @@ async def broadcast_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"finished going through its list.",
     )
 
+GIFT_PENDING = "gift_pending"
+GIFT_DONE = "gift_done"
+
+async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/gift <bot|all> <key> <credits> <last day YYYY-MM-DD>"""
+    if not await guard(update, context):
+        return
+    if len(context.args) != 4:
+        await update.message.reply_text(
+            "Usage: /gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day YYYY-MM-DD&gt;\n"
+            "e.g. <code>/gift all gift-100-users 100 2027-01-15</code>\n"
+            f"Known: {bot_list_hint()}",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    targets = _targets(context.args[0])
+    if targets is None:
+        await update.message.reply_text(
+            f"No such bot: {context.args[0]}. Known: {bot_list_hint()}"
+        )
+        return
+    parsed = family_link._gift_args(context.args[1:])
+    if isinstance(parsed, str):
+        await update.message.reply_text(parsed)
+        return
+    key, amount, _expires, raw_day = parsed
+    args = f"{key} {amount} {raw_day}"
+    for bot in targets:
+        await asyncio.to_thread(
+            db.queue_command, bot["id"], "gift", args,
+            update.effective_user.id, update.effective_chat.id,
+        )
+    nonce = secrets.token_hex(4)
+    context.user_data[GIFT_PENDING] = {"bots": [b["id"] for b in targets], "args": args,
+                                       "nonce": nonce}
+    names = ", ".join(b["name"] for b in targets)
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Give it", callback_data=f"gift:go:{nonce}"),
+        InlineKeyboardButton("Cancel", callback_data=f"gift:cancel:{nonce}"),
+    ]])
+    await update.message.reply_text(
+        f"🎁 <b>{amount} ⚡ of bonus credit, good until {html.escape(raw_day)}</b>, "
+        f"to everyone {html.escape(names)} know(s), once per person "
+        f"(key <code>{html.escape(key)}</code>).\n\n"
+        f"Each bot is counting now and will report how many people it would give "
+        f"it to, with the notice they would read. Nothing is given until you press "
+        f"<b>Give it</b>, and that cannot be taken back.",
+        parse_mode=ParseMode.HTML, reply_markup=kb,
+    )
+
+async def gift_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not await guard(update, context):
+        return
+    await query.answer()
+
+    action, _, nonce = query.data.removeprefix("gift:").partition(":")
+    if nonce and nonce == context.user_data.get(GIFT_DONE):
+
+        return
+    pending = context.user_data.get(GIFT_PENDING)
+    if not pending:
+        await edit_in_place(query.message, context.bot,
+                            "That gift is no longer waiting. Send /gift again.")
+        return
+    if not nonce or nonce != pending.get("nonce"):
+        await edit_in_place(
+            query.message, context.bot,
+            "That card is not the one waiting (a newer /gift replaced it, or the "
+            "card is from before an update). Nothing was given. Use the newest "
+            "card, or send /gift again.",
+        )
+        return
+    context.user_data.pop(GIFT_PENDING, None)
+    context.user_data[GIFT_DONE] = nonce
+    key, amount = pending["args"].split()[:2]
+    if action != "go":
+        await edit_in_place(query.message, context.bot,
+                            f"Cancelled — nothing was given ({amount} ⚡, key {key}).")
+        return
+    queued, failed = [], []
+    for bot_id in pending["bots"]:
+        try:
+            await asyncio.to_thread(
+                db.queue_command, bot_id, "gift", pending["args"] + " --go",
+                update.effective_user.id, update.effective_chat.id,
+            )
+            queued.append(bot_id)
+        except Exception as exc:
+            failed.append(bot_id)
+            logger.warning("Gift %s: could not be queued for %s (%s)", key, bot_id, type(exc).__name__)
+    if queued:
+        text = (f"🎁 Giving {amount} ⚡ (key {key}), through {', '.join(queued)}. "
+                f"Each bot reports back how many people it gave it to when it has been "
+                f"through its list.")
+    else:
+        text = f"🎁 Nothing was given ({amount} ⚡, key {key}): no bot could be asked."
+    if failed:
+
+        text += (f"\n\n⚠️ Could not ask {', '.join(failed)} (a database error, see "
+                 f"the log). Send the same /gift again and press Give it: nobody "
+                 f"gets it twice.")
+    await edit_in_place(query.message, context.bot, text)
+
+PROMO_COUNT_SECONDS = 15 * 60
+PROMO_COUNT_FIRST_SECONDS = 60
+PROMO_PENDING = "promo_pending"
+PROMO_DONE = "promo_done"
+PROMO_BUTTON_PATTERN = r"^promo:(go|cancel):[0-9a-f]{8}$"
+
+_promo_count: dict = {"count": None, "at": None}
+
+def _promo_schemas() -> list[str]:
+    return [child["schema"] for child in CHILDREN]
+
+def _promo_moment(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+def _promo_last_day(closes: datetime) -> str:
+    """The last day somebody can claim, from the midnight claiming closes at."""
+    return (closes - timedelta(days=1)).strftime("%d.%m.%Y")
+
+def _promo_db_error(exc: Exception) -> str:
+    return f"Could not read the gift's state ({type(exc).__name__}). Nothing was changed."
+
+async def count_unique_people(context: ContextTypes.DEFAULT_TYPE):
+    """The 15-minute job: count the people across all the bots, and the first time the count reaches the mark, tell the owner once."""
+    try:
+        count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+        _promo_count.update(count=count, at=datetime.now(timezone.utc))
+        if count < family_link.PROMO_USERS:
+            return
+        if await asyncio.to_thread(family_link.promo_milestone_at) is not None:
+            return
+
+        started = await asyncio.to_thread(family_link.promo_window, True)
+        if started is not None:
+            await asyncio.to_thread(family_link.note_promo_milestone)
+            return
+        delivered = await notify_owner(
+            context,
+            f"🎉 Mumu bots have reached {count} unique users (everyone who has used any of the bots, "
+            f"counted once). That's the mark for the {family_link.PROMO_CREDITS} ⚡ gift: start it with /promo.",
+        )
+        if delivered is False:
+            logger.warning("The gift's milestone notice could not be delivered; trying again at the next count")
+            return
+        await asyncio.to_thread(family_link.note_promo_milestone)
+    except Exception as exc:
+        logger.warning("The unique-people count did not finish (%s); trying again at the next one",
+                       type(exc).__name__)
+
+def _promo_status_text(started: datetime, closes: datetime, claims: int, seen: "int | None") -> str:
+    now = datetime.now(timezone.utc)
+    is_open = now < closes
+    stopped_early = closes < family_link.promo_closes_for(started)
+    text = (f"The {family_link.PROMO_CREDITS} ⚡ gift started {_promo_moment(started)}.\n"
+            f"Claims {'are open until' if is_open else 'closed at'} {_promo_moment(closes)}"
+            f"{' -- stopped early' if stopped_early else ''}.\n"
+            f"Claimed by {claims} people. AnonBot showed the ad to {'?' if seen is None else seen} people.")
+    if is_open:
+        text += "\nTo end the claiming now: /promo stop"
+    return text
+
+def _promo_card_text(count: int) -> str:
+    """The card, in HTML."""
+    closes = family_link.promo_closes_for(datetime.now(timezone.utc))
+    claim_by = html.escape(_promo_last_day(closes))
+    amount, spend_days = family_link.PROMO_CREDITS, family_link.PROMO_SPEND_DAYS
+    return (
+        f"Start the {amount} ⚡ gift? This can be done once.\n"
+        f"• Anyone who writes to ConvertBot or DownloaderBot until {claim_by} (the end of that day, UTC) "
+        f"gets {amount} ⚡ of bonus credit, once, automatically, and a notice.\n"
+        f"• Each gift can be spent for {spend_days} days from the day it is claimed.\n"
+        f"• AnonBot shows this ad once to each person who writes to it, until then:\n\n"
+        f"{family_link.promo_ad('en', closes)}\n\n"
+        f"Unique users now: {count}."
+    )
+
+async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/promo -- where the 220 ⚡ gift stands, and once the mark is reached a card to start it; /promo stop -- end the claiming early."""
+    if not await guard(update, context):
+        return
+    args = [arg.lower() for arg in context.args]
+    if args == ["stop"]:
+        await _promo_stop(update)
+        return
+    if args:
+        await update.message.reply_text("Usage: /promo, or /promo stop.")
+        return
+    try:
+        window = await asyncio.to_thread(family_link.promo_window, True)
+        if window is not None:
+            claims = await asyncio.to_thread(family_link.promo_claim_count)
+            anon = next((child for child in CHILDREN if child["id"] == "anonbot"), None)
+            seen = (await asyncio.to_thread(db.promo_seen_count, anon["schema"], family_link.PROMO_KEY)
+                    if anon else None)
+            await update.message.reply_text(_promo_status_text(window[0], window[1], claims, seen))
+            return
+        count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+        milestone = await asyncio.to_thread(family_link.promo_milestone_at)
+    except Exception as exc:
+        await update.message.reply_text(_promo_db_error(exc))
+        return
+    if count < family_link.PROMO_USERS and milestone is None:
+        await update.message.reply_text(
+            f"The {family_link.PROMO_CREDITS} ⚡ gift can start once the bots have {family_link.PROMO_USERS} "
+            f"unique users. Now: {count}. I'll message you when it happens.")
+        return
+    nonce = secrets.token_hex(4)
+    context.user_data[PROMO_PENDING] = nonce
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("▶️ Start the gift", callback_data=f"promo:go:{nonce}"),
+        InlineKeyboardButton("Cancel", callback_data=f"promo:cancel:{nonce}"),
+    ]])
+    await update.message.reply_text(_promo_card_text(count), parse_mode=ParseMode.HTML, reply_markup=kb)
+
+async def _promo_stop(update: Update):
+    try:
+        stopped = await asyncio.to_thread(family_link.stop_promo)
+    except Exception as exc:
+        await update.message.reply_text(_promo_db_error(exc))
+        return
+    if not stopped:
+        await update.message.reply_text("The gift is not open (not started yet, or already over). Nothing to stop.")
+        return
+    try:
+        claims = await asyncio.to_thread(family_link.promo_claim_count)
+    except Exception:
+        claims = "?"
+    await update.message.reply_text(
+        f"Stopped. Nobody can claim the gift any more; the {claims} people who have it keep it until it runs out.")
+
+async def promo_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on the card."""
+    query = update.callback_query
+    if not await guard(update, context):
+        return
+    await query.answer()
+    action, _, nonce = query.data.removeprefix("promo:").partition(":")
+    if nonce and nonce == context.user_data.get(PROMO_DONE):
+
+        return
+    if not nonce or nonce != context.user_data.get(PROMO_PENDING):
+        await edit_in_place(
+            query.message, context.bot,
+            "That card is not the one waiting (a newer /promo replaced it, or it is from before an "
+            "update). Nothing was started. Send /promo again.",
+        )
+        return
+    context.user_data.pop(PROMO_PENDING, None)
+    context.user_data[PROMO_DONE] = nonce
+    if action != "go":
+        await edit_in_place(query.message, context.bot, "Cancelled. Nothing was started.")
+        return
+
+    try:
+        window = await asyncio.to_thread(family_link.promo_window, True)
+        if window is not None:
+            text = f"It had already started {_promo_moment(window[0])}. Nothing changed."
+        else:
+            count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+            reached = count >= family_link.PROMO_USERS or (
+                await asyncio.to_thread(family_link.promo_milestone_at)) is not None
+            if not reached:
+                text = (f"Not yet: {count} unique users of {family_link.PROMO_USERS}. "
+                        f"Nothing was started.")
+            else:
+                started, won = await asyncio.to_thread(family_link.start_promo)
+                if won:
+                    text = (f"Started {_promo_moment(started)}. Claims close "
+                            f"{_promo_last_day(family_link.promo_closes_for(started))} "
+                            f"(the end of that day, UTC). /promo shows how it goes.")
+                else:
+                    text = f"It had already started {_promo_moment(started)}. Nothing changed."
+    except Exception as exc:
+        text = f"Could not start it ({type(exc).__name__}). Nothing was started; send /promo again."
+    await edit_in_place(query.message, context.bot, text)
+
 BOT_COMMANDS = [
 
     BotCommand("status", "Every bot: up, version, errors, users"),
     BotCommand("problems", "The 22:00 problems report, on demand"),
+    BotCommand("nightly", "The same report, under its old name"),
     BotCommand("feedback", "What people sent with /feedback"),
+    BotCommand("reports", "Latest problems, each with its incident code"),
     BotCommand("report", "One problem in full, by its incident code"),
     BotCommand("errors", "What each bot has hit since it started"),
     BotCommand("events", "Crashes, restarts and payments as they happened"),
@@ -7920,6 +9534,7 @@ BOT_COMMANDS = [
     BotCommand("logs", "Tail a bot's log"),
     BotCommand("usage", "Memory, peaks, and what they cost"),
     BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
+    BotCommand("buttons", "Button taps per bot, counts only"),
     BotCommand("run", "Run a command inside another bot"),
     BotCommand("restart", "Restart a bot's process"),
     BotCommand("pause", "Stop the bots taking work an update would lose"),
@@ -7931,6 +9546,8 @@ BOT_COMMANDS = [
     BotCommand("users", "Active users per bot"),
     BotCommand("balance", "See or change a credit balance"),
     BotCommand("addcredit", "Add ⚡ credit to an account by Telegram id"),
+    BotCommand("gift", "Bonus ⚡ for everyone; counts, then asks"),
+    BotCommand("promo", "The 220 ⚡ gift: start, status, stop"),
     BotCommand("donations", "Paid donations per bot"),
     BotCommand("stars", "ConvertBot's Stars: paid, refunded, recent"),
     BotCommand("backup", "Whole database, restorable, pinned here"),
@@ -8032,6 +9649,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("usage", usage_command))
     app.add_handler(CommandHandler("idle", idle_command))
+    app.add_handler(CommandHandler("buttons", buttons_command))
     app.add_handler(CommandHandler("me", me_command))
     app.add_handler(CommandHandler("run", run_command))
     app.add_handler(CommandHandler("ping", broadcast_ping))
@@ -8055,7 +9673,7 @@ def main():
     app.add_handler(CommandHandler("errorlog", _log_shortcut("errorlog")))
     app.add_handler(CommandHandler("botlog", _log_shortcut("botlog")))
     app.add_handler(CommandHandler("problemlog", _log_shortcut("problemlog")))
-    app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|all]")))
+    app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|problems]")))
     app.add_handler(CommandHandler("dbdump", _shortcut("dbdump", 1, "Usage: /dbdump <bot> — or /backup for everything")))
     app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot>")))
     app.add_handler(CommandHandler("whois", _shortcut("whois", 2, "Usage: /whois <bot> <user_id>")))
@@ -8066,6 +9684,8 @@ def main():
     app.add_handler(CommandHandler("stars", _shortcut("stars", 0, "", default_bot="convertbot")))
 
     app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("gift", gift_command))
+    app.add_handler(CommandHandler("promo", promo_command))
     app.add_handler(CommandHandler("pause", pause_command))
     app.add_handler(CommandHandler("warn", warn_command))
 
@@ -8073,7 +9693,10 @@ def main():
 
     app.add_handler(CallbackQueryHandler(board_button, pattern=r"^board:"))
     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
+    app.add_handler(CallbackQueryHandler(help_page_button, pattern=r"^helpdet:[a-z]{1,20}$"))
     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
+    app.add_handler(CallbackQueryHandler(gift_button, pattern=r"^gift:"))
+    app.add_handler(CallbackQueryHandler(promo_button, pattern=PROMO_BUTTON_PATTERN))
     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))
     app.add_handler(CallbackQueryHandler(feedback_mode_button, pattern=r"^fbmode:"))
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
@@ -8089,6 +9712,9 @@ def main():
 
     app.job_queue.run_once(startup_rollcall, when=STARTUP_ROLLCALL_SECONDS)
     app.job_queue.run_repeating(watchdog, interval=60, first=20)
+
+    app.job_queue.run_repeating(count_unique_people, interval=PROMO_COUNT_SECONDS,
+                                first=PROMO_COUNT_FIRST_SECONDS)
 
     app.job_queue.run_repeating(_event_backstop, interval=PUMP_TICK_SECONDS, first=10)
     app.job_queue.run_repeating(_result_backstop, interval=PUMP_TICK_SECONDS, first=5)

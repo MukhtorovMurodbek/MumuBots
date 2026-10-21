@@ -28,6 +28,8 @@ _Last reviewed: 3 October 2026._
 - **A timestamp per use** — one row saying this id used a bot at this minute,
   so the operator can tell whether anybody is using it. It carries no content
   and says nothing about what was done.
+- **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
+  tapped it.
 - **Payments and donations**, if any: the amount, the currency, what it was
   for, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger**, once you have paid or been given
@@ -35,8 +37,12 @@ _Last reviewed: 3 October 2026._
   every top-up, bonus, conversion charge, credit returned and correction, with
   the amount, which bot, and why. `/balance` and `/mystars` read it.
 - **Bonus credit, and when it expires** — for each payment that earned a
-  bonus: how much, how much of it is left, and the date it runs out. Bonus that
-  runs out unused is taken off the balance, and the ledger says so.
+  bonus and each gift: how much, how much of it is left, and the date it runs
+  out. Bonus that runs out unused is taken off the balance, and the ledger
+  says so.
+- **Gifts given** — that a gift, by its name, was given to your id and
+  when, so that it is given only once across the family. Kept like the ledger;
+  `/deletemydata` does not remove it.
 - **Problems, whenever one is shown to anybody** — the error code, an incident
   number, when it happened and the bot's version. This is written down
   automatically, because a fault nobody reports is still a fault, and nothing in
@@ -97,11 +103,13 @@ collected speculatively, and nothing is collected to be sold later.
 |---|---|
 | user id, language, and what a bot's own section lists as kept "until erased" | until erased, or indefinitely while the bot is in use |
 | timestamp per use | about 90 days |
+| button tap counts | 45 days |
 | work in progress | 12 hours |
 | details added to a problem report | 30 days |
 | problem records | 180 days |
 | payments and donations | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the payments |
+| gifts given (which gift was given to your id, and when) | kept, like the ledger |
 | feedback sent with `/feedback` | 30 days |
 
 ### Erasing it
@@ -164,7 +172,8 @@ owner, from Telegram.
 ## ConvertBot privacy
 
 ConvertBot converts files between formats: pictures, video, audio, documents,
-e-books, spreadsheets, subtitles, camera raw photos and archives. Everything under
+e-books, spreadsheets, subtitles, camera raw photos and archives, and reads the
+text in a picture or a scanned PDF. Everything under
 [Privacy, every bot](#privacy-every-bot) applies. Also held:
 
 - **The file being converted, while it is being converted.** It is written to a
@@ -177,7 +186,11 @@ e-books, spreadsheets, subtitles, camera raw photos and archives. Everything und
   minutes pass without a conversion of it, so it can be converted again. It is
   off unless you turn it on, the choice is remembered, and /cancel deletes the
   file sooner. A file waiting in the queue is kept until its conversion has
-  run.
+  run. **If you change the text language** under the format menu — the language
+  the words in a picture or a scanned PDF are read in: English, Russian or
+  Uzbek — that choice is remembered too, for your next file. Until you pick one
+  it follows the language you use the bot in; it is about the language, never
+  about what the text says.
 - **Work in progress** — a conversion waiting on a format choice; and, while
   a paid conversion runs, who it is for, its price and its formats, so that its
   ⚡ can be given back even if the bot is stopped in the middle of it. That
@@ -187,7 +200,10 @@ e-books, spreadsheets, subtitles, camera raw photos and archives. Everything und
 Not held: the converted file once it has been sent back, and the contents of
 any file, at any point, in the database. Files are converted on the machine the
 bot runs on — by ffmpeg, Pillow, PyMuPDF and a handful of other libraries, all
-running locally — and are never handed to an outside service. A file over
+running locally — and are never handed to an outside service. That includes
+reading the text in a picture or a scanned PDF: it is recognised on the same
+machine, by the Tesseract engine inside PyMuPDF, never by an outside service,
+and the text it finds is kept no longer than the file it came from. A file over
 20 MB is fetched from Telegram and sent back to Telegram over Telegram's own
 protocol rather than its Bot API; it still travels only between Telegram and
 the bot. So does a video shot in HDR, which is tone-mapped on the way; nothing
@@ -205,14 +221,35 @@ Reddit or X and sends back the media behind it. Everything under
 
 - **The caption, quality and large-file settings** that go with the chosen
   language.
-- **The link sent in**, for as long as it takes to fetch what is behind it.
+- **The last download, for five minutes.** What the bot has just sent you stays
+  on its server for five minutes, so that the button under it, or the same link
+  sent again, is answered without fetching the post a second time. Each of those
+  starts the five minutes again, but it never lasts past 12 hours after the
+  download. It is deleted sooner when you send a different
+  link, when the bot restarts, when the server is short of space, or when you use
+  `/deletemydata`. Only you can get it back, and a download over 100 MB is never
+  kept.
+- **References to files the bot has already sent** (Telegram's file IDs), filed
+  under a scrambled name of the post and not under who asked for it. They let the
+  bot send the same post again without downloading it. Before re-using one, the
+  bot checks at least every 12 hours that the post is still public. References
+  nobody uses are deleted after 90 days. A reference is not about anyone: it holds
+  no user id, chat, username, link, platform name or caption, and the scrambled
+  name cannot be turned back into the link.
+- **The links of your last five downloads**, so the buttons under them work, until
+  you have not used the bot for 12 hours. Every link is cut down to the address of
+  the post before the bot does anything else with it: the share-tracking parts that
+  apps add when you copy a link (such as `igsh`, `utm_source` or `si`) are removed,
+  and what is held is the plain link.
 - **One row per download** — which platform, and when. The daily allowance is
   counted from it; the link is not part of the row. Kept 7 days.
 - **Work in progress** — a download waiting on a choice.
 
-Not held: the media itself (fetched, sent, and deleted), the link once the
-download is done, and anything about the author of the post beyond what is
-inside the media file they published. A large file (over 48 MB, with large
+Not held: the media itself beyond those five minutes (fetched, sent, and
+deleted); who asked for which post, in the references to files already sent (they
+are kept under a scrambled name of the post alone, and nothing in them says who the
+post was sent to); and anything about the author of the post beyond what is inside
+the media file they published. A large file (over 48 MB, with large
 files switched on) is sent over Telegram's own protocol rather than its Bot
 API; it still travels only between Telegram and the bot.
 
@@ -225,8 +262,13 @@ Also sees it:
   and sees the request as coming from the bot's server, not from the person who
   sent it. What those services log is governed by their own policies.
 
-Erasing the download rows resets the daily allowance along with them. Nothing
-already downloaded is affected — it was never kept here.
+Erasing the download rows resets the daily allowance along with them. It also
+deletes the last download if it is still being held; nothing older was ever kept
+here.
+
+`/deletemydata` has nothing of yours to delete among the references to files
+already sent, because they hold nothing about you: no id, no chat, no username,
+no link. They go on their own, 90 days after they were last used.
 
 ## AnonBot privacy
 
@@ -246,6 +288,9 @@ applies. Also held:
   reply be matched to what it answers, and a transcript be sorted into
   conversations. Pruned once a conversation has gone quiet.
 - **A block list** — who an inbox owner has blocked.
+- **Announcements you were shown** — that this bot showed you a one-time
+  announcement (the 220 ⚡ gift), so that it is shown to you only once. Kept
+  until erased; `/deletemydata` removes it.
 
 Not held: **what anybody writes.** Messages are relayed and never stored. They
 exist in the two Telegram chats, where each side can delete their own copy, and
@@ -317,6 +362,11 @@ would. The bot says what the next Stars earn before payment.
 after the payment that earned it.** Ordinary credit does not expire.
 Conversions use bonus credit first, the soonest to expire first, so what
 expires is only bonus that went unused.
+
+**Credit given free in a promotion (a gift) is bonus credit: it has no cash
+value, cannot be transferred to another account, is not refundable, and expires
+at the end of the last day stated when it is given (UTC).** Like other bonus
+credit it is spent first; ordinary credit does not expire.
 
 **Payments are final. Stars are not refunded, and credit is not money and it is
 not Stars: it cannot be withdrawn, turned back into Stars, or transferred.**
@@ -401,8 +451,29 @@ made it, and what happens to it after it has been downloaded — republishing it
 selling it, presenting it as somebody else's own work — is between the person
 who downloaded it, the person who made it, and the law. The operator neither
 reviews nor licenses any of it. Rights holders who want a specific post to stop
-being retrievable should approach the platform hosting it; this bot stores
-nothing and has nothing to take down.
+being retrievable should approach the platform hosting it. Remove the post at the
+platform: once neither the platform nor the download services the bot asks still
+serve it, the bot stops sending it within 12 hours. This bot keeps no copy of any
+post. It holds only the last download, for five minutes, and references to files it
+has already sent (see below); before it re-uses one of those it checks, at least
+every 12 hours, that the post is still public. It has nothing else to take down.
+
+**The last download.** What the bot has just sent you is held on its server for five
+minutes, so that the button under it, or the same link sent again, is answered
+without fetching the post a second time. It is a convenience, not storage: it is
+deleted when you send a different link, after five minutes, on a restart, or
+with `/deletemydata`, and it may be deleted sooner when the server is short of
+space. It never lasts past 12 hours after the download. The DownloaderBot privacy
+section above has the details.
+
+**References to files already sent.** So that the same post can be sent again
+without being fetched again, the bot keeps Telegram's file IDs for what it has
+sent, under a scrambled name of the post and not under who asked for it; they hold
+nothing about you. Before re-using one, the bot checks, at least every 12 hours,
+that the post is still public; if the post has been removed, or the bot cannot
+tell, it does not send the old file and goes to the platform as usual instead.
+References nobody uses are deleted after 90 days. They are a convenience, not storage.
+The DownloaderBot privacy section above has the details.
 
 **Fair share.** There is a daily allowance per person, so that one heavy user
 cannot make the bot unusable or unaffordable for everyone else. Working around

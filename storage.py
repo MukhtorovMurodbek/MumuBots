@@ -1394,6 +1394,17 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sent_files (
+                post_key     TEXT PRIMARY KEY,
+                items        TEXT NOT NULL,
+                confirmed_at TIMESTAMPTZ NOT NULL,
+                last_used    DATE NOT NULL DEFAULT CURRENT_DATE
+            )
+            """
+        )
         conn.commit()
 
 def record_activity_batch(user_ids) -> None:
@@ -1689,6 +1700,64 @@ def save_provider_health(rows: list[tuple]) -> None:
             )
         conn.commit()
 
+def _days_from_env(name: str, default: int) -> int:
+    """A whole number of days, `default` when it is unset, unreadable or under 1: a typo here must not stop the bot starting, and 0 must not delete every row."""
+    try:
+        days = int(os.environ.get(name) or default)
+    except ValueError:
+        return default
+    return days if days >= 1 else default
+
+SENT_FILES_KEEP_DAYS = _days_from_env("DBOT_FILEID_KEEP_DAYS", 90)
+
+def sent_files_get(post_key: str):
+    """(items text, confirmed_at) of this post's row, or None."""
+    with pooled_read() as conn:
+        row = conn.execute(
+            "SELECT items, confirmed_at FROM sent_files WHERE post_key = %s",
+            (post_key,),
+        ).fetchone()
+    return (row[0], row[1]) if row else None
+
+def sent_files_put(post_key: str, items_text: str) -> None:
+    """Store a delivery: the ids, seen public now, used today. Replaces what was there."""
+    with pooled() as conn:
+        conn.execute(
+            """
+            INSERT INTO sent_files (post_key, items, confirmed_at, last_used)
+            VALUES (%s, %s, now(), CURRENT_DATE)
+            ON CONFLICT (post_key) DO UPDATE SET
+                items = EXCLUDED.items,
+                confirmed_at = now(),
+                last_used = CURRENT_DATE
+            """,
+            (post_key, items_text),
+        )
+        conn.commit()
+
+def sent_files_confirmed(post_key: str) -> None:
+    """The post was seen public just now (a lookup found it), and the row was used."""
+    with pooled() as conn:
+        conn.execute(
+            "UPDATE sent_files SET confirmed_at = now(), last_used = CURRENT_DATE WHERE post_key = %s",
+            (post_key,),
+        )
+        conn.commit()
+
+def sent_files_used(post_key: str) -> None:
+    """The row was used today. confirmed_at stays: only a fetch or a lookup proves that the post is still public."""
+    with pooled() as conn:
+        conn.execute(
+            "UPDATE sent_files SET last_used = CURRENT_DATE WHERE post_key = %s",
+            (post_key,),
+        )
+        conn.commit()
+
+def sent_files_drop(post_key: str) -> None:
+    with pooled() as conn:
+        conn.execute("DELETE FROM sent_files WHERE post_key = %s", (post_key,))
+        conn.commit()
+
 def prune_old_data() -> int:
     """Returns how many rows were removed. Safe to run at any time."""
     with pooled() as conn:
@@ -1701,6 +1770,12 @@ def prune_old_data() -> int:
         cur = conn.execute(
             "DELETE FROM download_events WHERE occurred_at < now() - make_interval(days => %s)",
             (DOWNLOAD_RETENTION_DAYS,),
+        )
+        removed += cur.rowcount
+
+        cur = conn.execute(
+            "DELETE FROM sent_files WHERE last_used < CURRENT_DATE - make_interval(days => %s)",
+            (SENT_FILES_KEEP_DAYS,),
         )
         removed += cur.rowcount
         conn.commit()
@@ -2058,6 +2133,17 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_activity_events_occurred_at ON activity_events (occurred_at)"
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS promo_seen (
+                user_id BIGINT NOT NULL,
+                promo TEXT NOT NULL,
+                seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (user_id, promo)
+            )
+            """
+        )
         conn.commit()
 
 def record_activity_batch(user_ids) -> None:
@@ -2125,6 +2211,17 @@ def claim_reactions_note(user_id: int) -> bool:
             "UPDATE user_settings SET knows_reactions = TRUE "
             "WHERE user_id = %s AND knows_reactions IS NOT TRUE RETURNING user_id",
             (user_id,),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+def claim_promo_seen(user_id: int, promo: str) -> bool:
+    """True exactly once per (person, announcement): this call recorded that they are being shown it, and two updates arriving together cannot both win."""
+    with pooled() as conn:
+        row = conn.execute(
+            "INSERT INTO promo_seen (user_id, promo) VALUES (%s, %s) "
+            "ON CONFLICT DO NOTHING RETURNING user_id",
+            (user_id, promo),
         ).fetchone()
         conn.commit()
     return row is not None
@@ -2818,7 +2915,7 @@ def erase_user(user_id: int) -> int:
         ):
             cur = conn.execute(statement, params)
             removed += cur.rowcount or 0
-        for table in ("user_settings", "donation_prompts", "activity_events"):
+        for table in ("user_settings", "donation_prompts", "activity_events", "promo_seen"):
             cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             removed += cur.rowcount or 0
         conn.execute(
@@ -3267,11 +3364,55 @@ def donations_by_schema(schemas: list[str]) -> dict[str, list[tuple[str, int, in
             rows.sort()
         return out
 
-def run_readonly_query(sql: str, limit: int = 50):
+PEOPLE_TABLES = ("activity_events", "user_settings", "settings")
+
+def unique_people(schemas: list[str]) -> int:
+    """How many different people have used any of these bots, each counted once however many bots they used: the distinct user_id over every schema's activity_events and whichever of user_settings and settings it has, leaving out ids that are not people (zero and below, and family_link's _GIFT_NOT_PEOPLE: Telegram, anonymous admins, channels)."""
+    if not schemas:
+        return 0
+
+    import family_link
+    with pooled_read() as conn:
+        found = []
+        for table in PEOPLE_TABLES:
+            found += [(schema, table) for schema in sorted(_existing_tables(conn, schemas, table))]
+        if not found:
+            return 0
+
+        with_user_id = {tuple(row) for row in conn.execute(
+            "SELECT table_schema, table_name FROM information_schema.columns "
+            "WHERE table_schema = ANY(%s) AND table_name = ANY(%s) AND column_name = 'user_id'",
+            (schemas, list(PEOPLE_TABLES)),
+        ).fetchall()}
+        parts = [f'SELECT user_id FROM "{schema}".{table}'
+                 for schema, table in found if (schema, table) in with_user_id]
+        if not parts:
+            return 0
+
+        row = conn.execute(
+            "SELECT COUNT(*) FROM (" + " UNION ".join(parts) + ") AS everyone "
+            "WHERE user_id > 0 AND user_id <> ALL(%s)",
+            (sorted(family_link._GIFT_NOT_PEOPLE),),
+        ).fetchone()
+        return row[0]
+
+def promo_seen_count(schema: str, promo: str) -> "int | None":
+    """How many people that bot's schema says were shown this announcement, or None when the schema has no promo_seen table (a bot that never had one, or not created yet)."""
+    with pooled_read() as conn:
+        if schema not in _existing_tables(conn, [schema], "promo_seen"):
+            return None
+        return conn.execute(
+            f'SELECT COUNT(*) FROM "{schema}".promo_seen WHERE promo = %s', (promo,)
+        ).fetchone()[0]
+
+SQL_TIMEOUT_SECONDS = 10
+SQL_MAX_ROWS = 50
+
+def run_readonly_query(sql: str, limit: int = SQL_MAX_ROWS):
     """Backs ManagerBot's /sql."""
     with pooled() as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        conn.execute("SET LOCAL statement_timeout = '10s'")
+        conn.execute(f"SET LOCAL statement_timeout = '{SQL_TIMEOUT_SECONDS}s'")
         cur = conn.execute(sql, prepare=True)
         cols = [d.name for d in cur.description] if cur.description else []
         rows = cur.fetchmany(limit) if cur.description else []

@@ -11,6 +11,7 @@ raise ImportError("download.py is loaded section by section by main.py -- run ma
 """Which platform a pasted link belongs to, and the two page-scrapes that are about *text* rather than media."""
 import math
 import re
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
@@ -19,7 +20,7 @@ from net import FetchError, client, close_client, fetch_bytes
 
 __all__ = [
     "FetchError", "client", "close_client", "fetch_bytes",
-    "detect_platform", "ANY_LINK_RE",
+    "detect_platform", "canonical_link", "ANY_LINK_RE",
     "fetch_reddit_post", "reddit_is_media", "reddit_direct_image_url",
     "fetch_tweet_syndication",
 ]
@@ -63,12 +64,111 @@ ANY_LINK_RE = re.compile(
     "|".join(f"(?:{p.pattern})" for _, p in _PLATFORM_PATTERNS), re.IGNORECASE
 )
 
+_TRAILING_PUNCT = ".,;:!?)]}>»\"'"
+
+_IG_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
+_IG_POST = re.compile(r"/(p|reel|reels|tv)/([A-Za-z0-9_-]+)(?:/|$)")
+
+_IG_USER_POST = re.compile(r"/([^/]+)" + _IG_POST.pattern)
+_IG_NOT_USERS = {"share", "stories"}
+
+_TT_HOSTS = {"tiktok.com", "www.tiktok.com", "m.tiktok.com"}
+_TT_SHORT_HOSTS = {"vm.tiktok.com", "vt.tiktok.com"}
+
+_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
+_YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+
+_TW_HOSTS = {"twitter.com", "www.twitter.com", "mobile.twitter.com",
+             "x.com", "www.x.com", "mobile.x.com"}
+_TW_STATUS = re.compile(r"/(\w+)/status(?:es)?/(\d+)(?:/|$)")
+
+_RD_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "m.reddit.com"}
+
+_PIN_HOST = re.compile(
+    r"(?:[a-z0-9-]{1,8}\.)?"
+    r"(?:pinterest\.(?:com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})|pin\.it)"
+)
+_PIN_POST = re.compile(r"/pin/(\d+)(?:/|$)")
+
+def _trim(text: str) -> str:
+    return text.rstrip(_TRAILING_PUNCT)
+
+def _keep_path(host: str, path: str) -> str:
+    return f"https://{host}{_trim(path)}"
+
+def _canonical(platform: str, url: str) -> str:
+    parts = urlsplit(_trim(url.strip()))
+    host = (parts.hostname or "").lower()
+    path = parts.path
+
+    if platform == "instagram" and host in _IG_HOSTS:
+        m = _IG_USER_POST.match(path)
+        if m and m.group(1).lower() in _IG_NOT_USERS:
+            m = None
+        if m:
+            kind, code = m.group(2), m.group(3)
+        else:
+            m = _IG_POST.match(path)
+            kind, code = (m.group(1), m.group(2)) if m else ("", "")
+        if kind:
+            return f"https://www.instagram.com/{'reel' if kind == 'reels' else kind}/{code}/"
+        return _keep_path("www.instagram.com", path)
+
+    if platform == "tiktok":
+        if host in _TT_HOSTS:
+            return _keep_path("www.tiktok.com", path)
+        if host in _TT_SHORT_HOSTS:
+            return _keep_path(host, path)
+
+    if platform == "youtube":
+        video = ""
+        if host in _YT_HOSTS:
+            segments = [s for s in path.split("/") if s]
+            if path.rstrip("/") == "/watch":
+                values = [v for k, v in parse_qsl(parts.query, keep_blank_values=True) if k == "v"]
+                video = values[0] if values else ""
+            elif len(segments) >= 2 and segments[0] in ("shorts", "live"):
+                video = segments[1]
+        elif host == "youtu.be":
+            segments = [s for s in path.split("/") if s]
+            video = segments[0] if segments else ""
+        if _YT_ID.fullmatch(video):
+            return f"https://www.youtube.com/watch?v={video}"
+        return url
+
+    if platform == "twitter" and host in _TW_HOSTS:
+        m = _TW_STATUS.match(path)
+        if m:
+            return f"https://x.com/{m.group(1)}/status/{m.group(2)}"
+        return url
+
+    if platform == "reddit":
+        if host in _RD_HOSTS:
+            return _keep_path("www.reddit.com", path)
+        if host == "redd.it":
+            return _keep_path("redd.it", path)
+
+    if platform == "pinterest" and _PIN_HOST.fullmatch(host):
+        m = _PIN_POST.match(path)
+        if m and host != "pin.it":
+            return f"https://www.pinterest.com/pin/{m.group(1)}/"
+        return _keep_path(host, path)
+
+    return url
+
+def canonical_link(platform: str, url: str) -> str:
+    """The link written the one way that identifies the post: share trackers, query strings and fragments gone, the host and path normalised, the punctuation a sentence leaves on the end of a link taken off."""
+    try:
+        return _canonical(platform, url)
+    except Exception:
+        return url
+
 def detect_platform(text: str) -> tuple[str, str] | None:
-    """Returns (platform, matched_url) for the first recognized link in text, or None if nothing matches."""
+    """Returns (platform, canonical_link) for the first recognized link in text, or None if nothing matches."""
     for name, pattern in _PLATFORM_PATTERNS:
         m = pattern.search(text)
         if m:
-            return name, m.group(0)
+            return name, canonical_link(name, m.group(0))
     return None
 
 TEXT_PAGE_LIMIT_BYTES = 8 * 1024 * 1024
@@ -669,16 +769,21 @@ if __name__ == "__main__":
 
 # ─── module: downloader_bot.video ────────────────────────────────────────────
 """The yt-dlp provider: download a video with yt-dlp so the bot can re-send it."""
+import asyncio
 import contextlib
 import glob
+import json
 import logging
+import math
 import os
 import re
+import shutil
 import sys
 import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 
 MAX_DOWNLOAD_MB = int(os.environ.get("DBOT_MAX_DOWNLOAD_MB", "48"))
 
@@ -1009,6 +1114,162 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
             "download was stopped."
         )
     return path
+
+PROBE_SECONDS = 5
+
+PROBE_BUDGET_SECONDS = 10
+PROBE_MAX_BYTES = 64 * 1024
+MAX_SIDE = 16384
+MAX_SECONDS = 2 ** 31 - 1
+
+@dataclass(frozen=True)
+class VideoShape:
+    """What the player will show: the DISPLAYED size (the stored size, widened by a non-square pixel and turned a quarter when the file says so) and the length in whole seconds, or None when ffprobe did not say."""
+    width: int
+    height: int
+    duration: "int | None" = None
+
+class ProbeRun:
+    """One delivery's probing."""
+
+    def __init__(self):
+        self.timed_out = False
+        self.spent = 0.0
+
+    @property
+    def exhausted(self) -> bool:
+        """No more probing for this delivery."""
+        return self.timed_out or self.spent >= PROBE_BUDGET_SECONDS
+
+    def allowance(self) -> float:
+        """How long the next probe may take: its own limit, or what is left of the delivery's budget if that is less."""
+        return min(PROBE_SECONDS, max(0.0, PROBE_BUDGET_SECONDS - self.spent))
+
+def _side(value) -> "int | None":
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_SIDE:
+        return None
+    return value
+
+def _quarter_turn(stream: dict) -> bool:
+    """Whether the player turns the picture 90 or 270 degrees, which swaps its sides."""
+    turn = None
+    side_data = stream.get("side_data_list")
+    for data in side_data if isinstance(side_data, list) else ():
+        if isinstance(data, dict) and "rotation" in data:
+            turn = data["rotation"]
+            break
+    if turn is None:
+        tags = stream.get("tags")
+        turn = tags.get("rotate") if isinstance(tags, dict) else None
+    try:
+        turn = float(turn)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(turn):
+        return False
+    return round(abs(turn) / 90) % 2 == 1
+
+def _display_width(width: int, ratio) -> int:
+    """`width` widened by a non-square pixel ("N:D"), as the player shows it."""
+    if isinstance(ratio, str) and ratio.count(":") == 1:
+        try:
+            n, d = (int(part) for part in ratio.split(":"))
+            if n > 0 and d > 0 and n != d:
+                return min(MAX_SIDE, max(1, round(width * n / d)))
+        except (ValueError, OverflowError):
+            pass
+    return width
+
+def shape_from_ffprobe(data) -> "VideoShape | None":
+    """The shape from ffprobe's JSON, or None for anything that is not a plausible picture. Pure."""
+    try:
+        streams = data["streams"]
+        stream = streams[0]
+        width, height = _side(stream.get("width")), _side(stream.get("height"))
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
+    if width is None or height is None:
+        return None
+    width = _display_width(width, stream.get("sample_aspect_ratio"))
+    if _quarter_turn(stream):
+        width, height = height, width
+    duration = None
+    try:
+        seconds = float(data["format"]["duration"])
+        if math.isfinite(seconds) and 0 <= seconds <= MAX_SECONDS:
+            duration = int(round(seconds))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    return VideoShape(width, height, duration)
+
+def _ffprobe_argv() -> "list[str] | None":
+    """The command that starts ffprobe, or None."""
+    found = shutil.which("ffprobe")
+    return [found] if found else None
+
+async def _read_capped(stream, limit: int) -> "bytes | None":
+    """Everything on `stream`, or None once it is more than `limit` bytes."""
+    data = b""
+    while True:
+        chunk = await stream.read(limit + 1 - len(data))
+        if not chunk:
+            return data
+        data += chunk
+        if len(data) > limit:
+            return None
+
+async def probe(path: str, run: "ProbeRun | None" = None) -> "VideoShape | None":
+    """The width, height and duration of the video at `path`, or None."""
+    argv = _ffprobe_argv()
+    if argv is None:
+        return None
+    if run is not None and run.exhausted:
+        return None
+    limit = PROBE_SECONDS if run is None else run.allowance()
+    started = time.monotonic()
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv, "-v", "error", "-protocol_whitelist", "file", "-select_streams", "v:0",
+            "-show_entries",
+            "stream=width,height,sample_aspect_ratio:stream_tags=rotate:stream_side_data=rotation:format=duration",
+            "-of", "json", "file:" + str(path),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        async def answer():
+            said = await _read_capped(process.stdout, PROBE_MAX_BYTES)
+            if said is not None:
+                await process.wait()
+            return said
+
+        output = await asyncio.wait_for(answer(), limit)
+        if output is None:
+            logger.debug("ffprobe said more than %d bytes; ignored", PROBE_MAX_BYTES)
+            return None
+        if process.returncode != 0:
+            return None
+        return shape_from_ffprobe(json.loads(output))
+    except asyncio.TimeoutError:
+        if run is not None:
+            run.timed_out = True
+        logger.debug("ffprobe took more than %s s", limit)
+        return None
+    except Exception as exc:
+        logger.debug("ffprobe failed: %s", type(exc).__name__)
+        return None
+    finally:
+        if process is not None and process.returncode is None:
+
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await process.wait()
+            except Exception:
+                pass
+        if run is not None:
+            run.spent += time.monotonic() - started
 
 # ─── module: downloader_bot.resolvers ────────────────────────────────────────
 """Turning a pasted link into files, through whichever route is still working."""
@@ -1745,6 +2006,29 @@ async def _resolve(platform: str, url: str) -> Resolved:
 
     raise NothingWorked(platform, failures)
 
+async def lookup(platform: str, url: str) -> str:
+    """Is the post still public? "present", "missing" or "unknown" -- asked of the routes without taking any media (sent_files.py: a stored file id is trusted only while the post was seen public in the last few hours)."""
+    asked = said_missing = 0
+    skipped: set[str] = set()
+    for name, fn in _ordered(platform):
+        if name.startswith("ytdlp:") or name in skipped:
+            continue
+        asked += 1
+        try:
+            found = await asyncio.wait_for(fn(url), timeout=_timeout_for(name))
+        except ProviderFailed as exc:
+            skipped.update(exc.skip)
+            if exc.kind == "missing":
+                said_missing += 1
+            continue
+        except Exception as exc:
+            logger.info("lookup: route %s gave no answer for %s (%s)", name, platform, type(exc).__name__)
+            continue
+        if found.items:
+            return "present"
+        said_missing += 1
+    return "missing" if asked and said_missing == asked else "unknown"
+
 SAMPLES = {
     "instagram": "https://www.instagram.com/reel/DTxk5orCKEv/",
     "tiktok": "https://www.tiktok.com/@scout2015/video/6718335390845095173",
@@ -2291,6 +2575,922 @@ def schedule(application) -> None:
     if not ENABLED or application.job_queue is None:
         return
     application.job_queue.run_repeating(_tick, interval=TICK_S, first=FIRST_RUN_S)
+
+# ─── module: downloader_bot.merge ────────────────────────────────────────────
+"""An album as one file: a PDF of its photos, or a ZIP of everything in it."""
+import asyncio
+import io
+import os
+import re
+import shutil
+import struct
+import zipfile
+from datetime import datetime, timezone
+
+from PIL import Image
+
+MIN_PDF_PHOTOS = 2
+MIN_ZIP_ITEMS = 2
+MAX_MEGAPIXELS = 20
+
+MAX_PAGE_POINTS = 14400
+MAX_SIDE = 65_500
+
+JPEG_QUALITY = 92
+
+MAX_HEADER_PARTS = 1000
+MAX_PNG_IDATS = 50_000
+MAX_GIF_SUB_BLOCKS = 300_000
+
+_MAX_JPEG_FILL = 4096
+
+MAX_JPEG_SCANS = 200
+_CHUNK_HEAD = struct.Struct(">I4s")
+
+PHOTO_FORMATS = ("JPEG", "PNG", "WEBP", "GIF")
+
+_EXIF_ORIENTATION = 0x0112
+
+class MergeError(Exception):
+    """Something this module will not or cannot build."""
+
+class PictureTooLarge(MergeError):
+    """An image over MAX_MEGAPIXELS. Refused from its header, before a pixel is decoded."""
+
+class NotAPhoto(MergeError):
+    """A file that is not a still picture in one of PHOTO_FORMATS: another format, or an animation."""
+
+class PhotoCutShort(MergeError):
+    """A JPEG, PNG or GIF whose file ends inside its own header: a photo that was cut."""
+
+class NothingToMerge(MergeError):
+    """No file was given, or not enough of them were photographs to make a PDF of (build_pdf left the others out)."""
+
+def output_name(platform: str, ext: str, now: "datetime | None" = None) -> str:
+    """`instagram_20261007-1432.pdf`: what the person sees the file called."""
+    now = now or datetime.now(timezone.utc)
+    stem = re.sub(r"[^a-z0-9]+", "", (platform or "").lower()) or "album"
+    return f"{stem}_{now:%Y%m%d-%H%M}.{ext}"
+
+def _safe_ext(path: str, default: str = "bin") -> str:
+    """The extension of a file on OUR disk, or `default` if it is not plainly one."""
+    ext = os.path.splitext(str(path))[1].lstrip(".").lower()
+    return ext if ext and len(ext) <= 5 and ext.isascii() and ext.isalnum() else default
+
+def entry_name(index: int, path: str, width: int = 2) -> str:
+    """`01.jpg` for the first file, `02.mp4` for the second."""
+    return f"{index:0{width}d}.{_safe_ext(path)}"
+
+def build_zip(paths: "list[str]", out_path: str) -> int:
+    """Every file in `paths`, in order, stored (not compressed) in one ZIP. Returns how many went in."""
+    if not paths:
+        raise NothingToMerge("nothing to put in a ZIP")
+    width = max(2, len(str(len(paths))))
+    stamp = datetime.now(timezone.utc).timetuple()[:6]
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_STORED) as archive:
+        for number, path in enumerate(paths, start=1):
+
+            info = zipfile.ZipInfo(entry_name(number, path, width), date_time=stamp)
+            info.compress_type = zipfile.ZIP_STORED
+            info.external_attr = 0o644 << 16
+            with open(path, "rb") as source, archive.open(info, "w", force_zip64=False) as target:
+                shutil.copyfileobj(source, target, 1024 * 1024)
+    return len(paths)
+
+_NEXT_MARKER = re.compile(rb"\xff[^\x00\xd0-\xd7\xff]")
+_NOT_FILL = re.compile(rb"[^\xff]")
+
+_MAX_SEGMENTS = 10_000
+
+def _jpeg_layout(data: bytes):
+    """(width, height, components, length) of a JPEG that can go into a PDF untouched, or None."""
+    n = len(data)
+    if data[:2] != b"\xff\xd8":
+        return None
+    pos, frame, segments = 2, None, 0
+    while pos + 2 <= n:
+        if data[pos] != 0xFF:
+            return None
+        marker = data[pos + 1]
+        if marker == 0xFF:
+            found = _NOT_FILL.search(data, pos)
+            if not found:
+                return None
+            pos = found.start() - 1
+            continue
+        segments += 1
+        if segments > _MAX_SEGMENTS:
+            return None
+        if marker == 0xD9:
+            return frame + (pos + 2,) if frame else None
+        if marker == 0x00:
+            return None
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            pos += 2
+            continue
+        if pos + 4 > n:
+            return None
+        length = int.from_bytes(data[pos + 2:pos + 4], "big")
+        if length < 2:
+            return None
+        if marker in (0xC0, 0xC2):
+            body = data[pos + 4:pos + 2 + length]
+            if len(body) < 6 or frame is not None or body[0] != 8:
+                return None
+            height, width = int.from_bytes(body[1:3], "big"), int.from_bytes(body[3:5], "big")
+            if not width or not height or body[5] not in (1, 3):
+                return None
+            frame = (width, height, body[5])
+        elif marker in (0xC1, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            return None
+        pos += 2 + length
+        if marker == 0xDA:
+            if frame is None:
+                return None
+            found = _NEXT_MARKER.search(data, pos)
+            if not found:
+                return None
+            pos = found.start()
+    return None
+
+def _orientation(image) -> int:
+    try:
+        return int(image.getexif().get(_EXIF_ORIENTATION, 1) or 1)
+    except Exception:
+        return 1
+
+def _upright(image):
+    """The picture the way up the camera meant it."""
+    if _orientation(image) not in (2, 3, 4, 5, 6, 7, 8):
+        return image
+    from PIL import ImageOps
+    turned = ImageOps.exif_transpose(image)
+    if turned is not image:
+        image.close()
+    return turned
+
+def _flatten(image):
+    """RGB, with any transparency laid over white."""
+    if image.mode in ("I;16", "I;16L", "I;16B", "I"):
+
+        image = image.point(lambda value: value * (1 / 256)).convert("L")
+    if image.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in image.info:
+        rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+        page = Image.new("RGB", rgba.size, (255, 255, 255))
+        page.paste(rgba, mask=rgba)
+        return page
+    return image if image.mode == "RGB" else image.convert("RGB")
+
+def _check_size(width: int, height: int) -> None:
+    if width * height > MAX_MEGAPIXELS * 1_000_000:
+        raise PictureTooLarge(f"{width} x {height} is over {MAX_MEGAPIXELS} megapixels")
+    if max(width, height) > MAX_SIDE:
+        raise PictureTooLarge(f"{width} x {height} has a side over {MAX_SIDE} pixels")
+
+def _too_many(parts: int) -> None:
+    if parts > MAX_HEADER_PARTS:
+        raise NotAPhoto(f"more than {MAX_HEADER_PARTS} parts in a header before the picture")
+
+def _count_scans(source) -> None:
+    """Refuses a JPEG with more than MAX_JPEG_SCANS start-of-scan markers."""
+    source.seek(0)
+    scans, tail = 0, b""
+    while True:
+        piece = source.read(1 << 20)
+        if not piece:
+            return
+        scans += (tail + piece).count(b"\xff\xda")
+        if scans > MAX_JPEG_SCANS:
+            raise NotAPhoto(f"more than {MAX_JPEG_SCANS} scans in a JPEG")
+        tail = piece[-1:]
+
+def _walk_jpeg(source, size: int) -> None:
+    """Segment by segment, jumping over each by its length, from the SOI to the first SOS (or EOI)."""
+    pos, parts, filler = 2, 0, 0
+    while True:
+        source.seek(pos)
+        pair = source.read(2)
+        if len(pair) < 2:
+            raise PhotoCutShort("a JPEG that ends before its picture")
+        if pair[0] != 0xFF or pair[1] in (0x00, 0xFF):
+            filler += 1
+            if filler > _MAX_JPEG_FILL:
+                raise NotAPhoto("junk between a JPEG's segments")
+            pos += 1
+            continue
+        parts += 1
+        _too_many(parts)
+        marker = pair[1]
+        if marker in (0xDA, 0xD9):
+            return
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            pos += 2
+            continue
+        raw = source.read(2)
+        if len(raw) < 2:
+            raise PhotoCutShort("a JPEG that ends inside a segment's length")
+        length = int.from_bytes(raw, "big")
+        if length < 2:
+            raise NotAPhoto("a JPEG segment without a length")
+        pos += 2 + length
+        if pos > size:
+            raise PhotoCutShort("a JPEG segment that runs past the end of the file")
+
+def _walk_png(source, size: int) -> None:
+    """Chunk by chunk (length, type, data, CRC), jumping over each, from the signature to IEND (or the end of the file)."""
+    pos, others, idats = 8, 0, 0
+    while True:
+        source.seek(pos)
+        window = source.read(65536)
+        end = len(window)
+        offset = 0
+        while offset + 8 <= end:
+            length, kind = _CHUNK_HEAD.unpack_from(window, offset)
+            if kind == b"IDAT":
+                idats += 1
+                if idats > MAX_PNG_IDATS:
+                    raise NotAPhoto(f"more than {MAX_PNG_IDATS} IDAT chunks in a PNG")
+            else:
+                others += 1
+                _too_many(others)
+                if kind == b"IEND":
+                    return
+            offset += 12 + length
+            if pos + offset > size:
+                raise PhotoCutShort("a PNG chunk that runs past the end of the file")
+        pos += offset
+        if pos >= size:
+            if pos == size and idats:
+                return
+            raise PhotoCutShort("a PNG that ends before its picture is over")
+        if not offset:
+            raise PhotoCutShort("a PNG that ends inside a chunk's header")
+
+def _gif_sub_blocks(source, pos: int, count: list, comment: bool) -> int:
+    """Past the sub-blocks that start at `pos` (each a length byte and that many bytes, ended by a zero length): the position after the terminator."""
+    seen = count[0]
+    room = MAX_GIF_SUB_BLOCKS - seen
+    if comment:
+        room = min(room, MAX_HEADER_PARTS - count[1])
+    taken = 0
+    while True:
+        source.seek(pos)
+        window = source.read(65536)
+        if not window:
+            raise PhotoCutShort("a GIF block that runs past the end of the file")
+        end = len(window)
+        offset = 0
+        while offset < end:
+            length = window[offset]
+            if not length:
+                count[0] += taken
+                if comment:
+                    count[1] += taken
+                return pos + offset + 1
+            offset += 1 + length
+            taken += 1
+            if taken > room:
+                if comment and taken + count[1] > MAX_HEADER_PARTS:
+                    raise NotAPhoto(f"more than {MAX_HEADER_PARTS} sub-blocks in a GIF comment")
+                raise NotAPhoto(f"more than {MAX_GIF_SUB_BLOCKS} sub-blocks in a GIF")
+        pos += offset
+
+def _walk_gif(source, size: int, head: bytes) -> None:
+    """Block by block, the WHOLE file, to the trailer (or the end of the file): extension blocks and the picture's own data, sub-block by sub-block, every one counted."""
+    if len(head) < 13:
+        raise PhotoCutShort("a GIF without its screen descriptor")
+    pos = 13 + (3 * (2 << (head[10] & 7)) if head[10] & 0x80 else 0)
+    blocks, images, count = 0, 0, [0, 0]
+    while True:
+        source.seek(pos)
+        block = source.read(1)
+        if not block or block == b"\x3b":
+            if images:
+                return
+            raise PhotoCutShort("a GIF that ends before its picture")
+        if block == b"\x21":
+            blocks += 1
+            _too_many(blocks)
+            label = source.read(1)
+            if not label:
+                raise PhotoCutShort("a GIF extension that runs past the end of the file")
+            pos = _gif_sub_blocks(source, pos + 2, count, label == b"\xfe")
+        elif block == b"\x2c":
+            images += 1
+            if images > 1:
+                raise NotAPhoto("an animated picture")
+            descriptor = source.read(9)
+            if len(descriptor) < 9:
+                raise PhotoCutShort("a GIF that ends inside its picture's descriptor")
+            pos += 10
+            if descriptor[8] & 0x80:
+                pos += 3 * (2 << (descriptor[8] & 7))
+            pos = _gif_sub_blocks(source, pos + 1, count, False)
+        else:
+            raise NotAPhoto("something in a GIF that is not a block")
+
+def _walk_webp(source, size: int) -> None:
+    """Chunk by chunk (fourcc, little-endian size, data padded to even), up to the first picture chunk."""
+    pos, parts = 12, 0
+    while True:
+        source.seek(pos)
+        head = source.read(8)
+        if len(head) < 8:
+            raise NotAPhoto("a WEBP that ends before its picture")
+        parts += 1
+        _too_many(parts)
+        if head[:4] in (b"VP8 ", b"VP8L", b"ANMF"):
+            return
+        length = int.from_bytes(head[4:8], "little")
+        pos += 8 + length + (length & 1)
+        if pos > size:
+            raise NotAPhoto("a WEBP chunk that runs past the end of the file")
+
+def _check_header(path: str) -> None:
+    """Refuse, from the file's start and before Pillow is asked to open it, what open() itself would pay for."""
+    with open(path, "rb") as source:
+        head = source.read(30)
+        size = os.fstat(source.fileno()).st_size
+        if len(head) >= 30 and head[:4] == b"RIFF" and head[8:12] == b"WEBP" and head[12:16] == b"VP8X":
+            _check_size(1 + int.from_bytes(head[24:27], "little"), 1 + int.from_bytes(head[27:30], "little"))
+            if head[20] & 0x02:
+                raise NotAPhoto("an animated picture")
+        elif len(head) >= 10 and head[:6] in (b"GIF87a", b"GIF89a"):
+            _check_size(int.from_bytes(head[6:8], "little"), int.from_bytes(head[8:10], "little"))
+        if head[:3] == b"\xff\xd8\xff":
+            _walk_jpeg(source, size)
+            _count_scans(source)
+        elif head[:8] == b"\x89PNG\r\n\x1a\n":
+            _walk_png(source, size)
+        elif head[:6] in (b"GIF87a", b"GIF89a"):
+            _walk_gif(source, size, head)
+        elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            _walk_webp(source, size)
+
+def _animated(image) -> bool:
+    """More than one picture in it, now that Pillow has opened it."""
+    if image.format == "MPO":
+        return False
+    if image.format == "GIF":
+        return False
+    return bool(getattr(image, "is_animated", False)) or getattr(image, "n_frames", 1) > 1
+
+def _open_photo(path: str):
+    """The file opened as a Pillow image, if it is a still photograph of a size this module takes: everything that can be told without decoding a pixel."""
+    _check_header(path)
+    try:
+
+        image = Image.open(path, formats=PHOTO_FORMATS)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise PictureTooLarge("an image far over the limit") from exc
+    except Image.UnidentifiedImageError as exc:
+        raise NotAPhoto("not a JPEG, PNG, WEBP or GIF") from exc
+    except OSError as exc:
+
+        if "could not create decoder object" in str(exc):
+            raise NotAPhoto("a WEBP that cannot be decoded") from exc
+        raise
+    try:
+        width, height = image.size
+        _check_size(width, height)
+        if _animated(image):
+            raise NotAPhoto("an animated picture")
+    except Exception:
+        image.close()
+        raise
+    return image
+
+def _prepare(path: str):
+    """(width, height, colour space, JPEG bytes) for one page of the PDF."""
+    image = _open_photo(path)
+    with image:
+        width, height = image.size
+        if _orientation(image) == 1:
+            with open(path, "rb") as source:
+                data = source.read()
+            layout = _jpeg_layout(data)
+            if layout and layout[:2] == (width, height):
+                w, h, components, length = layout
+
+                return (w, h, "/DeviceGray" if components == 1 else "/DeviceRGB",
+                        data if length == len(data) else memoryview(data)[:length])
+            del data
+        image.load()
+        _check_size(*image.size)
+        picture = _flatten(_upright(image))
+        buffer = io.BytesIO()
+        picture.save(buffer, "JPEG", quality=JPEG_QUALITY)
+        size = picture.size
+        picture.close()
+        return size[0], size[1], "/DeviceRGB", buffer.getvalue()
+
+def _points(value: float) -> bytes:
+
+    text = f"{max(1.0, min(value, MAX_PAGE_POINTS)):.3f}".rstrip("0").rstrip(".")
+    return text.encode()
+
+def build_pdf(paths: "list[str]", out_path: str) -> int:
+    """One page per photograph in `paths`, in order, written to `out_path`."""
+    if not paths:
+        raise NothingToMerge("nothing to put in a PDF")
+    photos = []
+    for path in paths:
+        try:
+            _open_photo(path).close()
+        except NotAPhoto:
+            continue
+        photos.append(path)
+    if not photos or (len(photos) < len(paths) and len(photos) < MIN_PDF_PHOTOS):
+        raise NothingToMerge(f"{len(photos)} of {len(paths)} files are photographs")
+    paths = photos
+    pages = len(paths)
+
+    total = 3 + 3 * pages
+    offsets: "dict[int, int]" = {}
+    with open(out_path, "wb") as out:
+        def obj(number: int, body: bytes, stream: "bytes | None" = None) -> None:
+            offsets[number] = out.tell()
+            out.write(b"%d 0 obj\n" % number)
+            if stream is None:
+                out.write(body + b"\nendobj\n")
+            else:
+                out.write(body[:-2] + b" /Length %d >>\nstream\n" % len(stream))
+                out.write(stream)
+                out.write(b"\nendstream\nendobj\n")
+
+        out.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        obj(1, b"<< /Type /Catalog /Pages 2 0 R >>")
+        kids = b" ".join(b"%d 0 R" % (3 + 3 * i) for i in range(pages))
+        obj(2, b"<< /Type /Pages /Count %d /Kids [%s] >>" % (pages, kids))
+        for index, path in enumerate(paths):
+            width, height, colour, jpeg = _prepare(path)
+            scale = min(1.0, MAX_PAGE_POINTS / max(width, height))
+            page_w, page_h = _points(width * scale), _points(height * scale)
+            page, content, image = 3 + 3 * index, 4 + 3 * index, 5 + 3 * index
+            obj(page, b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] "
+                      b"/Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>"
+                % (page_w, page_h, image, content))
+            obj(content, b"<< >>", b"q %s 0 0 %s 0 0 cm /Im0 Do Q" % (page_w, page_h))
+            obj(image, b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s "
+                       b"/BitsPerComponent 8 /Filter /DCTDecode >>" % (width, height, colour.encode()),
+                jpeg)
+            del jpeg
+            out.flush()
+        table = out.tell()
+        out.write(b"xref\n0 %d\n0000000000 65535 f \n" % total)
+        for number in range(1, total):
+            out.write(b"%010d 00000 n \n" % offsets[number])
+        out.write(b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (total, table))
+    return pages
+
+_pdf_gate: "asyncio.Semaphore | None" = None
+
+def pdf_gate() -> "asyncio.Semaphore":
+    global _pdf_gate
+    if _pdf_gate is None:
+        _pdf_gate = asyncio.Semaphore(1)
+    return _pdf_gate
+
+async def build_pdf_queued(paths: "list[str]", out_path: str) -> int:
+    """build_pdf in a pool thread, after any other PDF being built has finished."""
+    gate = pdf_gate()
+    await gate.acquire()
+    try:
+
+        task = asyncio.ensure_future(asyncio.to_thread(build_pdf, paths, out_path))
+    except BaseException:
+        gate.release()
+        raise
+
+    def finished(done: "asyncio.Future") -> None:
+        gate.release()
+        if not done.cancelled():
+            done.exception()
+
+    task.add_done_callback(finished)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+
+        def discard(_done: "asyncio.Future") -> None:
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+        task.add_done_callback(discard)
+        raise
+
+# ─── module: downloader_bot.delivery_cache ───────────────────────────────────
+"""The last download, kept for five minutes, so the redo button and the same link sent again are answered without fetching the post a second time."""
+import logging
+import os
+import shutil
+import time
+import uuid
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+MB = 1024 * 1024
+
+def _env_int(name: str, default: int, unreadable: "int | None" = None) -> int:
+    """A whole number from the environment, never negative; `unreadable` (the default when it is None) for anything else -- a typo here must not stop the bot starting."""
+    try:
+        return max(0, int(os.environ.get(name) or default))
+    except ValueError:
+        return default if unreadable is None else unreadable
+
+LIFE_SECONDS = _env_int("DBOT_CACHE_SECONDS", 300, unreadable=0)
+
+MAX_LIFE_SECONDS = 12 * 60 * 60
+
+ENTRY_MAX_MB = _env_int("DBOT_CACHE_ENTRY_MAX_MB", 100)
+TOTAL_MAX_MB = _env_int("DBOT_CACHE_MAX_MB", 400)
+
+LATEST_KEEP_SECONDS = 60 * 60
+
+SHARED_SENDER_IDS = frozenset({1087968824, 136817688, 777000})
+
+_clock = time.monotonic
+
+@dataclass(eq=False)
+class Entry:
+    user_id: int
+    key: tuple
+    items: list
+    dir: str
+    size: int
+    expires_at: float
+    last_used: float
+    pins: int = 0
+    kept_at: float = 0.0
+    dead: bool = False
+
+_work_dir = None
+_root = None
+_entries = {}
+_dead = []
+_latest = {}
+_hits = 0
+_misses = 0
+
+def configure(work_dir) -> None:
+    """Where downloads are staged; the cache folder is inside it."""
+    global _work_dir, _root
+    _work_dir = work_dir
+    _root = os.path.join(work_dir, "dbot-cache") if work_dir else None
+
+def enabled() -> bool:
+    return LIFE_SECONDS > 0 and _root is not None
+
+def usable(user_id) -> bool:
+    """Whether anything may be cached, taken or noted for this sender: the cache is on and the id is one person's (not SHARED_SENDER_IDS)."""
+    return enabled() and user_id not in SHARED_SENDER_IDS
+
+def free_mb() -> "int | None":
+    """Free space on the disk the downloads are staged on, or None."""
+    try:
+        return shutil.disk_usage(_work_dir).free // MB
+    except (OSError, TypeError):
+        return None
+
+def _remove_dir(path: str) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+
+        logger.warning("couldn't delete a cached delivery (%s)", type(exc).__name__)
+
+def _discard(entry: Entry) -> None:
+    """The entry is no longer offered. Its files go now, or at the last release if a send is still reading them."""
+    if _entries.get(entry.user_id) is entry:
+        del _entries[entry.user_id]
+    if entry.pins > 0:
+        entry.dead = True
+        if not any(each is entry for each in _dead):
+            _dead.append(entry)
+    else:
+        _remove_dir(entry.dir)
+
+def _used_bytes() -> int:
+    return sum(e.size for e in _entries.values()) + sum(e.size for e in _dead)
+
+NOTED_OFF = "off"
+NOTED_NEW = "new"
+NOTED_AGAIN_CACHED = "again.cached"
+NOTED_AGAIN_NOT_CACHED = "again.not_cached"
+
+def note_link(user_id: int, platform: str, url: str) -> str:
+    """The person has just sent (or tapped) this link."""
+    if not usable(user_id):
+        return NOTED_OFF
+    now = _clock()
+    key = (platform, url)
+    before = _latest.get(user_id)
+    again = before is not None and before[0] == key
+    _latest[user_id] = (key, now)
+    entry = _entries.get(user_id)
+    live = entry is not None and entry.key == key and entry.expires_at > now
+    if entry is not None:
+        if live:
+            entry.expires_at = _renewed(entry, now)
+            entry.last_used = now
+        else:
+            _discard(entry)
+    if not again:
+        return NOTED_NEW
+    return NOTED_AGAIN_CACHED if live else NOTED_AGAIN_NOT_CACHED
+
+def keep(user_id: int, platform: str, url: str, items_with_paths, floor_mb: int = 0) -> bool:
+    """Take over these delivered files."""
+    try:
+        return _keep(user_id, (platform, url), list(items_with_paths), floor_mb)
+    except Exception as exc:
+
+        logger.warning("couldn't keep a delivery (%s)", type(exc).__name__)
+        return False
+
+def _keep(user_id: int, key: tuple, items_with_paths: list, floor_mb: int) -> bool:
+    if not usable(user_id) or not items_with_paths:
+        return False
+    latest = _latest.get(user_id)
+    if latest is None or latest[0] != key:
+        return False
+    size = sum(os.path.getsize(path) for _, path in items_with_paths)
+    if size > ENTRY_MAX_MB * MB:
+        return False
+    previous = _entries.get(user_id)
+    if previous is not None:
+        _discard(previous)
+
+    candidates = sorted((e for e in _entries.values() if e.pins == 0), key=lambda e: e.last_used)
+    over = _used_bytes() + size - TOTAL_MAX_MB * MB
+    need = 0
+    freed = 0
+    while over - freed > 0:
+        if need >= len(candidates):
+            return False
+        freed += candidates[need].size
+        need += 1
+    if floor_mb > 0:
+        free = free_mb()
+        if free is None:
+            return False
+        freed_disk = sum(c.size for c in candidates[:need])
+        while free + freed_disk / MB < floor_mb:
+            if need >= len(candidates):
+                return False
+            freed_disk += candidates[need].size
+            need += 1
+    for victim in candidates[:need]:
+        _discard(victim)
+
+    directory = os.path.join(_root, uuid.uuid4().hex)
+    os.makedirs(directory, mode=0o700)
+    moved, kept = [], []
+    try:
+        for item, path in items_with_paths:
+            destination = os.path.join(directory, os.path.basename(path))
+            if os.path.lexists(destination):
+                raise FileExistsError("two files with one name")
+            os.replace(path, destination)
+            moved.append((path, destination))
+            kept.append((item, destination))
+    except Exception:
+        for path, destination in reversed(moved):
+            try:
+                os.replace(destination, path)
+            except OSError:
+                try:
+                    os.remove(destination)
+                except OSError:
+                    pass
+        _remove_dir(directory)
+        return False
+    now = _clock()
+    _entries[user_id] = Entry(user_id, key, kept, directory, size, now + LIFE_SECONDS, now, kept_at=now)
+    return True
+
+def _renewed(entry: Entry, now: float) -> float:
+    """The five minutes again from now, but never past MAX_LIFE_SECONDS after keeping."""
+    return min(now + LIFE_SECONDS, entry.kept_at + MAX_LIFE_SECONDS)
+
+def take(user_id: int, platform: str, url: str):
+    """The person's kept delivery of exactly this link, pinned for the send (call release() when it is over, whatever happens) and with its life restarted; or None."""
+    global _hits, _misses
+    if not usable(user_id):
+        return None
+    now = _clock()
+    key = (platform, url)
+    entry = _entries.get(user_id)
+    if entry is not None and entry.expires_at <= now:
+        _discard(entry)
+        entry = None
+    if entry is not None and entry.key == key and not all(os.path.exists(p) for _, p in entry.items):
+        _discard(entry)
+        entry = None
+    if entry is None or entry.key != key:
+        _misses += 1
+        return None
+    entry.pins += 1
+    entry.expires_at = _renewed(entry, now)
+    entry.last_used = now
+    _hits += 1
+    return entry
+
+def release(entry) -> None:
+    """The send from `entry` is over."""
+    entry.pins = max(0, entry.pins - 1)
+    if entry.dead and entry.pins == 0:
+        _dead[:] = [each for each in _dead if each is not entry]
+        _remove_dir(entry.dir)
+
+def drop(user_id: int) -> None:
+    """Forget this person's kept delivery."""
+    entry = _entries.get(user_id)
+    if entry is not None:
+        _discard(entry)
+
+def forget_user(user_id: int) -> None:
+    """/deletemydata: the kept delivery, and also what makes a download that is still in flight kept when it lands (their latest link)."""
+    drop(user_id)
+    _latest.pop(user_id, None)
+
+def sweep(now=None) -> None:
+    """Drop what has expired, and forget latest links that nothing is waiting on (an hour old, LATEST_KEEP_SECONDS: not the cache's own life, which a slow download outlasts)."""
+    now = _clock() if now is None else now
+    for entry in list(_entries.values()):
+        if not enabled() or entry.expires_at <= now:
+            _discard(entry)
+    for user_id, (_key, noted) in list(_latest.items()):
+        if user_id not in _entries and (not enabled() or noted + LATEST_KEEP_SECONDS <= now):
+            del _latest[user_id]
+
+def make_room(mb: int, min_free_mb: int = 0) -> None:
+    """A download is about to need up to `mb` MB of the disk, on top of the `min_free_mb` it must always leave free: delete kept deliveries, least recently used first, until the disk has both or nothing that can be deleted is left."""
+    try:
+        if not enabled():
+            return
+        free = free_mb()
+        if free is None:
+            return
+        need = min_free_mb + mb
+        freed = 0
+        for victim in sorted((e for e in _entries.values() if e.pins == 0), key=lambda e: e.last_used):
+            if free + freed / MB >= need:
+                break
+            freed += victim.size
+            _discard(victim)
+    except Exception as exc:
+        logger.warning("couldn't make room (%s)", type(exc).__name__)
+
+def wipe() -> None:
+    """Delete everything in the cache folder (at startup: it can only hold what a previous process left behind) and forget all state."""
+    _entries.clear()
+    _dead.clear()
+    _latest.clear()
+    if _root is not None:
+        _remove_dir(_root)
+
+def stats() -> dict:
+    """Counts only, for the owner's /status."""
+    return {"enabled": enabled(), "entries": len(_entries), "bytes": _used_bytes(),
+            "hits": _hits, "misses": _misses}
+
+# ─── module: downloader_bot.sent_files ───────────────────────────────────────
+"""Telegram's file IDs for what this bot has already sent, kept so the same post can be sent again without being downloaded again."""
+import hashlib
+import hmac
+import json
+import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+import delivery_cache
+
+logger = logging.getLogger(__name__)
+
+STORE_VERSION = 1
+
+MAX_ITEMS = 10
+
+KINDS = ("video", "photo")
+
+def _whole_number(name: str, default: int):
+    """The number in the environment, `default` when it is not set, None when it is not a whole number."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+def read_settings() -> "tuple[bool, int]":
+    """(on, confirm hours) from the environment."""
+    flag = _whole_number("DBOT_SENT_FILES", 1)
+    hours = _whole_number("DBOT_FILEID_CONFIRM_HOURS", 12)
+    return (flag is not None and flag > 0), (hours if hours is not None and hours >= 1 else 12)
+
+ENABLED, CONFIRM_HOURS = read_settings()
+
+_clock = lambda: datetime.now(timezone.utc)
+
+_key: "bytes | None" = None
+
+def configure(token) -> None:
+    """The hash key, from the bot's token."""
+    global _key
+    _key = hashlib.sha256(b"dbot-sent-files|" + token.encode()).digest() if token else None
+
+def enabled() -> bool:
+    return ENABLED and _key is not None
+
+def usable(user_id) -> bool:
+    """Whether the store may be read or written for this sender: it is on, and the id is one person's."""
+    return enabled() and user_id not in delivery_cache.SHARED_SENDER_IDS
+
+def post_key(platform: str, url: str, lossless: bool) -> str:
+    """The row of this post in this form: a hex HMAC-SHA256. See the module docstring."""
+    form = "file" if lossless else "media"
+    message = f"{STORE_VERSION}|{platform}|{url}|{form}".encode("utf-8")
+    return hmac.new(_key, message, hashlib.sha256).hexdigest()
+
+@dataclass(frozen=True)
+class StoredFile:
+    """One stored file as bot._send_media takes it in place of a MediaItem: what it was (the kind of the item sent, whatever the form) and the id to send it by."""
+    kind: str
+    file_id: str
+    filename: str = "download"
+
+def _valid_pairs(pairs) -> bool:
+    if not isinstance(pairs, (list, tuple)) or not 1 <= len(pairs) <= MAX_ITEMS:
+        return False
+    for pair in pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            return False
+        kind, file_id = pair
+        if kind not in KINDS or not isinstance(file_id, str) or not file_id:
+            return False
+    return True
+
+def encode_items(pairs) -> "str | None":
+    """[(kind, file id), ...] as the JSON text of a row, or None if it is not something a row may hold (1 to 10 items, kind video or photo, an id that is a non-empty string)."""
+    if not _valid_pairs(pairs):
+        return None
+    return json.dumps([[kind, file_id] for kind, file_id in pairs], separators=(",", ":"))
+
+def decode_items(text) -> "list[tuple[str, str]] | None":
+    """The pairs in a row, or None for anything that is not a list of 1 to 10 [kind, id]: such a row is treated as if it were absent."""
+    try:
+        pairs = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not _valid_pairs(pairs):
+        return None
+    return [(kind, file_id) for kind, file_id in pairs]
+
+def stored_files(pairs) -> list:
+    return [StoredFile(kind, file_id) for kind, file_id in pairs]
+
+def is_fresh(confirmed_at, now=None) -> bool:
+    """Whether the post was seen public less than CONFIRM_HOURS ago."""
+    if not isinstance(confirmed_at, datetime):
+        return False
+    now = now if now is not None else _clock()
+    if confirmed_at.tzinfo is None:
+        confirmed_at = confirmed_at.replace(tzinfo=timezone.utc)
+    age = now - confirmed_at
+    return -timedelta(minutes=5) <= age < timedelta(hours=CONFIRM_HOURS)
+
+_INVALID_ID_MARKERS = (
+    "wrong file identifier", "wrong remote file identifier", "file_id",
+    "type of file mismatch", "file reference", "file_reference", "media_empty",
+)
+
+def is_invalid_file_id(exc: BaseException) -> bool:
+    from telegram.error import BadRequest
+    if not isinstance(exc, BadRequest):
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _INVALID_ID_MARKERS)
+
+_counts = {"hit": 0, "stale": 0, "miss": 0, "present": 0, "missing": 0, "unknown": 0,
+           "invalid": 0, "stored": 0}
+
+def note(name: str) -> None:
+    _counts[name] += 1
+
+def stats() -> dict:
+    return dict(_counts, enabled=enabled())
+
+def reset_stats() -> None:
+    for name in _counts:
+        _counts[name] = 0
 
 # ─── module: downloader_bot.large_files ──────────────────────────────────────
 """Downloads over 48 MB: fetched anyway, sent over MTProto, and paid for -- only for somebody who has said yes."""

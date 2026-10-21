@@ -48,8 +48,8 @@ DRAIN_SECONDS = float(os.environ.get("UNIFIED_DRAIN_SECONDS") or 30)
 
 STATUS_MINUTES = float(os.environ.get("UNIFIED_STATUS_MINUTES") or 30)
 
-# The threads all five bots share for blocking work (database, file I/O, yt-dlp).
-# 8 until 2.1.0: on 2026-10-09 every bot's once-a-second database
+# The threads all five bots share for blocking work (database, file I/O, yt-dlp,
+# the album PDF). 8 until 2.1.0: on 2026-10-09 every bot's once-a-second database
 # job was skipped for a minute and a half because the threads were all waiting on
 # the database at once. The pools' timeouts now bound such a wait; this is the
 # headroom while one lasts. An idle thread costs next to nothing.
@@ -901,6 +901,26 @@ def _worker_problem(jobs) -> str | None:
         return None if outcome.bytes > 0 and Path(outcome.path).is_file() else "no file came out"
 
 
+def _probe_problem(video) -> str | None:
+    """DownloaderBot's video measuring on a real clip: a 64x36, two-frame video made
+    with the ffmpeg on this machine must come back from `video.probe` as 64 wide and
+    36 high. It proves the ffprobe arguments work on the ffmpeg the image installs."""
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as work:
+        clip = Path(work) / "probe-check.mp4"
+        made = subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=64x36:rate=10",
+             "-frames:v", "2", "-c:v", "mpeg4", "-pix_fmt", "yuv420p", str(clip)],
+            capture_output=True, timeout=120)
+        if made.returncode != 0 or not clip.is_file():
+            return "ffmpeg could not make the test clip"
+        shape = asyncio.run(video.probe(str(clip)))
+        if shape is None:
+            return "ffprobe gave no shape"
+        return None if (shape.width, shape.height) == (64, 36) else f"it measured {shape.width}x{shape.height}"
+
+
 def check(bots: list[Bot]) -> int:
     """Load every bot without starting any, and prove each got its own modules."""
     failures = []
@@ -967,6 +987,39 @@ def check(bots: list[Bot]) -> int:
         expect(f"ConvertBot's worker converts a picture ({problem})", problem is None)
         if problem is None:
             print("  ok    ConvertBot: the conversion worker ran, as", " ".join(jobs.WORKER_ARGS))
+        # Text recognition reads a line of English and a line of Russian from a page
+        # it draws, so an image without the language data, or with a PyMuPDF that has
+        # no engine in it, fails the build here and not on somebody's scan. The
+        # Dockerfile sets TESSDATA_PREFIX; a checkout without it says it skipped.
+        if os.environ.get("TESSDATA_PREFIX"):
+            try:
+                importlib.import_module("convert_bot.ocr_convert").selftest()
+                ocr_problem = None
+            except SystemExit:
+                ocr_problem = "its self-test failed: see the line above"
+            except Exception as exc:
+                ocr_problem = f"{type(exc).__name__}: {exc}"
+            expect(f"ConvertBot reads text from a picture ({ocr_problem})", ocr_problem is None)
+            if ocr_problem is None:
+                print("  ok    ConvertBot: text recognition read its test page")
+        else:
+            print("  --    ConvertBot: text recognition not checked (TESSDATA_PREFIX is not set)")
+    video = sys.modules.get("downloader_bot.video")
+    if video is not None:
+        # Videos are sent with their real width and height (video.probe); a build
+        # whose ffprobe does not answer to those arguments fails here, not on a reel.
+        # Skipped, with a note, where there is no ffmpeg (a bare checkout).
+        import shutil
+        if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+            try:
+                shape_problem = _probe_problem(video)
+            except Exception as exc:
+                shape_problem = f"{type(exc).__name__}: {exc}"
+            expect(f"DownloaderBot measures a video's shape ({shape_problem})", shape_problem is None)
+            if shape_problem is None:
+                print("  ok    DownloaderBot: ffprobe measured a 64x36 test clip")
+        else:
+            print("  --    DownloaderBot: video shape not checked (ffmpeg is not on PATH)")
     give_back_memory()
     print(f"\n{len(loaded)} bot(s) loaded in {seconds:.1f}s; {footprint()}")
     if failures:

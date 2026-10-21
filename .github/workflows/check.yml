@@ -27,8 +27,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: ffmpeg and bsdtar
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libarchive-tools
+      - name: ffmpeg, bsdtar and the text-recognition language data
+        # The same packages as the Dockerfile, so the self-check also reads a test page's text.
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libarchive-tools
+          tesseract-ocr-eng tesseract-ocr-rus tesseract-ocr-uzb tesseract-ocr-uzb-cyrl
       - name: Install requirements
         run: |
           python -m pip install --upgrade pip
@@ -36,4 +39,5 @@ jobs:
       - name: Self-check
         env:
           PYTHONIOENCODING: utf-8
+          TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
         run: python main.py --check

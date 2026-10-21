@@ -5,7 +5,7 @@ Five Telegram bots in one process.
 | bot | what it does |
 |---|---|
 | **StickerBot** | Turns images, GIFs, videos and stickers into Telegram sticker packs, with co-editing by share link and bulk import from another pack or a WhatsApp export. |
-| **ConvertBot** | Converts files between about 90 formats: pictures, camera raw photos, video, audio, documents, e-books, spreadsheets, subtitles and archives, up to 2000 MB. |
+| **ConvertBot** | Converts files between about 90 formats: pictures, camera raw photos, video, audio, documents, e-books, spreadsheets, subtitles and archives, up to 2000 MB, and reads the text in a photo or a scanned PDF (TXT or a searchable PDF). |
 | **DownloaderBot** | Returns the media behind an Instagram, TikTok, Pinterest, Reddit or X link -- over 50 MB too, for ⚡ credit, for somebody who switched that on. |
 | **AnonBot** | A permanent personal link for receiving anonymous messages, with two-way replies threaded per conversation. |
 | **ManagerBot** | Private. Watches the other four, forwards their crashes and payments, and runs their owner-only commands from one chat. |
@@ -50,9 +50,13 @@ to stop, one button each, and stops nothing until one is chosen), `/balance`,
 suggestion or a report about anything, for whoever runs the bots: the words,
 the bot and the language reach them, never who wrote it, so it is one-way —
 read, never answered — and it is deleted after 30 days), in English, Uzbek and
-Russian. `/help` is the short version in every bot, with a button for the full
-guide (`/help full`). Owner-only commands answer anybody else exactly as a misspelt command
-does, so their existence is not disclosed.
+Russian. `/help` is the short version in every bot. Under it, as under ManagerBot's
+`/ping`, is one button per command that has options, and a last one for the full guide
+(`/help full`, or `/fullhelp` in one tap); a page button sends that command's page as a
+new message, a detailed explanation with an example and every price and limit worked out
+by the code that applies it (also `/help convert`, `/help newpack`, ...). ManagerBot has
+the same for its own commands. Owner-only commands answer anybody else exactly as a
+misspelt command does, so their existence is not disclosed.
 
 ### StickerBot
 
@@ -142,6 +146,36 @@ Pasting a supported link is the whole interface.
 | `/caption on\|off` | The credit caption. |
 | `/donate` | A voluntary payment in Stars; it also raises the download allowance. |
 
+**The last download is kept for five minutes**, so that the button under it (get
+it as a file, or compressed) and the same link sent again are answered without
+fetching the post a second time. Each use starts the five minutes again, but the
+kept copy never lasts past 12 hours after the download; a
+different link, `/deletemydata` or a restart deletes it at once. It still counts
+as one download. `DBOT_CACHE_SECONDS` (0 switches it off), `DBOT_CACHE_ENTRY_MAX_MB`
+and `DBOT_CACHE_MAX_MB` set the time and the sizes. Videos are sent with their
+real width, height and length, so a vertical video arrives vertical.
+
+**One post is one link.** A pasted link is cut down to the address of the post
+first: share-tracking parts such as `?igsh=`, `?utm_source=` or `?si=` are removed
+before anything else sees it, so one post pasted in two shapes is one link. The same
+link pasted again while the first is still queued or downloading starts no second
+job: the repeat gets a 👌 reaction and is not counted as a download (same person,
+same chat, same post only).
+
+**A post already sent is sent again by file ID.** Telegram gives every file the bot
+sends a file ID, and the bot keeps those, filed under a scrambled name of the post
+and not under who asked (no user id, chat, username, link or caption), so a link for
+a post it has already sent to anybody is answered without downloading it. A
+reference confirmed less than 12 hours ago is used as it is; an older one only after
+a lookup shows the post still public. If the post is gone or the lookup is
+inconclusive, nothing old is sent and the bot goes to the platform as usual; a send
+by file ID that Telegram refuses (BadRequest) drops the stored reference, and the post
+is fetched in the same job only when Telegram says the ID itself is invalid. References unused for 90
+days are deleted. It counts as one download. `DBOT_SENT_FILES` (0 switches it off),
+`DBOT_FILEID_CONFIRM_HOURS` and `DBOT_FILEID_KEEP_DAYS`. Large files, PDF/ZIP
+merges, Reddit pictures, rendered text cards and deliveries of more than 10 files
+are not stored.
+
 **Large files, over 48 MB.** The Bot API sends 50 MB at most, so downloads
 stop at 48. With the API id and hash above, a file past that is fetched anyway
 and sent over MTProto, up to 2000 MB, **for ⚡7 up to 100 MB and less for each
@@ -220,6 +254,12 @@ Answers only `ADMIN_ID`; without it, it does not start.
   trip leg by leg, timed on the database's clock), `/logs <bot>`, `/restart`,
   `/whois`, `/say`, `/dbdump`.
 - **Releases:** `/pause`, `/warn`, `/resume`, `/broadcast`.
+- **The 220 ⚡ gift:** every 15 minutes ManagerBot counts the unique people across all
+  the bots (`/users` shows it) and tells the owner once when they reach 220. `/promo`
+  then starts the gift, once ever: for 14 days the first message a person sends
+  ConvertBot or DownloaderBot gives them 220 ⚡ of bonus credit (spendable for 28 days
+  from that day), and AnonBot shows each person who writes to it an ad for it, once.
+  `/promo` shows how it goes; `/promo stop` ends the claiming early.
 - **The family:** `/balance`, `/addcredit`, `/donations`, `/backup` (the whole
   database as CSVs), `/sql <SELECT …>` (read-only), `/decode <code>`.
 

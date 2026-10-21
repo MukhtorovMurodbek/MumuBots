@@ -18,6 +18,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import socket
 import time
 from collections import deque
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 FAMILY_SCHEMA = "family"
 
-VERSION = os.environ.get("FAMILY_VERSION", "2.1.0")
+VERSION = os.environ.get("FAMILY_VERSION", "2.2.0")
 
 _REPORTS_BECAME_AUTOMATIC = datetime(2026, 9, 13, tzinfo=timezone.utc)
 
@@ -165,6 +166,18 @@ def init_family_schema() -> None:
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_usage_recent "
             f"ON {FAMILY_SCHEMA}.usage_samples (bot_id, sampled_at DESC)"
+        )
+
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.button_taps (
+                bot_id TEXT NOT NULL,
+                day DATE NOT NULL,
+                button TEXT NOT NULL,
+                taps INTEGER NOT NULL,
+                PRIMARY KEY (bot_id, day, button)
+            )
+            """
         )
 
         conn.execute(
@@ -618,6 +631,41 @@ def grant_stars_once(user_id: int, amount: int, key: str, detail: str | None = N
             logger.exception("Could not release the grant claim %s", claim)
         raise
 
+GIFT_MAX_CREDIT = 1000
+
+def grant_bonus_once(user_id: int, amount: int, key: str, expires_at: datetime,
+                     detail: str | None = None) -> "int | None":
+    """A gift: `amount` credits of bonus that runs out at `expires_at`, given the first time this (key, user) is ever asked for and never again."""
+    if not 0 < amount <= GIFT_MAX_CREDIT:
+        raise ValueError(f"a gift is 1..{GIFT_MAX_CREDIT} credits, not {amount}")
+    if expires_at.tzinfo is None:
+        raise ValueError("a gift's expiry must carry its time zone")
+    if expires_at <= datetime.now(timezone.utc):
+        raise ValueError("a gift that has already expired gives nothing")
+    claim = f"stars:granted:{key}:{user_id}"
+    with _connect() as conn:
+        _lock_wallet_in(conn, user_id)
+        won = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO NOTHING RETURNING key",
+            (claim, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()
+        if not won:
+            conn.rollback()
+            return None
+        _expire_in(conn, user_id)
+
+        last_day = expires_at - timedelta(microseconds=1)
+        balance = _move_in(conn, user_id, amount, "grant",
+                           detail or f"gift {key}, bonus through {last_day:%Y-%m-%d}")
+        conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
+            f"VALUES (%s, %s, %s, %s)",
+            (user_id, amount, amount, expires_at),
+        )
+        conn.commit()
+    return balance
+
 def expire_bonus_credit() -> int:
     """Housekeeping: expire every person's run-out bonus."""
     with _connect() as conn:
@@ -988,6 +1036,38 @@ def record_usage(window_minutes: int, rss_mb, peak_rss_mb, ceiling_mb,
         )
         conn.commit()
 
+def record_taps(taps: dict) -> None:
+    """Add a window's button counts to today's (UTC) row of each button."""
+    if not _enabled or not taps:
+        return
+    rows = [(_bot_id, key, count) for key, count in taps.items()
+            if isinstance(key, str) and isinstance(count, int) and not isinstance(count, bool) and count > 0]
+    if not rows:
+        return
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO {FAMILY_SCHEMA}.button_taps AS t (bot_id, day, button, taps) "
+                f"VALUES (%s, (now() AT TIME ZONE 'UTC')::date, %s, %s) "
+                f"ON CONFLICT (bot_id, day, button) DO UPDATE SET taps = t.taps + EXCLUDED.taps",
+                rows,
+            )
+        conn.commit()
+
+def button_taps_history(days: int = 7) -> list[dict]:
+    """Taps per bot and button over the last `days` UTC days (today and the days-1 before it), most tapped first within a bot."""
+    if not _enabled:
+        return []
+    with _connect() as conn:
+        cur = conn.execute(
+            f"SELECT bot_id, button, SUM(taps)::bigint AS taps FROM {FAMILY_SCHEMA}.button_taps "
+            f"WHERE day > (now() AT TIME ZONE 'UTC')::date - %s "
+            f"GROUP BY bot_id, button ORDER BY bot_id, SUM(taps) DESC, button",
+            (days,),
+        )
+        names = [column.name for column in cur.description]
+        return [dict(zip(names, row)) for row in cur.fetchall()]
+
 def usage_history(bot_id: str | None = None, hours: int = 24) -> list[dict]:
     """Recent samples, newest first. `bot_id=None` means every bot, which is what ManagerBot asks for."""
     if not _enabled:
@@ -1237,8 +1317,11 @@ def _tail_lines(path: Path, wanted: int) -> list[str]:
             data = f.read(step) + data
     return data.decode("utf-8", errors="replace").splitlines()[-wanted:]
 
+LOG_TAIL_DEFAULT = 40
+LOG_TAIL_MAX = 500
+
 async def _cmd_logs(context, args):
-    lines_wanted = min(int(args[0]), 500) if args and args[0].isdigit() else 40
+    lines_wanted = min(int(args[0]), LOG_TAIL_MAX) if args and args[0].isdigit() else LOG_TAIL_DEFAULT
     which = "errors.log"
     if args and args[-1] in ("bot", "all"):
         which = "bot.log"
@@ -1294,10 +1377,20 @@ _PLAIN = {
     "update_soon_try_later_soon": "\U0001f527 I'm about to be updated, so I can't start anything new right now. Please try again shortly.",
     "update_will_reset": "\U0001f527 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a moment.",
     "update_done_try_now": "✅ The update is done. You can go ahead and try again now.",
+    "gift_granted": "\U0001f381 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, "
+                    "good until {date}. It pays for about {conversions} paid conversions in {convert} "
+                    "or big-file downloads in {download}. Your balance: /balance",
+    "gift_claimed": "\U0001f381 Gift received: {amount} ⚡ of free credit! Mumu bots have passed {users} users, "
+                    "and this is our thank-you.\nIt is good until {date} (UTC) and pays for about {conversions} "
+                    "paid conversions in {convert} or big-file downloads in {download}.\nYour balance: /balance",
+    "gift_ad": "\U0001f389 Mumu bots have passed {users} unique users, so we decided to give out {amount} ⚡ of "
+               "free credit! You can claim it and use it in {download} and {convert}.\n\n<i>To claim it, send any "
+               "message to either bot: the gift is added automatically. Claim it by {claim_by}; once claimed, "
+               "it lasts {days} days.</i>",
 }
 
 def phrase(key: str, lang: str | None = None, **kwargs) -> str:
-    """One of the four sentences above, translated if this bot can."""
+    """One of the sentences above, translated if this bot can."""
     i18n = _i18n()
     if i18n is not None:
         try:
@@ -1392,6 +1485,297 @@ async def _cmd_broadcast(context, args):
         None, None,
     )
 
+GIFT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,39}$")
+
+GIFT_KEY_RULE = "The key is 3-40 lowercase letters, digits or dashes, starting with a letter or digit."
+GIFT_MAX_DAYS = 400
+
+_GIFT_NOT_PEOPLE = {1087968824, 136817688, 777000}
+
+GIFT_CREDITS_PER_CONVERSION = 10
+
+def _gift_last_day(text: str) -> "datetime | None":
+    """`YYYY-MM-DD` -> the moment the gift runs out: the end of that day, UTC."""
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day + timedelta(days=1)
+
+def _gift_args(args: list[str]) -> "tuple[str, int, datetime, str] | str":
+    """(key, amount, expires_at, last day as written), or the sentence saying what is wrong."""
+    if len(args) != 3:
+        return "Usage: gift <key> <credits> <last day YYYY-MM-DD> [--go]"
+    key, raw_amount, raw_day = args
+    if not GIFT_KEY_RE.fullmatch(key):
+        return GIFT_KEY_RULE
+    if key == PROMO_KEY:
+
+        return "That key belongs to the 220 ⚡ gift (/promo). Choose another."
+    amount = int(raw_amount) if re.fullmatch(r"[0-9]{1,6}", raw_amount) else 0
+    if not 0 < amount <= GIFT_MAX_CREDIT:
+        return f"The amount is a whole number of credits, 1 to {GIFT_MAX_CREDIT}."
+    expires = _gift_last_day(raw_day)
+    now = datetime.now(timezone.utc)
+    if expires is None or not now + timedelta(days=1) <= expires <= now + timedelta(days=GIFT_MAX_DAYS + 1):
+        return f"The last day is a date, YYYY-MM-DD, from tomorrow (UTC) to {GIFT_MAX_DAYS} days ahead."
+    return key, amount, expires, raw_day
+
+def _gift_already_given(key: str) -> set:
+    prefix = f"stars:granted:{key}:"
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT key FROM {FAMILY_SCHEMA}.settings WHERE key LIKE %s", (prefix + "%",)
+        ).fetchall()
+    given = set()
+    for (claim,) in rows:
+        tail = claim[len(prefix):]
+        if tail.lstrip("-").isdigit():
+            given.add(int(tail))
+    return given
+
+def _bot_handle(bot_id: str, fallback: str) -> str:
+    """A sibling as somebody can tap it, from SIBLING_BOTS (the format shared_features documents), or its plain name."""
+    for entry in os.environ.get("SIBLING_BOTS", "").split(","):
+        parts = entry.strip().split(":")
+        if len(parts) == 3 and parts[0] == bot_id and parts[2].strip().lstrip("@"):
+            return "@" + parts[2].strip().lstrip("@")
+    return fallback
+
+def gift_notice(lang: "str | None", amount: int, expires_at: datetime) -> str:
+    last_day = expires_at - timedelta(days=1)
+    return phrase(
+        "gift_granted", lang, amount=amount, date=last_day.strftime("%d.%m.%Y"),
+        conversions=max(1, amount // GIFT_CREDITS_PER_CONVERSION),
+        convert=_bot_handle("convertbot", "ConvertBot"),
+        download=_bot_handle("downloaderbot", "DownloaderBot"),
+    )
+
+async def _cmd_gift(context, args):
+    go = "--go" in args
+    parsed = _gift_args([a for a in args if a != "--go"])
+    if isinstance(parsed, str):
+        return parsed, None, None
+    key, amount, expires, raw_day = parsed
+    fn = getattr(db, "list_all_users", None)
+    if fn is None:
+        return "This bot keeps no list of its users, so it has nobody to give to.", None, None
+    try:
+        users = [uid for uid in await asyncio.to_thread(fn)
+                 if isinstance(uid, int) and uid > 0 and uid not in _GIFT_NOT_PEOPLE]
+    except Exception as exc:
+        return f"Could not read this bot's users ({type(exc).__name__}); nothing was given.", None, None
+    users = list(dict.fromkeys(users))
+    given = await asyncio.to_thread(_gift_already_given, key)
+    due = [uid for uid in users if uid not in given]
+    head = (f"Gift '{key}': {amount} ⚡ of bonus credit each, good until {raw_day} "
+            f"(the end of that day, UTC).")
+
+    if not go:
+        return (
+            f"{head}\nThis bot knows {len(users)} people; {len(due)} would get it now "
+            f"({len(users) - len(due)} already have it, from this bot or another), "
+            f"{len(due) * amount} ⚡ in all.\nNothing was given: this was only the count.\n\n"
+            f"What each of them is told (in their own language; English here):\n"
+            f"{gift_notice('en', amount, expires)}",
+            None, None,
+        )
+
+    granted = already = failed = told = unreachable = 0
+    delay = 1.0 / BROADCAST_PER_SECOND if BROADCAST_PER_SECOND > 0 else 0
+    for uid in due:
+        try:
+            balance = await asyncio.to_thread(grant_bonus_once, uid, amount, key, expires)
+        except Exception as exc:
+            failed += 1
+            logger.warning("Gift %s: could not give it to one person (%s)", key, type(exc).__name__)
+            continue
+        if balance is None:
+            already += 1
+            continue
+        granted += 1
+        try:
+            lang = await asyncio.to_thread(_language_of, uid)
+            await context.bot.send_message(chat_id=uid, text=gift_notice(lang, amount, expires))
+            told += 1
+        except Exception as exc:
+            unreachable += 1
+            logger.debug("Gift %s: a notice could not be delivered (%s)", key, type(exc).__name__)
+        if delay:
+            await asyncio.sleep(delay)
+    out = (f"{head}\nGave it to {granted} people ({granted * amount} ⚡) and told {told} of them"
+           + (f"; {unreachable} could not be reached but have the credit" if unreachable else "")
+           + f". {len(users) - len(due) + already} already had it.")
+    if failed:
+        out += f"\n{failed} failed (database errors, see the log); run the same command again to finish them."
+    return out, None, None
+
+PROMO_KEY = "gift-220-users"
+PROMO_USERS = 220
+PROMO_CREDITS = 220
+PROMO_CLAIM_DAYS = 14
+PROMO_SPEND_DAYS = 28
+PROMO_STARTED = f"promo:{PROMO_KEY}:started"
+PROMO_STOPPED = f"promo:{PROMO_KEY}:stopped"
+PROMO_MILESTONE = f"promo:{PROMO_KEY}:milestone"
+
+PROMO_REFRESH_SECONDS = 60
+
+PROMO_GIVEN, PROMO_HAD, PROMO_CLOSED = "given", "had", "closed"
+
+_promo_cache: dict = {"at": None, "started": None, "stopped": None}
+
+def _end_of_day(day) -> datetime:
+    """The moment a date ends: the midnight UTC after it."""
+    return datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+def _moment(text: "str | None") -> "datetime | None":
+    if not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return when.astimezone(timezone.utc) if when.tzinfo is not None else None
+
+def _claim_setting(key: str, value: str) -> bool:
+    """Write a setting only if it is not there yet."""
+    with _connect() as conn:
+        won = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO NOTHING RETURNING key",
+            (key, value),
+        ).fetchone()
+        conn.commit()
+    return bool(won)
+
+def _read_promo(fresh: bool = False) -> tuple:
+    """(started, stopped), each a UTC datetime or None. Blocking."""
+    at = _promo_cache["at"]
+    if not fresh and at is not None and time.monotonic() - at < PROMO_REFRESH_SECONDS:
+        return _promo_cache["started"], _promo_cache["stopped"]
+    try:
+        with _connect() as conn:
+            values = dict(conn.execute(
+                f"SELECT key, value FROM {FAMILY_SCHEMA}.settings WHERE key IN (%s, %s)",
+                (PROMO_STARTED, PROMO_STOPPED),
+            ).fetchall())
+    except Exception:
+        if fresh:
+            raise
+        logger.debug("Could not read the gift's state; closed until the next try", exc_info=True)
+        _promo_cache.update(at=time.monotonic(), started=None, stopped=None)
+        return None, None
+    started, stopped = _moment(values.get(PROMO_STARTED)), _moment(values.get(PROMO_STOPPED))
+    _promo_cache.update(at=time.monotonic(), started=started, stopped=stopped)
+    return started, stopped
+
+def promo_closes_for(started: datetime) -> datetime:
+    """When claiming ends for a gift started at `started`, unless it is stopped first: the end of the PROMO_CLAIM_DAYS-th day after the start (UTC)."""
+    return _end_of_day((started.astimezone(timezone.utc) + timedelta(days=PROMO_CLAIM_DAYS)).date())
+
+def promo_window(fresh: bool = False) -> "tuple[datetime, datetime] | None":
+    """(started, closes) once the owner has started the gift, else None."""
+    started, stopped = _read_promo(fresh)
+    if started is None:
+        return None
+    closes = promo_closes_for(started)
+    if stopped is not None and stopped < closes:
+        closes = stopped
+    return started, closes
+
+def promo_open(now: "datetime | None" = None, fresh: bool = False) -> bool:
+    """Can the gift be claimed at `now`? Blocking."""
+    window = promo_window(fresh)
+    if window is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return window[0] <= now < window[1]
+
+def promo_expiry(claimed_at: datetime) -> datetime:
+    """When a gift claimed at `claimed_at` runs out: the end of the PROMO_SPEND_DAYS-th day after the day it was claimed (UTC)."""
+    return _end_of_day((claimed_at.astimezone(timezone.utc) + timedelta(days=PROMO_SPEND_DAYS)).date())
+
+def claim_promo_gift(user_id: int) -> "tuple[str, datetime | None]":
+    """Give this person the gift if it is open and they never had it: (PROMO_GIVEN, when it runs out), (PROMO_HAD, None) or (PROMO_CLOSED, None)."""
+    if not (isinstance(user_id, int) and user_id > 0) or user_id in _GIFT_NOT_PEOPLE:
+        return PROMO_CLOSED, None
+    now = datetime.now(timezone.utc)
+    if not promo_open(now, fresh=True):
+        return PROMO_CLOSED, None
+    expires = promo_expiry(now)
+    if grant_bonus_once(user_id, PROMO_CREDITS, PROMO_KEY, expires) is None:
+        return PROMO_HAD, None
+    return PROMO_GIVEN, expires
+
+def promo_given_to(user_id: int) -> bool:
+    """Has this person had the gift? Blocking; raises on a database error."""
+    claim = f"stars:granted:{PROMO_KEY}:{user_id}"
+    with _connect() as conn:
+        return conn.execute(
+            f"SELECT 1 FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (claim,)
+        ).fetchone() is not None
+
+def promo_claim_count() -> int:
+    """How many people have had the gift. Blocking; raises on a database error."""
+    return len(_gift_already_given(PROMO_KEY))
+
+def _refresh_promo_after_write() -> None:
+    """Re-read the state after this process changed it."""
+    try:
+        _read_promo(fresh=True)
+    except Exception:
+        _promo_cache["at"] = None
+        logger.debug("The gift's state changed; reading it back failed", exc_info=True)
+
+def start_promo() -> "tuple[datetime, bool]":
+    """Start the gift -- possible once, ever."""
+    now = datetime.now(timezone.utc)
+    if _claim_setting(PROMO_STARTED, now.isoformat()):
+        _refresh_promo_after_write()
+        return now, True
+    started, _ = _read_promo(fresh=True)
+    return started, False
+
+def stop_promo() -> bool:
+    """End the claiming now, if the gift is open."""
+    if not promo_open(fresh=True):
+        return False
+    won = _claim_setting(PROMO_STOPPED, datetime.now(timezone.utc).isoformat())
+    _refresh_promo_after_write()
+    return won
+
+def note_promo_milestone() -> bool:
+    """True the first time ever this is called: ManagerBot's one notice to the owner that the users have reached PROMO_USERS."""
+    return _claim_setting(PROMO_MILESTONE, datetime.now(timezone.utc).isoformat())
+
+def promo_milestone_at() -> "datetime | None":
+    """When the users first reached PROMO_USERS, if they have. Blocking; raises on a database error."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT value FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (PROMO_MILESTONE,)
+        ).fetchone()
+    return _moment(row[0]) if row else None
+
+def _promo_bots() -> dict:
+    return {"convert": _bot_handle("convertbot", "ConvertBot"),
+            "download": _bot_handle("downloaderbot", "DownloaderBot")}
+
+def promo_notice(lang: "str | None", expires_at: datetime) -> str:
+    """What somebody reads in ConvertBot or DownloaderBot when the gift was just given to them. Plain text."""
+    return phrase(
+        "gift_claimed", lang, amount=PROMO_CREDITS, users=PROMO_USERS,
+        date=(expires_at - timedelta(days=1)).strftime("%d.%m.%Y"),
+        conversions=max(1, PROMO_CREDITS // GIFT_CREDITS_PER_CONVERSION), **_promo_bots(),
+    )
+
+def promo_ad(lang: "str | None", closes: datetime) -> str:
+    """AnonBot's ad for the gift, in HTML (the last paragraph is in italics)."""
+    return phrase(
+        "gift_ad", lang, amount=PROMO_CREDITS, users=PROMO_USERS, days=PROMO_SPEND_DAYS,
+        claim_by=(closes - timedelta(microseconds=1)).strftime("%d.%m.%Y"), **_promo_bots(),
+    )
+
 async def _cmd_pause(context, args):
     """Stop starting work a redeploy would throw away, and say so."""
     minutes = int(args[0]) if args and args[0].isdigit() else lifecycle.DEFAULT_MAINTENANCE_MINUTES
@@ -1456,6 +1840,7 @@ COMMANDS = {
     "pause": _cmd_pause,
     "warnbusy": _cmd_warnbusy,
     "resume": _cmd_resume,
+    "gift": _cmd_gift,
 }
 
 COMMAND_HELP = {
@@ -1474,6 +1859,7 @@ COMMAND_HELP = {
     "pause": "pause [minutes] -- decline new long work and say why",
     "warnbusy": "tell whoever is mid-something that it is about to be reset",
     "resume": "reopen, and tell everyone who was turned away",
+    "gift": "gift <key> <credits> <last day YYYY-MM-DD> [--go] -- bonus credit for everyone, once each; counts unless --go",
 }
 
 async def _active_users_since(since) -> int:
@@ -1580,7 +1966,7 @@ async def _send_heartbeat(context) -> None:
     except Exception:
         logger.debug("Heartbeat failed (database unreachable?)", exc_info=True)
 
-def _prune_family_rows() -> tuple[int, int]:
+def _prune_family_rows() -> tuple[int, int, int, int]:
     with _connect() as conn:
         cur = conn.execute(
             f"DELETE FROM {FAMILY_SCHEMA}.commands "
@@ -1602,12 +1988,20 @@ def _prune_family_rows() -> tuple[int, int]:
             (_bot_id, USAGE_RETENTION_DAYS),
         )
         samples = cur.rowcount
+
+        cur = conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.button_taps "
+            f"WHERE bot_id = %s AND day < (now() AT TIME ZONE 'UTC')::date - %s",
+            (_bot_id, USAGE_RETENTION_DAYS),
+        )
+        taps = cur.rowcount
         conn.commit()
-    return commands, events, samples
+    return commands, events, samples, taps
 
 def _prune() -> str:
-    commands, events, samples = _prune_family_rows()
-    parts = [f"{commands} command(s)", f"{events} event(s)", f"{samples} usage sample(s)"]
+    commands, events, samples, taps = _prune_family_rows()
+    parts = [f"{commands} command(s)", f"{events} event(s)", f"{samples} usage sample(s)",
+             f"{taps} button tap row(s)"]
     try:
         parts.append(f"{expire_bonus_credit()} expired bonus credit")
     except Exception:
@@ -2856,6 +3250,31 @@ PROBLEMS = {
         "The compressed/uncompressed button refers to a download that is no longer remembered.",
         "An old message, or a restart.",
         "Nothing."),
+    "DL-MERGE-TOO-BIG": Problem(
+        "DownloaderBot", "An album too big to put in one file",
+        "The 📄 PDF or 🗜 ZIP button was tapped on an album with more than DBOT_MERGE_MAX_ITEMS files (20), or "
+        "whose files came to more than DBOT_MERGE_MAX_MB (48) when fetched, or whose PDF or ZIP came out over "
+        "the 50 MB the Bot API takes; or one picture was over 20 megapixels (too many for a PDF page). "
+        "Fetching stopped at the file that passed the limit and nothing was built.",
+        "A large carousel or a post of long videos; a very high-resolution photograph.",
+        "Nothing; the person still has the files from the delivery. Raise the two DBOT_MERGE_* limits if "
+        "ordinary albums are being refused (merge.py)."),
+    "DL-MERGE-NO-PHOTOS": Problem(
+        "DownloaderBot", "A PDF asked for, fewer than two photos found",
+        "The 📄 PDF button was tapped, and when the post was fetched again fewer than two photos came back -- "
+        "no PDF was built.",
+        "The post was edited or deleted since it was delivered, or a different route answered this time "
+        "and returned only a video or a cover picture.",
+        "Nothing, unless it happens to albums that are still up: then compare what the routes return for "
+        "that link (/probe in ManagerBot)."),
+    "DL-MERGE-FAILED": Problem(
+        "DownloaderBot", "Building or sending an album's PDF or ZIP failed",
+        "The files were fetched but the single PDF or ZIP could not be built or uploaded; everything was "
+        "deleted and the person was offered a report.",
+        "For a PDF, a file that is not an image although the post called it a photo, an animated picture, or "
+        "one in a format other than JPEG, PNG, WEBP and GIF (all refused unread); Pillow running out of "
+        "memory on a large picture; a full disk; or Telegram refusing the upload.",
+        "The traceback in the log beside the incident id ('Merging ... failed'); merge.py."),
 
     "ST-WHOMADE-UNKNOWN": Problem(
         "StickerBot", "Pack not made through this bot",
@@ -3177,6 +3596,10 @@ KEYS = {
         "twitter_fetch_failed_link": "DL-TWITTER-CARD",
         "unrecognized_message": "DL-UNRECOGNIZED",
         "redeliver_expired": "DL-BUTTON-EXPIRED",
+        "merge_too_big": "DL-MERGE-TOO-BIG",
+        "merge_picture_too_big": "DL-MERGE-TOO-BIG",
+        "merge_no_photos": "DL-MERGE-NO-PHOTOS",
+        "merge_failed": "DL-MERGE-FAILED",
         "large_files_off": "DL-LARGE-OFF",
         "large_files_private_only": "DL-LARGE-PRIVATE",
         "large_files_no_credit": "DL-LARGE-NO-CREDIT",
@@ -3267,7 +3690,7 @@ SIMPLE = frozenset({
     "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW", "CV-NO-MEMORY",
     "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-UNRECOGNIZED",
     "DL-LARGE-OFF", "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
-    "DL-BUTTON-EXPIRED",
+    "DL-BUTTON-EXPIRED", "DL-MERGE-TOO-BIG", "DL-MERGE-NO-PHOTOS",
     "ST-WHOMADE-UNKNOWN", "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
     "ST-TITLE-EMPTY", "ST-ANIMATED", "ST-IMPORT-SOURCE", "ST-TG-PACK-FULL", "ST-UNRECOGNIZED",
     "ST-NOTHING-ADDED", "ST-NO-STICKER",
@@ -3326,11 +3749,12 @@ KINDS = {
         "CV-TOO-SLOW", "CV-NO-MEMORY",
         "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-LARGE-OFF",
         "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
+        "DL-MERGE-TOO-BIG",
         "ST-ANIMATED", "ST-TG-PACK-FULL",
         "AN-TOO-FAST", "AN-REACTION-NOT-PASSED",
     }),
     GONE: frozenset({
-        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED",
+        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED", "DL-MERGE-NO-PHOTOS",
         "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
         "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
     }),
@@ -3502,14 +3926,15 @@ def wants_full_help(context) -> bool:
     args = getattr(context, "args", None) or []
     return bool(args) and str(args[0]).lower() in ("full", "all", "more")
 
-def help_keyboard(lang: str, full: bool, rows=()) -> InlineKeyboardMarkup:
-    """The button to the other version, then the bot's own rows."""
+def help_keyboard(lang: str, full: bool, rows=(), pages=None, labels=None) -> InlineKeyboardMarkup:
+    """The bot's page buttons (when it has pages), then the button to the other version, then the bot's own rows -- the items first and "everything" last, as under /ping."""
     toggle = (InlineKeyboardButton(i18n.t(lang, "help_brief_button"), callback_data="help:brief")
               if full else
               InlineKeyboardButton(i18n.t(lang, "help_full_button"), callback_data="help:full"))
-    return InlineKeyboardMarkup([[toggle]] + [list(row) for row in rows if row])
+    page_rows = help_page_buttons(lang, pages, labels) if pages else []
+    return InlineKeyboardMarkup(page_rows + [[toggle]] + [list(row) for row in rows if row])
 
-def help_toggle(build_text, rows=None):
+def help_toggle(build_text, rows=None, pages=None, labels=None):
     """The toggle's handler, for one bot: `build_text(lang, full=...)` is the bot's own build_help_text, and `rows(lang)` the button rows it keeps under its help, if any."""
     async def toggle(update, context) -> None:
         query = update.callback_query
@@ -3518,8 +3943,60 @@ def help_toggle(build_text, rows=None):
         full = query.data == "help:full"
         await live_message.edit_in_place(
             query.message, context.bot, build_text(lang, full=full),
-            reply_markup=help_keyboard(lang, full, rows(lang) if rows else ()))
+            reply_markup=help_keyboard(lang, full, rows(lang) if rows else (), pages, labels))
     return toggle
+
+HELP_PAGE_PREFIX = "helpdet:"
+HELP_PAGE_PATTERN = r"^helpdet:[a-z]{1,20}$"
+
+def help_page_name(context, pages, aliases=None) -> str | None:
+    """The page that `/help <word>` asks for, or None."""
+    args = getattr(context, "args", None) or []
+    if not args:
+        return None
+    word = str(args[0]).lower().lstrip("/").split("@", 1)[0]
+    if word.startswith("help_"):
+        word = word[len("help_"):]
+    word = (aliases or {}).get(word, word)
+    return word if word in pages else None
+
+def help_page_text(lang: str, pages, name: str) -> str:
+    """One page, then where the full guide is."""
+    return pages[name](lang).rstrip() + "\n\n" + i18n.t(lang, "help_page_everything")
+
+def help_page_buttons(lang: str, pages, labels=None) -> list[list[InlineKeyboardButton]]:
+    """One button per page, in the order of `pages` (an alias never gets one), two to a row."""
+    labels = labels or {}
+    buttons = [
+        InlineKeyboardButton(i18n.t(lang, labels[name]) if name in labels else "/" + name,
+                             callback_data=HELP_PAGE_PREFIX + name)
+        for name in pages
+    ]
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+def help_page_button(pages):
+    """The handler of a tap on a page button, for one bot: the page arrives as a new message, so the help message above it is never edited and stays to be tapped again."""
+    async def page(update, context) -> None:
+        query = update.callback_query
+        user = update.effective_user
+        lang = await i18n.get_lang(user.id, context)
+        name = query.data[len(HELP_PAGE_PREFIX):]
+        if name not in pages:
+            await query.answer(i18n.t(lang, "help_page_gone"), show_alert=True)
+            return
+        await query.answer()
+        chat_id = query.message.chat_id if query.message is not None else user.id
+        await context.bot.send_message(chat_id=chat_id, text=help_page_text(lang, pages, name),
+                                       link_preview_options=NO_PREVIEW)
+    return page
+
+def full_help_command(build_text, rows=None, pages=None, labels=None):
+    """The handler of /fullhelp: what /help full gives, for one bot -- `build_text(lang, full=...)` is its build_help_text, `rows(lang)` the button rows it keeps under its help, if any, and `pages`/`labels` its page buttons (see help_page_buttons)."""
+    async def fullhelp(update, context) -> None:
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        await update.message.reply_text(build_text(lang, full=True),
+                                        reply_markup=help_keyboard(lang, True, rows(lang) if rows else (), pages, labels))
+    return fullhelp
 
 WORKER_THREADS = int(os.environ.get("WORKER_THREADS", "4"))
 
@@ -3602,6 +4079,65 @@ def attach_flood_gate(app, admin_ids=(), group: int = -3, exempt=None) -> None:
         raise ApplicationHandlerStop
 
     app.add_handler(TypeHandler(Update, _gate), group=group)
+
+PROMO_DONE_KEY = "_promo_done"
+
+_promo_claiming: set = set()
+
+_promo_state = {"over": False}
+
+def _notice_language(user_id: int, telegram_code: "str | None") -> str:
+    """The language for the gift's notice."""
+    chosen = family_link._language_of(user_id)
+    if chosen in i18n.SUPPORTED_LANGUAGES:
+        return chosen
+    code = (telegram_code or "").split("-")[0].lower()
+    return code if code in i18n.SUPPORTED_LANGUAGES else "en"
+
+async def _claim_and_tell(context, user_id: int, chat_id: int, telegram_code: "str | None" = None) -> None:
+    log = logging.getLogger(__name__)
+    try:
+        window = await asyncio.to_thread(family_link.promo_window)
+        now = datetime.now(timezone.utc)
+        if window is None or not window[0] <= now < window[1]:
+
+            if window is not None and now >= window[1]:
+                _promo_state["over"] = True
+            return
+        outcome, expires = await asyncio.to_thread(family_link.claim_promo_gift, user_id)
+    except Exception as exc:
+
+        log.warning("The gift could not be claimed (%s); the next message tries again", type(exc).__name__)
+        return
+    finally:
+        _promo_claiming.discard(user_id)
+    context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
+    if outcome != family_link.PROMO_GIVEN:
+        return
+    try:
+        lang = await asyncio.to_thread(_notice_language, user_id, telegram_code)
+        await context.bot.send_message(chat_id=chat_id, text=family_link.promo_notice(lang, expires))
+    except Exception:
+
+        log.debug("The gift's notice could not be sent", exc_info=True)
+
+def attach_promo_claim(app, group: int = -2) -> None:
+    """Register in a group of its OWN (python-telegram-bot runs one handler per group), after the flood gate's: somebody being throttled claims nothing."""
+
+    async def _claim_on_message(update, context) -> None:
+        if _promo_state["over"]:
+            return
+        user, chat = update.effective_user, update.effective_chat
+        if (update.message is None or user is None or chat is None or chat.type != "private"
+                or getattr(user, "is_bot", False)):
+            return
+        if context.user_data.get(PROMO_DONE_KEY) == family_link.PROMO_KEY or user.id in _promo_claiming:
+            return
+        _promo_claiming.add(user.id)
+        context.application.create_task(
+            _claim_and_tell(context, user.id, chat.id, getattr(user, "language_code", None)))
+
+    app.add_handler(TypeHandler(Update, _claim_on_message), group=group)
 
 DONATION_STEPS = [15, 60, 200]
 DONATION_COOLDOWN_FLOOR_DAYS = 3
@@ -3972,12 +4508,14 @@ async def donation_payment_received(update, context) -> None:
 
 _LEDGER_LABELS = {"refund": "returned"}
 
+BALANCE_RECENT_ROWS = 8
+
 async def balance_command(update, context) -> None:
     """/balance -- what this person is holding, and what it is for."""
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
     totals = await asyncio.to_thread(family_link.star_totals, user.id)
-    rows = await asyncio.to_thread(family_link.star_ledger_for, user.id, 8)
+    rows = await asyncio.to_thread(family_link.star_ledger_for, user.id, BALANCE_RECENT_ROWS)
     lines = [i18n.t(lang, "balance_header", balance=totals["balance"])]
     if totals["stars_paid"] > 0 or totals["spent"] > 0:
         lines.append(i18n.t(lang, "balance_totals", paid=totals["stars_paid"],
@@ -5081,6 +5619,7 @@ async def track_activity(update, context) -> None:
     note_network_ok()
 
     live_message.note_update(update)
+    _count_tap(update)
     user = update.effective_user
     if not user:
         return
@@ -5300,6 +5839,75 @@ def note_job(ok: bool) -> None:
     else:
         _usage_jobs_failed += 1
 
+TAP_MAX_KEYS = 150
+_TAP_FIRST = re.compile(r"[a-z][a-z0-9_]{0,23}")
+_TAP_SECOND = {
+    "help": re.compile(r"full|brief"),
+    "helpdet": re.compile(r"convert|recharge|balance|download|settings|newpack|addsticker|import|link|export|which"),
+    "setlang": re.compile(r"[a-z]{2,3}"),
+    "erasedata": re.compile(r"yes|no"),
+    "donatefiat": re.compile(r"[A-Za-z]{3}"),
+    "donatecustom": re.compile(r"[A-Za-z]{3}"),
+    "caption": re.compile(r"on|off"),
+    "lossless": re.compile(r"on|off"),
+    "large": re.compile(r"[a-z]{1,10}"),
+    "merge": re.compile(r"pdf|zip"),
+    "convfmt": re.compile(r"[a-z0-9]{1,10}"),
+    "fmtcat": re.compile(r"[a-z_]{1,16}"),
+    "aq_export": re.compile(r"pick|copy|doc|cancel"),
+    "anonlink": re.compile(r"toggle|newlink"),
+    "confirmremove": re.compile(r"yes|no"),
+}
+_MANAGER_BOT_ID = "managerbot"
+_taps: "dict[str, int]" = {}
+
+def tap_key(data) -> str:
+    """The key under which a tap of a button with this callback data is counted."""
+    if not isinstance(data, str):
+        return "other"
+    parts = data.split(":", 2)
+    first = parts[0]
+    if _TAP_FIRST.fullmatch(first) is None:
+        return "other"
+    if len(parts) < 2:
+        return first
+    second = parts[1]
+    if first == "donate":
+
+        return f"donate:{second}" if second in {str(amount) for amount in DONATE_STAR_OPTIONS} else first
+    pattern = _TAP_SECOND.get(first)
+    if pattern is not None and pattern.fullmatch(second) is not None:
+        return f"{first}:{second}"
+    return first
+
+def note_tap(key: str) -> None:
+    """Count one tap (or one event, for the bots that count things that are not callbacks) under `key`."""
+    try:
+        if key in _taps:
+            _taps[key] += 1
+        elif key != "other" and len(_taps) < TAP_MAX_KEYS - (0 if "other" in _taps else 1):
+            _taps[key] = 1
+        else:
+            _taps["other"] = _taps.get("other", 0) + 1
+    except Exception:
+        pass
+
+def take_taps() -> "dict[str, int]":
+    """The counts so far, and a fresh start."""
+    global _taps
+    taps, _taps = _taps, {}
+    return taps
+
+def _count_tap(update) -> None:
+    """Count the button this update is a tap of, if it is one."""
+    try:
+        query = update.callback_query
+        data = query.data if query is not None else None
+        if isinstance(data, str) and family_link._bot_id != _MANAGER_BOT_ID:
+            note_tap(tap_key(data))
+    except Exception:
+        pass
+
 def _alarm_due(kind: str) -> bool:
     now = time.time()
     if now - _usage_alarmed.get(kind, 0) < _ALARM_QUIET_SECONDS.get(kind, 3600):
@@ -5384,7 +5992,7 @@ def _check_usage_alarms(numbers: dict, updates: int, users: int,
             "whether the plan this runs on is still the right one.",
         )
 
-def _sample_usage_now() -> None:
+def _sample_usage_now(taps: "dict[str, int] | None" = None) -> None:
     """One window: write the row, then decide whether to say anything."""
     global _usage_updates, _usage_users
     updates, users = _usage_updates, len(_usage_users)
@@ -5409,6 +6017,13 @@ def _sample_usage_now() -> None:
         )
     except Exception:
         logging.getLogger(__name__).debug("Usage sample not written", exc_info=True)
+
+    if taps is None:
+        taps = take_taps()
+    try:
+        family_link.record_taps(taps)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Button taps not written (%s)", type(exc).__name__)
     try:
         _check_usage_alarms(numbers, updates, users, jobs_ok, jobs_failed)
     except Exception:
@@ -5416,7 +6031,9 @@ def _sample_usage_now() -> None:
     _usage_recent.append(updates)
 
 async def _usage_sample_job(context) -> None:
-    await asyncio.to_thread(_sample_usage_now)
+
+    taps = take_taps()
+    await asyncio.to_thread(_sample_usage_now, taps)
 
 def build_status_text(start_time: datetime, users_last_hour: int, users_since_start: int) -> str:
     now = datetime.now(timezone.utc)

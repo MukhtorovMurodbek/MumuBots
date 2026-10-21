@@ -95,9 +95,11 @@ GIF_IS_VIDEO = True
 ANIMATED_TARGETS = ("mp4", "webm", "gif", "webp", "apng", "mkv", "mov", "png", "jpg")
 
 TARGETS_BY_CATEGORY = {
+
     IMAGE: (
         "png", "jpg", "webp", "pdf", "ico", "tiff",
         "bmp", "gif", "avif", "heic", "jp2", "tga", "ppm", "qoi", "icns",
+        "txt", "ocrpdf",
     ),
     VIDEO: (
         "mp4", "webm", "gif", "mp3", "mkv", "mov",
@@ -118,7 +120,7 @@ TARGETS_BY_CATEGORY = {
 }
 
 TARGETS_BY_FORMAT = {
-    "pdf": ("docx", "png", "jpg", "txt", "html", "webp", "svg", "tiff"),
+    "pdf": ("docx", "png", "jpg", "txt", "ocrpdf", "html", "webp", "svg", "tiff"),
     "epub": ("pdf", "docx", "txt", "html", "png", "jpg"),
     "mobi": ("pdf", "docx", "txt", "html", "png", "jpg"),
     "fb2": ("pdf", "docx", "txt", "html", "png", "jpg"),
@@ -158,12 +160,16 @@ FORMAT_NEEDS = {
     "xml": ("xml",),
     "7z": ("bsdtar",), "rar": ("bsdtar",),
     **{raw: ("rawpy",) for raw in RAW_FORMATS},
+
+    "ocrpdf": ("ocr",),
 }
 
 TARGET_NEEDS = {
     (IMAGE, "pdf"): (),
 
     (DOCUMENT, "docx"): ("pydocx", "mupdf"),
+
+    (IMAGE, "txt"): ("ocr",),
 }
 
 ENCODERS = {
@@ -229,6 +235,15 @@ def _ffmpeg_encoders() -> set[str]:
             names.add(parts[1])
     return names
 
+def _ocr_available() -> bool:
+    """Whether text can be recognised here: PyMuPDF with Tesseract in it, and the language data on disk (ocr_convert.available)."""
+    try:
+        import ocr_convert
+        return bool(ocr_convert.available())
+    except Exception:
+        logger.debug("Text recognition is not available", exc_info=True)
+        return False
+
 def probe() -> set[str]:
     """Work out what this host can do. Idempotent; called once from main()."""
     global _PROBED, _MET, _ENCODERS_PRESENT
@@ -248,6 +263,8 @@ def probe() -> set[str]:
             found.add(requirement)
     if bsdtar_path():
         found.add("bsdtar")
+    if _ocr_available():
+        found.add("ocr")
     _ENCODERS_PRESENT = _ffmpeg_encoders()
     if _ENCODERS_PRESENT:
         found.add("ffmpeg")
@@ -258,7 +275,7 @@ def probe() -> set[str]:
         ", ".join(sorted(found)) or "Pillow only", len(_ENCODERS_PRESENT),
     )
     absent = [name for name in ("mupdf", "heif", "openpyxl", "yaml", "markdown", "mammoth",
-                                "pydocx", "bsdtar", "rawpy")
+                                "pydocx", "bsdtar", "rawpy", "ocr")
               if name not in found]
     if absent:
         logger.warning(
@@ -654,9 +671,56 @@ def billable_bytes(in_bytes: int, out_bytes: int) -> int:
     """What the price is charged on. See BILLABLE."""
     return max(in_bytes, out_bytes) if BILLABLE == "max" else in_bytes + out_bytes
 
+def ocr_job_pages(src_ext: str, target_ext: str, ocr_pages: int = 0, files: int = 1) -> int:
+    """How many pages a conversion reads as text (ocr_convert.py): 0 when it reads none, so it is not a text-recognition job at all."""
+    import ocr_convert
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if target_ext not in ocr_convert.WRITES or files > 1:
+        return 0
+    if src_ext == "pdf":
+        counted = max(0, int(ocr_pages or 0))
+        return counted if counted <= ocr_convert.OCR_MAX_PAGES else 0
+    if src_ext in formats.RAW_FORMATS or src_ext == "svg":
+        return 0
+    return 1 if formats.category_of(src_ext, False) == formats.IMAGE else 0
+
+_OCR_TEXT_BYTES_PER_PAGE = 4096
+_OCR_LAYER_BYTES_PER_PAGE = 10 * 1024
+
+def ocr_limit(src_ext: str, target_ext: str, in_bytes: int, out_bytes: int, read_pages: int,
+              paid: bool, pages: "int | None" = None) -> int:
+    """The time limit of a job that reads `read_pages` pages as text, from what the quote knows: the file, its estimated result, the pair and the PDF's page count."""
+    import jobs
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if src_ext == "pdf" and target_ext == "txt":
+        out_bytes = max(out_bytes, estimate_output_bytes(src_ext, target_ext, in_bytes, pages))
+    return jobs.ocr_time_limit(read_pages, paid, billable_bytes(in_bytes, out_bytes),
+                               work_factor(src_ext, target_ext))
+
+def _ocr_price(src_ext: str, target_ext: str, in_bytes: int, pages: "int | None",
+               read_pages: int) -> tuple:
+    """(credits, estimated output bytes) for a conversion that reads text."""
+    import jobs
+    import ocr_convert
+    import pricing
+    if target_ext == "txt":
+        out_bytes = _OCR_TEXT_BYTES_PER_PAGE * max(pages or 0, read_pages)
+    elif src_ext == "pdf":
+        out_bytes = in_bytes + _OCR_LAYER_BYTES_PER_PAGE * read_pages
+    else:
+        out_bytes = int(in_bytes * 1.2) + _OCR_LAYER_BYTES_PER_PAGE
+    if billable_bytes(in_bytes, out_bytes) < FREE_UNDER_MB * _MB and read_pages <= ocr_convert.OCR_FREE_PAGES:
+        return 0, out_bytes
+    return pricing.price(pricing.cost(ocr_limit(src_ext, target_ext, in_bytes, out_bytes, read_pages, True, pages),
+                                      jobs.big_send_limit(out_bytes or in_bytes))), out_bytes
+
 def price_for_job(src_ext: str, target_ext: str, in_bytes: int,
-                  pages: "int | None" = None) -> tuple:
+                  pages: "int | None" = None, ocr_pages: int = 0, files: int = 1) -> tuple:
     """(credits, estimated output bytes) for one conversion."""
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    reading = ocr_job_pages(src_ext, target_ext, ocr_pages, files)
+    if reading:
+        return _ocr_price(src_ext, target_ext, in_bytes, pages, reading)
     out_bytes = estimate_output_bytes(src_ext, target_ext, in_bytes, pages)
     return _price(in_bytes, out_bytes, work_factor(src_ext, target_ext)), out_bytes
 
@@ -699,13 +763,13 @@ def price_tiers_text(lang: str = "en") -> str:
     example, _ = price_for_job("mp4", "mp4", example_mb * _MB)
     most = pricing.price(pricing.cost(jobs.TIME_LIMIT_S, jobs.big_send_limit(MAX_FILE_MB * _MB)))
     lines = [
-        f"  0–{FREE_UNDER_MB} MB: " + i18n.t(lang, "price_free"),
+        "  " + i18n.t(lang, "price_free_upto", mb=FREE_UNDER_MB) + i18n.t(lang, "price_free"),
         "  " + i18n.t(lang, "price_from", price=least_paid_price()),
         "  " + i18n.t(lang, "price_example", mb=example_mb, price=example),
         "  " + i18n.t(lang, "price_at_most", mb=MAX_FILE_MB, price=most),
     ]
     note = "" if BIG_FILES else " " + i18n.t(lang, "price_cloud_api_note")
-    lines.append(f"  over {MAX_FILE_MB} MB: " + i18n.t(lang, "price_not_supported") + note)
+    lines.append("  " + i18n.t(lang, "price_over", mb=MAX_FILE_MB) + i18n.t(lang, "price_not_supported") + note)
     lines.append("  " + i18n.t(lang, "price_quoted_first"))
     return "\n".join(lines)
 
@@ -1146,7 +1210,8 @@ def zip_files(paths, out_path) -> None:
 def _out(work_dir, stem: str, ext: str) -> Path:
     return Path(work_dir) / f"{stem}.{ext}"
 
-def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "converted") -> Result:
+def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "converted",
+            ocr_lang: str = "", ocr_pages: int = 0) -> Result:
     """Everything the bot converts, dispatched by what the source is."""
     in_paths = [str(path) for path in in_paths]
     if not in_paths:
@@ -1156,7 +1221,11 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     category = formats.category_of(src_ext)
     work_dir = Path(work_dir)
 
+    import ocr_convert
     if len(in_paths) > 1:
+        if target_ext in ocr_convert.WRITES and (target_ext == "ocrpdf" or category == formats.IMAGE):
+
+            raise ConversionError("Text is read from one picture or PDF at a time, not from an album.")
         return _convert_batch(in_paths, src_ext, target_ext, work_dir, stem)
 
     in_path = in_paths[0]
@@ -1164,6 +1233,16 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
 
     if src_ext in formats.ANIMATED_CAPABLE:
         category = formats.category_of(src_ext, gif_is_animated(in_path))
+
+    if target_ext in ocr_convert.WRITES:
+
+        reading = ocr_job_pages(src_ext, target_ext, ocr_pages, len(in_paths))
+        picture = category == formats.IMAGE and src_ext not in formats.RAW_FORMATS and src_ext != "svg"
+        if picture or (src_ext == "pdf" and (reading or target_ext == "ocrpdf")):
+            return ocr_convert.convert(in_path, src_ext, target_ext, work_dir, stem,
+                                       lang=ocr_lang, max_scanned=reading)
+        if target_ext == "ocrpdf":
+            raise ConversionError(f"A .{src_ext} file can't be turned into a searchable PDF.")
 
     if category == formats.IMAGE and src_ext in formats.RAW_FORMATS:
         import raw_convert
@@ -2778,6 +2857,456 @@ def describe(path, src_ext: str) -> "RawInfo | None":
     except ConversionError:
         return None
 
+# ─── module: convert_bot.ocr_convert ─────────────────────────────────────────
+"""Text from pictures and scanned PDFs, recognised on this machine."""
+from __future__ import annotations
+
+import math
+import os
+import sys
+from pathlib import Path
+
+import convert_utils
+import formats
+from convert_utils import ConversionError, OutOfMemory, Result, report
+
+OCR_MAX_PIXELS = int(os.environ.get("CONVERT_OCR_MAX_PIXELS") or 12_000_000)
+
+OCR_PAGE_S = int(os.environ.get("CONVERT_OCR_PAGE_SECONDS") or 15)
+
+OCR_MAX_PAGES = int(os.environ.get("CONVERT_OCR_MAX_PAGES") or 30)
+
+OCR_DESCRIBE_SECONDS = float(os.environ.get("CONVERT_OCR_DESCRIBE_SECONDS") or 5)
+
+OCR_FREE_PAGES = int(os.environ.get("CONVERT_OCR_FREE_PAGES") or 1)
+
+OCR_MIN_TEXT_CHARS = int(os.environ.get("CONVERT_OCR_MIN_TEXT_CHARS") or 20)
+
+OCR_MIN_DPI = int(os.environ.get("CONVERT_OCR_MIN_DPI") or 50)
+
+OCR_MAX_DECODE_PIXELS = int(os.environ.get("CONVERT_OCR_MAX_DECODE_PIXELS") or 64_000_000)
+MAX_DPI = 300
+
+WRITES = frozenset({"txt", "ocrpdf"})
+
+LANGS = {"eng": "eng", "rus": "rus", "uzb": "uzb+uzb_cyrl"}
+CHOICES = tuple(LANGS)
+
+DEFAULT_CHOICE = {"en": "eng", "ru": "rus", "uz": "uzb"}
+
+_TRAINEDDATA = ("eng", "rus", "uzb", "uzb_cyrl")
+
+def tesseract_language(choice) -> str:
+    """The language string for a choice."""
+    return LANGS.get(choice or "", LANGS["eng"])
+
+def default_choice(lang) -> str:
+    """The text language a person gets before they have chosen one."""
+    return DEFAULT_CHOICE.get(lang or "", "eng")
+
+def tessdata_dir() -> "str | None":
+    """TESSDATA_PREFIX when it holds all four language files, else None."""
+    folder = os.environ.get("TESSDATA_PREFIX") or ""
+    if folder and all(os.path.isfile(os.path.join(folder, f"{name}.traineddata")) for name in _TRAINEDDATA):
+        return folder
+    return None
+
+def available() -> bool:
+    """Whether this host can recognise text: PyMuPDF with the engine in it, and the language data."""
+    try:
+        import pymupdf
+        if not (hasattr(pymupdf.Pixmap, "pdfocr_tobytes") and hasattr(pymupdf.Page, "delete_image")
+                and hasattr(pymupdf.TOOLS, "store_shrink")):
+            return False
+    except Exception:
+        return False
+    return tessdata_dir() is not None
+
+def _pymupdf():
+    try:
+        import pymupdf
+        return pymupdf
+    except ImportError as exc:
+        raise ConversionError("Text recognition isn't available on this host.") from exc
+
+def _tidy(exc: Exception) -> str:
+    text = " ".join(str(exc).split())
+    return text[:160] or type(exc).__name__
+
+def ocr_dpi(width_pt, height_pt) -> "int | None":
+    """The dpi to draw a page of this size at for the engine: 300 where that stays under OCR_MAX_PIXELS, less where it does not (an A0 poster comes out at 87 or so)."""
+    try:
+        width, height = float(width_pt), float(height_pt)
+    except (TypeError, ValueError):
+        return None
+    if not (width > 0 and height > 0):
+        return None
+    dpi = min(MAX_DPI, math.floor(72 * math.sqrt(OCR_MAX_PIXELS / (width * height)) + 1e-6))
+    while dpi >= OCR_MIN_DPI and ((math.ceil(width * dpi / 72) + 1)
+                                  * (math.ceil(height * dpi / 72) + 1)) > OCR_MAX_PIXELS:
+        dpi -= 1
+    return dpi if dpi >= OCR_MIN_DPI else None
+
+def is_scanned(page) -> bool:
+    """A page that is a picture of text: there is a picture on it, it has too little text of its own, and it can be drawn at a size the engine can read."""
+    if not page.get_images():
+        return False
+    rect = page.rect
+    if ocr_dpi(rect.width, rect.height) is None:
+        return False
+    return len("".join(page.get_text("text").split())) < OCR_MIN_TEXT_CHARS
+
+def _open_pdf(path):
+    pymupdf = _pymupdf()
+    try:
+        doc = pymupdf.open(str(path))
+    except Exception as exc:
+        raise ConversionError(f"Couldn't read that PDF: {_tidy(exc)}") from exc
+    if not doc.is_pdf:
+        doc.close()
+        raise ConversionError("Couldn't read that as a PDF.")
+    if doc.needs_pass:
+        doc.close()
+        raise ConversionError("That PDF is password-protected, so its pages can't be read.")
+    return doc
+
+def count_scanned(path, on_pages=None, scan: bool = True, stop_after: "int | None" = None) -> dict:
+    """{"pages": n, "scanned": m} for a PDF: its page count, and how many of its first formats.MAX_PAGES pages are scanned."""
+    doc = _open_pdf(path)
+    try:
+        pages = int(doc.page_count)
+        if on_pages is not None:
+            on_pages(pages)
+        if not scan:
+            return {"pages": pages, "scanned": None}
+        scanned = 0
+        for index in range(min(pages, formats.MAX_PAGES)):
+            page = doc.load_page(index)
+            if is_scanned(page):
+                scanned += 1
+            del page
+            if stop_after is not None and scanned > stop_after:
+                break
+        return {"pages": pages, "scanned": scanned}
+    except ConversionError:
+        raise
+    except MemoryError:
+        raise OutOfMemory("reading that PDF ran out of memory") from None
+    except Exception as exc:
+        raise ConversionError(f"Couldn't read that PDF: {_tidy(exc)}") from exc
+    finally:
+        doc.close()
+
+def _recognise(pymupdf, page, language: str, tessdata: str, layer: bool) -> str:
+    """The text on one scanned page."""
+    dpi = ocr_dpi(page.rect.width, page.rect.height)
+    if dpi is None:
+        return ""
+    pix = page.get_pixmap(dpi=dpi)
+    try:
+        data = pix.pdfocr_tobytes(compress=True, language=language, tessdata=tessdata)
+    finally:
+        del pix
+    ocr = pymupdf.open("pdf", data)
+    del data
+    try:
+        text = ocr[0].get_text()
+        if layer and text.strip():
+            for item in ocr[0].get_images(full=True):
+                ocr[0].delete_image(item[0])
+
+            rotation = page.rotation
+            page.set_rotation(0)
+            try:
+                page.show_pdf_page(page.rect, ocr, 0, overlay=True, rotate=rotation)
+            finally:
+                page.set_rotation(rotation)
+    finally:
+        ocr.close()
+
+        pymupdf.TOOLS.store_shrink(100)
+    return text
+
+def _pdf(in_path, target_ext: str, out_path: Path, language: str, tessdata: str,
+         max_scanned: "int | None" = None) -> None:
+    import doc_convert
+    pymupdf = _pymupdf()
+    doc = _open_pdf(in_path)
+    try:
+        pages = doc_convert._page_count(doc)
+        if not pages:
+            raise ConversionError("That document had no pages in it.")
+        scanned = []
+        for index in range(pages):
+            page = doc.load_page(index)
+            if is_scanned(page):
+                scanned.append(index)
+            del page
+        if len(scanned) > OCR_MAX_PAGES:
+            raise ConversionError(
+                f"{len(scanned)} pages of that PDF are pictures without text. Text is recognised on at "
+                f"most {OCR_MAX_PAGES} such pages in one conversion. Split it and send the part you need.")
+        if max_scanned is not None and len(scanned) > max_scanned:
+
+            raise ConversionError(
+                f"{len(scanned)} pages of that PDF are pictures without text, more than the {max_scanned} "
+                "this conversion was priced for. Send the PDF again.")
+        if target_ext == "ocrpdf" and not scanned:
+            raise ConversionError("Every page of that PDF has its text already, so there is nothing to recognise.")
+
+        wanted = set(scanned)
+        texts = []
+        found = False
+        done = 0
+
+        for index in (range(pages) if target_ext == "txt" else scanned):
+            page = doc.load_page(index)
+            if index in wanted:
+                report(done, len(scanned))
+                text = _recognise(pymupdf, page, language, tessdata, layer=target_ext == "ocrpdf")
+                done += 1
+            else:
+                text = page.get_text()
+            found = found or bool(text.strip())
+            del page
+            if target_ext == "txt":
+                texts.append(text)
+        report(len(scanned), len(scanned))
+
+        if not found:
+            raise ConversionError("No text was found in that PDF.")
+        if target_ext == "txt":
+
+            out_path.write_text("\n".join(texts), encoding="utf-8")
+        else:
+            doc.save(str(out_path), garbage=3, deflate=True)
+    finally:
+        doc.close()
+
+_EXIF_ORIENTATION = 0x0112
+
+def _too_large(pixels: float = 0) -> ConversionError:
+    size = f"{pixels / 1_000_000:.0f} megapixels" if pixels else "too big"
+    return ConversionError(
+        f"That picture is {size}. Text is read from pictures up to "
+        f"{OCR_MAX_DECODE_PIXELS // 1_000_000} megapixels here, or from a JPEG of any size the bot takes. "
+        "Send a smaller copy.")
+
+_GREY_16_TO_8 = [value >> 8 for value in range(65536)]
+
+_GREY_BAND_PIXELS = 1_000_000
+
+def _eight_bit(im):
+    """The picture as L, RGB or RGBA, which is what a resize and a JPEG can take."""
+    from PIL import Image
+    mode = im.mode
+    if mode in ("L", "RGB", "RGBA"):
+        return im
+    if mode == "1":
+        return im.convert("L")
+    if mode == "I":
+
+        return im.point(_GREY_16_TO_8, "L")
+    if mode.startswith("I;16"):
+
+        width, height = im.size
+        rows = max(1, _GREY_BAND_PIXELS // max(1, width))
+        grey = Image.new("L", im.size)
+        for top in range(0, height, rows):
+            band = im.crop((0, top, width, min(height, top + rows)))
+            grey.paste(band.convert("I").point(_GREY_16_TO_8, "L"), (0, top))
+        return grey
+    if mode in ("LA", "PA") or (mode == "P" and "transparency" in im.info):
+        return im.convert("RGBA")
+    return im.convert("RGB")
+
+def _tiff_pages(im) -> int:
+    """How many pages (directories) an opened TIFF holds, counted from the file's headers and without decoding a pixel."""
+    try:
+        im.seek(1)
+    except Exception:
+        return 1
+    try:
+        return max(2, int(im.n_frames))
+    except Exception:
+        return 2
+    finally:
+        try:
+            im.seek(0)
+        except Exception:
+            pass
+
+def _picture(in_path):
+    """A picture ready to be a PDF page: (bytes, format name, width, height)."""
+    import io
+    from PIL import Image
+    convert_utils.register_openers()
+    try:
+        im = Image.open(in_path)
+    except Image.DecompressionBombError as exc:
+        raise _too_large() from exc
+    except MemoryError:
+        raise
+    except Exception as exc:
+        raise ConversionError(f"Couldn't read that as an image: {_tidy(exc)}") from exc
+    try:
+        source_format = im.format
+        pages = _tiff_pages(im) if source_format == "TIFF" else 1
+        if pages > 1:
+
+            raise ConversionError(
+                f"That TIFF holds {pages} pages. Text is read from a one-page picture: "
+                "convert the TIFF to PDF first, then choose TXT or Searchable PDF.")
+        width, height = im.size
+        if width * height > OCR_MAX_PIXELS:
+            scale = math.sqrt(OCR_MAX_PIXELS / (width * height))
+            im.draft("RGB", (max(1, math.ceil(width * scale)), max(1, math.ceil(height * scale))))
+
+        if im.size[0] * im.size[1] > OCR_MAX_DECODE_PIXELS:
+            raise _too_large(width * height)
+        try:
+            im.load()
+        except MemoryError:
+            raise OutOfMemory("decoding that picture ran out of memory") from None
+        except Exception as exc:
+            raise ConversionError(f"Couldn't read that as an image: {_tidy(exc)}") from exc
+
+        orientation = 1
+        if source_format not in convert_utils._ORIENTED_BY_CONTAINER:
+            try:
+                orientation = im.getexif().get(_EXIF_ORIENTATION, 1)
+            except Exception:
+                orientation = 1
+        picture = _eight_bit(im)
+        if picture is not im:
+            im.close()
+        if picture.size[0] * picture.size[1] > OCR_MAX_PIXELS:
+            scale = math.sqrt(OCR_MAX_PIXELS / (picture.size[0] * picture.size[1]))
+            smaller = picture.resize((max(1, math.floor(picture.size[0] * scale)),
+                                      max(1, math.floor(picture.size[1] * scale))), Image.LANCZOS)
+            picture.close()
+            picture = smaller
+        if picture.mode == "RGBA":
+            flat = convert_utils._flatten_onto_white(picture)
+            picture.close()
+            picture = flat
+        if orientation in (2, 3, 4, 5, 6, 7, 8):
+            turn = Image.Transpose
+            turned = picture.transpose({2: turn.FLIP_LEFT_RIGHT, 3: turn.ROTATE_180, 4: turn.FLIP_TOP_BOTTOM,
+                                        5: turn.TRANSPOSE, 6: turn.ROTATE_270, 7: turn.TRANSVERSE,
+                                        8: turn.ROTATE_90}[orientation])
+            picture.close()
+            picture = turned
+        out = io.BytesIO()
+        try:
+            if source_format == "PNG":
+                picture.save(out, format="PNG")
+            else:
+                picture.save(out, format="JPEG", quality=90)
+        except MemoryError:
+            raise OutOfMemory("saving that picture ran out of memory") from None
+        except Exception as exc:
+            raise ConversionError(f"Couldn't read that as an image: {_tidy(exc)}") from exc
+        result = (out.getvalue(), picture.size[0], picture.size[1])
+        picture.close()
+        return result
+    finally:
+        im.close()
+
+def _image(in_path, src_ext: str, target_ext: str, out_path: Path, language: str, tessdata: str) -> None:
+    pymupdf = _pymupdf()
+    data, width, height = _picture(in_path)
+
+    doc = pymupdf.open()
+    try:
+        page = doc.new_page(width=max(width, 1) * 72 / MAX_DPI, height=max(height, 1) * 72 / MAX_DPI)
+        page.insert_image(page.rect, stream=data)
+        del data
+        report(0, 1)
+        text = _recognise(pymupdf, page, language, tessdata, layer=target_ext == "ocrpdf")
+        report(1, 1)
+        if not text.strip():
+            raise ConversionError("No text was found in that picture.")
+        if target_ext == "txt":
+            out_path.write_text(text, encoding="utf-8")
+        else:
+            doc.save(str(out_path), garbage=3, deflate=True)
+    finally:
+        doc.close()
+
+def convert(in_path, src_ext: str, target_ext: str, work_dir, stem: str = "converted",
+            lang: str = "eng", max_scanned: "int | None" = None) -> Result:
+    """Text from a picture or a PDF as `target_ext`: "txt", or "ocrpdf" (a searchable PDF, written as `<stem>.pdf`)."""
+    src_ext = formats.normalise(src_ext)
+    target_ext = formats.normalise(target_ext)
+    if target_ext not in WRITES:
+        raise ConversionError(f"Text isn't recognised into .{target_ext}.")
+
+    animated = convert_utils.gif_is_animated(in_path) if src_ext in formats.ANIMATED_CAPABLE else None
+    if animated:
+        raise ConversionError("Text isn't recognised in an animation.")
+    is_picture = (formats.category_of(src_ext, animated) == formats.IMAGE
+                  and src_ext not in formats.RAW_FORMATS and src_ext != "svg")
+    if src_ext != "pdf" and not is_picture:
+        raise ConversionError(f"Text can't be recognised in a .{src_ext} file.")
+    if src_ext != "pdf" and max_scanned is not None and max_scanned < 1:
+        raise ConversionError("That conversion was not priced for reading any page.")
+    tessdata = tessdata_dir()
+    if tessdata is None:
+        raise ConversionError("Text recognition isn't available on this host.")
+    out_path = Path(work_dir) / f"{stem}.{'txt' if target_ext == 'txt' else 'pdf'}"
+    if os.path.realpath(in_path) == os.path.realpath(out_path):
+        raise ConversionError("The result would overwrite the original.")
+    language = tesseract_language(lang)
+    try:
+        if src_ext == "pdf":
+            _pdf(in_path, target_ext, out_path, language, tessdata, max_scanned)
+        else:
+            _image(in_path, src_ext, target_ext, out_path, language, tessdata)
+    except ConversionError:
+        out_path.unlink(missing_ok=True)
+        raise
+    except MemoryError:
+        out_path.unlink(missing_ok=True)
+        raise OutOfMemory("recognising the text ran out of memory") from None
+    except Exception as exc:
+        out_path.unlink(missing_ok=True)
+        raise ConversionError(f"Couldn't recognise the text: {_tidy(exc)}") from exc
+    return Result(out_path)
+
+def selftest() -> None:
+    """Exits 1 with a one-line reason unless the language data is there and the engine reads a line of English and a line of Russian back."""
+    def fail(reason: str):
+        sys.stderr.write(f"OCR self-test failed: {reason}\n")
+        raise SystemExit(1)
+
+    folder = os.environ.get("TESSDATA_PREFIX") or ""
+    missing = [name for name in _TRAINEDDATA if not os.path.isfile(os.path.join(folder, f"{name}.traineddata"))]
+    if missing:
+        fail(f"no language data for {', '.join(missing)} in TESSDATA_PREFIX={folder!r}")
+    try:
+        import pymupdf
+    except ImportError:
+        fail("PyMuPDF is not installed")
+    if not hasattr(pymupdf.Pixmap, "pdfocr_tobytes"):
+        fail("this PyMuPDF has no text recognition (Pixmap.pdfocr_tobytes)")
+    font = pymupdf.Font("helv")
+    for language, line, words in (("eng", "MumuBots OCR 2026", ("MumuBots", "OCR", "2026")),
+                                  ("rus", "Проверка текста", ("Проверка", "текста"))):
+        try:
+            doc = pymupdf.open()
+            page = doc.new_page(width=520, height=120)
+            writer = pymupdf.TextWriter(page.rect)
+            writer.append((20, 70), line, font=font, fontsize=36)
+            writer.write_text(page)
+            recognised = pymupdf.open("pdf", page.get_pixmap(dpi=200).pdfocr_tobytes(
+                compress=True, language=language, tessdata=folder))[0].get_text()
+        except Exception as exc:
+            fail(f"reading {language} failed: {_tidy(exc)}")
+        for word in words:
+            if word not in recognised:
+                fail(f"read {line!r} ({language}) as {' '.join(recognised.split())!r}")
+
 # ─── module: convert_bot.convert_worker ──────────────────────────────────────
 """One conversion, in a process of its own."""
 import json
@@ -2848,6 +3377,40 @@ def _describe_image(job: dict) -> int:
     _emit(True, width=int(width), height=int(height))
     return 0
 
+def _describe_pdf(job: dict) -> int:
+    """A PDF's page count and how many pages are pictures without text (ocr_convert.count_scanned), as JSON (jobs.describe_pdf)."""
+    try:
+        import convert_utils
+        import ocr_convert
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"could not load the converters: {exc}")
+        return 1
+
+    def say_pages(pages: int) -> None:
+        sys.stdout.write(json.dumps({"pages": int(pages)}) + "\n")
+        sys.stdout.flush()
+
+    try:
+        counted = ocr_convert.count_scanned(job["path"], on_pages=say_pages, scan=ocr_convert.available(),
+                                            stop_after=ocr_convert.OCR_MAX_PAGES)
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the PDF ran out of memory")
+        return 2
+    except convert_utils.OutOfMemory as exc:
+        _emit(False, kind="no_memory", message=str(exc))
+        return 2
+    except convert_utils.ConversionError as exc:
+        _emit(False, kind="refused", message=str(exc))
+        return 2
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")
+        return 1
+    scanned = counted["scanned"]
+    _emit(True, pages=int(counted["pages"]), scanned=None if scanned is None else int(scanned))
+    return 0
+
 def main(argv) -> int:
     if len(argv) < 2:
         _emit(False, kind="crash", message="no job was given to the worker")
@@ -2866,6 +3429,8 @@ def main(argv) -> int:
         return _describe_raw(job)
     if job.get("kind") == "describe_image":
         return _describe_image(job)
+    if job.get("kind") == "describe_pdf":
+        return _describe_pdf(job)
 
     try:
         import convert_utils
@@ -2897,6 +3462,7 @@ def main(argv) -> int:
         result = convert_utils.convert(
             job["in_paths"], job["src_ext"], job["target_ext"],
             job["work_dir"], job.get("stem") or "converted",
+            ocr_lang=job.get("ocr_lang") or "", ocr_pages=int(job.get("ocr_pages") or 0),
         )
     except convert_utils.OutOfMemory as exc:
         _emit(False, kind="no_memory", message=str(exc))
@@ -2968,6 +3534,13 @@ def time_limit_for(billable_bytes: int, work: float = 1.0, paid: bool = True) ->
         return FREE_TIME_LIMIT_S
     wanted = TIME_BASE_S + TIME_PER_MB_S * work * billable_bytes / (1024 * 1024)
     return int(min(TIME_LIMIT_S, max(TIME_BASE_S, wanted)))
+
+def ocr_time_limit(ocr_pages: int, paid: bool, billable: int = 0, work: float = 1.0) -> int:
+    """How long a job that recognises text may run: what any conversion of that file is given (time_limit_for: TIME_BASE_S, and a second more for every megabyte of work in the file and its result), and OCR_PAGE_S more for every page it reads, up to TIME_LIMIT_S."""
+    if not paid:
+        return FREE_TIME_LIMIT_S
+    import ocr_convert
+    return int(min(TIME_LIMIT_S, time_limit_for(billable, work, True) + max(0, ocr_pages) * ocr_convert.OCR_PAGE_S))
 
 def job_limit(job: "Job") -> int:
     """The limit this job runs under: its own, or for a job made before it had one, the flat limit of its kind."""
@@ -3078,6 +3651,9 @@ class Job:
     send_limit: int = SEND_LIMIT_BYTES
 
     time_limit: int = 0
+
+    ocr_lang: str = ""
+    ocr_pages: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     state: str = "queued"
     charged: bool = False
@@ -3258,6 +3834,8 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
         "stem": stem,
         "max_pixels": MAX_MEGAPIXELS * 1_000_000,
         "max_memory_mb": WORKER_MAX_MEMORY_MB,
+        "ocr_lang": job.ocr_lang,
+        "ocr_pages": job.ocr_pages,
     }
     proc = await _start_worker(payload)
     job.proc = proc
@@ -3407,6 +3985,75 @@ async def describe_image(path, timeout: float = DESCRIBE_TIMEOUT_S) -> "float | 
     answered = await _ask_child({"kind": "describe_image", "path": str(path),
                                  "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a picture's size")
     return None if answered is None else _image_size(answered[0])
+
+def _count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+def _pdf_info(answer: bytes) -> "dict | None":
+    """{"pages": n, "scanned": m} from a describe_pdf child's answer, or None for anything that is not exactly that."""
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    try:
+        last = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        last = None
+    if isinstance(last, dict) and last.get("ok"):
+        pages, scanned = last.get("pages"), last.get("scanned", False)
+        if not _count(pages) or not (scanned is None or (_count(scanned) and scanned <= pages)):
+            return None
+        return {"pages": pages, "scanned": scanned}
+    for line in lines:
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and "ok" not in data and _count(data.get("pages")):
+            return {"pages": data["pages"], "scanned": None}
+    return None
+
+async def _ask_child_partial(payload: dict, timeout: float, what: str):
+    """_ask_child, for a child whose first lines are worth having even when the rest is not: (what it wrote, its exit code) -- the exit code None when it overran `timeout` and was killed, with what it had written by then -- or None when it could not be run at all."""
+    async with _describe_slots:
+        proc = None
+        written: list[bytes] = []
+        try:
+            proc = await _start_worker(payload)
+
+            async def read_out():
+                while chunk := await proc.stdout.read(65536):
+                    written.append(chunk)
+                await proc.wait()
+
+            async def drain_err():
+                while await proc.stderr.read(65536):
+                    pass
+            await asyncio.wait_for(asyncio.gather(read_out(), drain_err()), timeout=timeout)
+        except asyncio.TimeoutError:
+            await _kill(proc)
+            logger.warning("Reading %s took over %.0f s and was stopped", what, timeout)
+            return b"".join(written), None
+        except asyncio.CancelledError:
+            await asyncio.shield(_kill(proc))
+            raise
+        except Exception as exc:
+            await _kill(proc)
+            logger.warning("Reading %s failed to run (%s)", what, type(exc).__name__)
+            return None
+        return b"".join(written), proc.returncode
+
+async def describe_pdf(path, timeout: "float | None" = None) -> "dict | None":
+    """How many pages a PDF has and how many of them are pictures without text ({"pages": n, "scanned": m}, ocr_convert.count_scanned), read in a child process, or None for a PDF that cannot be read -- which includes a child that crashed or answered nonsense before it knew the page count."""
+    if timeout is None:
+        import ocr_convert
+        timeout = ocr_convert.OCR_DESCRIBE_SECONDS
+    answered = await _ask_child_partial({"kind": "describe_pdf", "path": str(path),
+                                         "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a PDF's pages")
+    if answered is None:
+        return None
+    out, returncode = answered
+    info = _pdf_info(out)
+    if info is None and returncode not in (0, 2, None):
+        logger.warning("Reading a PDF's pages failed (exit %s)", returncode)
+    return info
 
 class Runner:
     """What bot.py provides. None of these may raise, except `deliver`, whose exception is the send failure."""
@@ -3695,6 +4342,15 @@ PROCESS_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 def _upper(ext: str) -> str:
     return (ext or "?").upper()
 
+def _target(job: jobs.Job, lang: str | None = None) -> str:
+    """The job's target as the person is told it: PNG, or "Searchable PDF" for the pseudo-target ocrpdf, never the pseudo-extension itself."""
+    return i18n.target_label(lang or job.lang, job.target_ext)
+
+def _pair(job: jobs.Job) -> str:
+    """"png->pdf", for the credit ledger and the in-flight record, which the person can read in /balance: the pseudo-target ocrpdf is written out."""
+    target = "searchable-pdf" if job.target_ext == "ocrpdf" else job.target_ext
+    return f"{job.src_ext}->{target}"
+
 BAR_CELLS = 10
 
 def progress_bar(fraction: float) -> str:
@@ -3720,7 +4376,7 @@ def time_left(done: float, total: float, elapsed: float) -> float | None:
 def status_card(lang: str, job: jobs.Job, now: float | None = None) -> str:
     now = time.monotonic() if now is None else now
     stage = job.extra.get("stage") or "converting"
-    lines = [f"🔄 {_upper(job.src_ext)} → {_upper(job.target_ext)}",
+    lines = [f"🔄 {_upper(job.src_ext)} → {_target(job, lang)}",
              i18n.t(lang, "card_sending" if stage == "sending" else "card_converting")]
     progress = job.extra.get("progress")
     stage_started = job.extra.get("stage_started") or job.started_at or now
@@ -3809,17 +4465,17 @@ class ConvertRunner(jobs.Runner):
             return await asyncio.to_thread(family_link.star_balance, job.user_id)
         return await asyncio.to_thread(
             family_link.spend_stars, job.user_id, job.price, "spend",
-            f"{job.src_ext}->{job.target_ext} conversion, {job.size / 1024:.0f} KB")
+            f"{_pair(job)} conversion, {job.size / 1024:.0f} KB")
 
     async def started(self, job: jobs.Job, balance: int) -> None:
         await self.card(job)
 
     async def queued(self, job: jobs.Job, ahead: int) -> None:
         if ahead:
-            text = i18n.t(job.lang, "job_queued", src=_upper(job.src_ext), target=_upper(job.target_ext),
+            text = i18n.t(job.lang, "job_queued", src=_upper(job.src_ext), target=_target(job),
                           ahead=ahead, price=job.price)
         else:
-            text = i18n.t(job.lang, "job_starting", src=_upper(job.src_ext), target=_upper(job.target_ext))
+            text = i18n.t(job.lang, "job_starting", src=_upper(job.src_ext), target=_target(job))
         await self._status(job, text, self.stop_keyboard(job))
 
     async def card(self, job: jobs.Job) -> None:
@@ -3871,16 +4527,16 @@ class ConvertRunner(jobs.Runner):
     async def succeeded(self, job: jobs.Job, outcome: jobs.Outcome) -> None:
         note_job(True)
         await self._status(job, i18n.t(job.lang, "job_done", src=_upper(job.src_ext),
-                                       target=_upper(job.target_ext)))
+                                       target=_target(job)))
 
     async def refund(self, job: jobs.Job, kind: str) -> int:
         return await asyncio.to_thread(
             family_link.move_stars, job.user_id, job.price, "refund",
-            f"{job.src_ext}->{job.target_ext} conversion ended: {kind}")
+            f"{_pair(job)} conversion ended: {kind}")
 
     async def hold(self, job: jobs.Job) -> None:
         await asyncio.to_thread(db.hold_conversion, job.id, job.user_id, job.chat_id, job.price,
-                                job.lang, f"{job.src_ext}->{job.target_ext}", PROCESS_ID)
+                                job.lang, _pair(job), PROCESS_ID)
 
     async def release(self, job: jobs.Job) -> str:
         return await asyncio.to_thread(db.release_conversion, job.id)
@@ -3946,7 +4602,7 @@ class ConvertRunner(jobs.Runner):
                                                     "limit": max(1, round(limit / 60))}),
             jobs.CRASH: ("job_reason_crash", {}),
             jobs.NO_MEMORY: ("job_reason_no_memory", {}),
-            jobs.TOO_LARGE: ("job_reason_too_large", {"target": _upper(job.target_ext),
+            jobs.TOO_LARGE: ("job_reason_too_large", {"target": _target(job),
                                                       "mb": detail.split()[0] if detail else "?",
                                                       "limit": job.send_limit // (1024 * 1024)}),
             jobs.SEND_FAILED: ("job_reason_send_failed", {}),
@@ -3969,7 +4625,7 @@ class ConvertRunner(jobs.Runner):
         credit = (f"{job.price} ⚡ back to the balance" if refunded_to is not None
                   else ("free conversion, nothing to refund" if not job.price else "not refunded"))
         text = (f"⚠️ {BOT_LABEL}: a conversion failed ({kind})\n"
-                f"File: {job.size / 1024 / 1024:.1f} MB {_upper(job.src_ext)} → {_upper(job.target_ext)}\n"
+                f"File: {job.size / 1024 / 1024:.1f} MB {_upper(job.src_ext)} → {_target(job, 'en')}\n"
                 f"Ran: {elapsed:.0f}s of a {limit}s limit\n"
                 f"Detail: {detail or '-'}\n"
                 f"Code: {problems.JOB_ENDINGS.get(kind, 'CV-CRASH')} · incident {job.extra.get('incident', '-')}\n"
