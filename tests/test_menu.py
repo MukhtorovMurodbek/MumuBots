@@ -48,6 +48,14 @@ for _bot in BOTS:
             "a one-word language switch, written in the language it switches "
             "to; /language covers all three and sits second in the menu")
 
+# 2.2.0: the full guide in one tap, in every public bot. The per-command pages
+# are the buttons under /help (and /help <name>), not commands: check_help_pages
+# below keeps any help_<name> command out of every bot.
+for _bot in BOTS:
+    UNADVERTISED[(_bot, "fullhelp")] = (
+        "the full guide in one tap -- the same as /help full and the button "
+        "under /help; the menu has /help, which leads to it")
+
 # Commands that became a button, a screen, or another command's job in 1.7.0.
 # Every one of them still works when typed: somebody learned it, and a command
 # that answers is cheaper to keep than a habit is to break.
@@ -355,6 +363,7 @@ def check_public(bot):
 
     check_translations(bot, menu, set(owner_menu))
     check_help(bot, menu)
+    check_help_pages(bot, handlers, lists)
 
 
 # Every command a user can send, named in /help, in every language: the
@@ -394,6 +403,114 @@ def check_help(bot, menu):
               not unexplained)
 
 
+# The per-command help pages (2.2.0, the owner 2026-10-17): a button under /help
+# (and /help <name>) shows a page, in a bot whose bot.py holds HELP_PAGES
+# (name -> function) and HELP_ALIASES (another name -> a page). A page is named
+# after the command it explains, so that the button "/convert" is the page of
+# /convert and nothing has to be looked up; the one page that is not a command's
+# is listed here with its reason.
+TOPIC_PAGES = {
+    ("downloader_bot", "download"):
+        "sending a link is not a command -- there is nothing to type but the "
+        "link -- and it is the part of this bot people most need explained",
+}
+# The pattern of shared_features.HELP_PAGE_PATTERN, for the name inside "helpdet:<name>".
+PAGE_NAME = re.compile(r"[a-z]{1,20}")
+
+
+def module_dict(bot, name):
+    """A module-level `NAME = {"key": value, ...}` in bot.py, as {key: value}: a string
+    value as itself, anything else as its source. None when it is not a dict literal
+    with string keys."""
+    tree = ast.parse((REPO / bot / "bot.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            if not isinstance(node.value, ast.Dict):
+                return None
+            if not all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in node.value.keys):
+                return None
+            return {k.value: (v.value if isinstance(v, ast.Constant) else ast.unparse(v))
+                    for k, v in zip(node.value.keys, node.value.values)}
+    return None
+
+
+def registers_page_button(bot):
+    """Is there a `CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN)`?
+    Read as a shape, not as text, so that another pages dict or another pattern shows up."""
+    tree = ast.parse((REPO / bot / "bot.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "CallbackQueryHandler" and node.args):
+            continue
+        handler = node.args[0]
+        if not (isinstance(handler, ast.Call) and getattr(handler.func, "id", None) == "help_page_button"):
+            continue
+        pattern = [kw.value for kw in node.keywords if kw.arg == "pattern"]
+        return (len(handler.args) == 1 and getattr(handler.args[0], "id", None) == "HELP_PAGES"
+                and len(pattern) == 1 and getattr(pattern[0], "id", None) == "HELP_PAGE_PATTERN")
+    return False
+
+
+def help_commands_registered(bot):
+    """The `help_<x>` commands a bot registers: a CommandHandler whose name, or one of whose
+    names, is written as help_... (a string, a list of them, or an f-string)."""
+    tree = ast.parse((REPO / bot / "bot.py").read_text(encoding="utf-8"))
+    found = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "CommandHandler" and node.args):
+            continue
+        target = node.args[0]
+        parts = target.elts if isinstance(target, (ast.List, ast.Tuple)) else [target]
+        for part in parts:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str) and part.value.startswith("help_"):
+                found.append(part.value)
+            elif isinstance(part, ast.JoinedStr) and part.values and isinstance(part.values[0], ast.Constant) \
+                    and str(part.values[0].value).startswith("help_"):
+                found.append("help_{...}")
+    return found
+
+
+def check_help_pages(bot, handlers, lists):
+    pages, aliases = module_dict(bot, "HELP_PAGES"), module_dict(bot, "HELP_ALIASES")
+    check(f"{bot}: HELP_PAGES and HELP_ALIASES are dict literals with string keys, and there is a page",
+          pages is not None and aliases is not None and bool(pages))
+    pages, aliases = pages or {}, aliases or {}
+
+    bad = [name for name in pages if not PAGE_NAME.fullmatch(name)]
+    check(f"{bot}: every page name fits the button's callback data (helpdet:<a-z, 1 to 20 letters>)"
+          + (f" -- {', '.join(bad)}" if bad else ""), not bad)
+
+    # A page is the page of a command the bot handles, or a topic on purpose.
+    strays = [name for name in pages if name not in handlers and (bot, name) not in TOPIC_PAGES]
+    check(f"{bot}: every page is a command the bot handles, or a listed topic"
+          + (f" -- {', '.join(strays)}" if strays else ""), not strays)
+    for (b, name), why in TOPIC_PAGES.items():
+        if b == bot:
+            check(f"{bot}: the topic page '{name}' is still a page, and still not a command ({why[:36]}...)",
+                  name in pages and name not in handlers)
+
+    lost = [alias for alias, page in aliases.items() if page not in pages]
+    check(f"{bot}: every alias stands for a page"
+          + (f" -- {', '.join(lost)}" if lost else ""), not lost)
+    doubled = [alias for alias in aliases if alias in pages]
+    check(f"{bot}: no alias is also a page" + (f" -- {', '.join(doubled)}" if doubled else ""), not doubled)
+
+    # The pages and /fullhelp stay out of every menu: the menu has /help, which leads to them.
+    menus = {key: names for key, names in lists.items() if key.endswith("COMMANDS")}
+    i18n_menu = command_menu(bot)
+    in_menu = [f"{where}:{name}" for where, names in menus.items() for name in names
+               if name.startswith("help_") or name == "fullhelp"]
+    in_menu += [f"{lang}:{name}" for lang, table in i18n_menu.items() for name in table
+                if name.startswith("help_") or name == "fullhelp"]
+    check(f"{bot}: no help page and no /fullhelp is in any menu"
+          + (f" -- {', '.join(in_menu)}" if in_menu else ""), not in_menu)
+
+    check(f"{bot}: /fullhelp is handled", "fullhelp" in handlers)
+    check(f"{bot}: the help page CallbackQueryHandler is registered with HELP_PAGE_PATTERN",
+          registers_page_button(bot))
+    stray = help_commands_registered(bot)
+    check(f"{bot}: no help_<x> command is registered" + (f" -- {', '.join(stray)}" if stray else ""), not stray)
+
+
 def check_parent():
     """ManagerBot, which is the same rule upside down.
 
@@ -419,7 +536,6 @@ def check_parent():
     # gap from this very check; the owner found it by typing "/pro" and being
     # offered /problems and nothing else (2026-09-29).
     aliases = {
-        "nightly": "problems", "reports": "problems",
         "finishupdates": "resume",
         "errorlog": "logs", "botlog": "logs", "problemlog": "logs",
         "me": "status",
@@ -455,6 +571,20 @@ def check_parent():
         all_handlers = analyse(bot)[0]
         check(f"{bot}: /{cmd} is still handled and still kept out of the menu ({why[:36]}...)",
               cmd in all_handlers and cmd not in menu)
+
+    # /reports was in the alias table above ("it is /problems now") for three
+    # versions and so never offered, while /report beside it was. They are two
+    # commands with two handlers: the list of recent problems, and one of them
+    # in full. An alias is only an alias if it is registered as one.
+    check(f"{bot}: /reports, the list that /report opens one row of, is in the menu", "reports" in menu)
+    registered = analyse(bot)[0]
+    check(f"{bot}: /reports is its own command, not a second name for /problems",
+          registered.get("reports") not in (None, registered.get("problems")))
+    check(f"{bot}: /nightly, which the owner types, is in the menu", "nightly" in menu)
+    check(f"{bot}: /nightly really is registered with /problems",
+          registered.get("nightly") == registered.get("problems") != None)  # noqa: E711
+    check(f"{bot}: every alias named above is a handled command",
+          all(alias in registered for alias in aliases))
 
     # The commands that reach one bot each: what is offered has to be the
     # command that runs, so a shortcut in the menu is a shortcut registered.

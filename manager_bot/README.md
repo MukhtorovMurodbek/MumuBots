@@ -36,6 +36,10 @@ database, and without them there is nothing for it to watch.
   report; `/feedback` switches between the two. It carries the words, the bot
   and the language, never who wrote them — so it is read only: there is
   nobody to answer.
+- **Counts the family's unique people.** Every 15 minutes it counts everyone who
+  has used any of the bots, each person once however many bots they use, and the
+  first time that reaches 220 it tells you, once, so you can start the 220 ⚡
+  gift with `/promo`. `/users` shows the same count on its last line.
 - **Says when it has gone blind.** If ManagerBot's own database connection
   fails it says so over Telegram, because otherwise the one failure that
   stops every alert would be the one failure nobody hears about.
@@ -119,7 +123,12 @@ Every owner-only command any bot in the family has is reachable from here.
 The last three name only one bot each, so the bot name is optional.
 
 Across the whole family:
-- `/users [hours]` — active users per bot, default 24h
+- `/users [hours]` — active users per bot, default 24h, and the unique people across all of them
+- `/promo [stop]` — the 220 ⚡ gift. Once the bots have 220 unique people, a card to start it: once, ever, and
+  it cannot be undone. From the start, the first message a person sends ConvertBot or DownloaderBot in the
+  next 14 days gives them 220 ⚡, and AnonBot shows an ad for it once to each person who writes to it. After the
+  start, `/promo` shows how it is going (when it started and closes, how many claimed it, how many saw the ad);
+  `/promo stop` ends the claiming early, and credit already given stays
 - `/donations` — paid donations per bot
 - `/sql <SELECT …>` — read-only query against the shared database
 - `/backup` — the entire database as one zip of CSVs

@@ -61,7 +61,14 @@ DIFFERENT_ON_PURPOSE = {
         'says "ManagerBot itself hit ..." -- it reports on four other bots, so '
         "whose crash it is has to be in the sentence.",
     "track_activity":
-        "does not stamp _last_seen, because nothing prunes user_data here.",
+        "does not stamp _last_seen, because nothing prunes user_data here; and it "
+        "does not count button taps -- ManagerBot's buttons are the owner's.",
+    "_sample_usage_now":
+        "the public bots also write the window's button-tap counts with the usage "
+        "row; ManagerBot counts none (its buttons are the owner's).",
+    "_usage_sample_job":
+        "the public bots swap the button-tap counts out on the event loop for "
+        "_sample_usage_now to write; ManagerBot has none.",
 }
 
 failures = []

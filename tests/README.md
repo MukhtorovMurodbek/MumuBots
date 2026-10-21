@@ -110,13 +110,121 @@ which were then made to isolate the guard they name):
   file), half size past `FULL_MP`, refused past `MAX_MP`, damaged and mislabelled
   files, a MemoryError reported as that; the 16-bit TIFF is read back by an
   independent parser and compared with LibRaw's own output value for value.
-- `test_redeliver.py` -- DownloaderBot's "get it as a file" button, tapped: a tap
-  that the download allowance refuses gives the button back (and sends the
-  allowance message, records nothing, starts nothing); a tap takes off only that
-  button; a second tap, in turn or both in flight at once, is told it has
-  expired and starts nothing. The real `redeliver_callback` with Telegram, the
-  database and the download faked; run against 12 deliberately broken copies
-  of the callback, every one caught.
+- `test_ocr.py` -- text read from pictures and scanned PDFs (`ocr_convert.py`), on
+  inputs drawn at run time with PyMuPDF's own Helvetica: the four languages
+  read back; a PDF of text pages, scans, a turned scan and a page whose invisible
+  text differs from its picture (text pages come out verbatim, in order); the
+  searchable PDF (same pages, every page identical at 50 dpi, the text layer on
+  the words -- turned pages too -- and at most 20 KB a page bigger); a 48 MP JPEG
+  decoded at half size and a 24 MP one brought down, with the engine never handed
+  more than 12 MP (hooks on Pillow's decode and on the engine); MuPDF's cache
+  shrunk once a page; progress; the dpi floor; the refusals; what a scanned page
+  is (a picture on it and under 20 characters of its own text: a report with two
+  blank pages and a deck of title slides count none); the count given in steps
+  (the page count first, none looked at, stopped past the most a conversion
+  reads); a TIFF of several pages refused while an MPO photo is read; a 16-bit
+  grey picture taken to 8 bits as before without a 32-bit copy of the whole of it.
+  Needs PyMuPDF and the
+  language data (`TESSDATA_PREFIX`, defaulted to `TempTools\tessdata` where it
+  exists) and says SKIP without them.
+- `test_ocr_wiring.py` -- the same, wired into the bot, driven with the fakes of
+  `test_batching.py`: which formats the menu offers and when (a PDF with scanned
+  pages, one with none, one the child could not read, one counted in pages but not
+  in scanned pages, pages with nothing on them, more than 30 -- TXT stays, as the
+  ordinary one -- an album, a host with no language data); the language row (default from the person's
+  language, the cycle, More formats staying open); one page under 3 MB free, two
+  priced, the time limit as one function that the quote and the queue both take
+  (`jobs.ocr_time_limit`, the file's own part included: a 90 MB PDF with one
+  scanned page is given the TXT limit of the same PDF without one, plus the page's);
+  the language and the page count in the worker's
+  payload, and a job never reading a page it was not sold; the pages counted by a
+  child process on a 5 second deadline (the page count comes first and survives a
+  kill; a PDF of two million glyphs does not hold the menu; a crash and nonsense
+  give None, and nothing opens the PDF in the bot's process); a file joining an
+  album after the menu was drawn (the real upload handler); `scan.pdf` coming back as a `.pdf` without touching
+  the upload; the texts in all three languages, and no label that says `ocrpdf`.
+  Broken on purpose 43 ways, one at a time, in a private copy of the tree; the
+  review fixes of 2026-10-10 18 more ways, in place.
+
+`test_pump_tasks.py` joined them on 2026-10-10, with the ManagerBot sweep fix: the 1 s tick that decides
+whether to sweep hands the sweep to a task and returns at once (it used to await it, so a sweep that outlasted one
+second made the scheduler skip every tick inside it, ~2,800 "maximum number of running instances" lines a day),
+never starts a second sweep over a running one, names a sweep stuck past a minute once, keeps the results and
+events pumps apart, and lets a sweep that raised be followed by the next (it also checks the /status sweep-timing
+line, 38 checks in all). Driven with a fake context and clock; four
+mutants (inline await, no running guard, stall never named, stall named every tick) each fail it.
+
+`test_merge.py` joined them the same day, with DownloaderBot's 📄 PDF and 🗜 ZIP
+buttons under an album. The PDF is written by hand (`downloader_bot/merge.py`, no
+new dependency), so it is checked against readers that did not write it: a
+parser in the test for the cross-reference table's byte offsets and the trailer,
+and PyMuPDF for the page count, the aspect ratios, the colours and which way up
+each page is. What goes in untouched (RGB and gray JPEGs, baseline and
+progressive: byte for byte) and what is re-encoded (PNG with alpha onto white,
+palette, 16-bit gray, CMYK, all eight EXIF turns against Pillow's own
+`exif_transpose`); an image past 20 megapixels refused from its header, with no
+pixel decoded; one decoded image in memory at a time, and the file already
+growing on disk while the later images are read; the ZIP's entries named by
+position and the downloaded file's extension, never a name from the source. The
+real `merge_callback` and `_merge_and_send` are driven with the routes, the
+database and Telegram faked: the allowance and the download record before
+anything is fetched, a PDF fetching the photos and not the video, both limits
+with small fakes (3 files, 1 MB -- the fetching stops at the file that passes
+it), each refusal's message and code, and every file deleted on every ending,
+a failed send and a file a route had already put on disk included. The wiring is
+read from the syntax tree, as `test_payment_once.py` does: the handler is
+registered, the `finally`, no `.filename` read, both limits from the environment
+and in `.env.example`. Run against 26 deliberately broken copies of the code (in
+`tests/.mirror`: alpha flattening off, the `finally` dropped, the MB cap skipped,
+the item cap skipped, offsets off by one, every JPEG re-encoded, the EXIF turn
+ignored, CMYK embedded as RGB, a remote name in the ZIP, the megapixel check
+skipped, a decoded image kept, ...), every one is caught; the first run found one
+that crashed the test instead of failing it, which was fixed. It needs Pillow,
+and PyMuPDF for the rendering checks (each says so and skips without).
+
+`test_video_shape.py` and `test_delivery_cache.py` joined them on 2026-10-12, with DownloaderBot's true video shape
+and its five-minute delivery cache. The first: ffprobe's JSON read into a width, height and length (landscape and portrait,
+a quarter turn from the display matrix and from the old tag, a non-square pixel, sizes and lengths that are missing, zero,
+huge, text, NaN), the real `probe` on clips made with the ffmpeg here (one turned by a display matrix), a fake ffprobe that
+never answers / says too much / fails (killed and reaped within the limit), and the real `_send_media` with Telegram faked:
+the single video and every album video carry the shape, documents and photos never do, and after one timeout the rest of
+the album is not measured. The second: the cache module on its own (fake clock, temp folder: life restarted by a use and by
+the same link, yet a kept delivery goes 12 hours after it was kept however often it is used, a different link dropping at once, the latest-link rule, the two caps with least-recently-used eviction, the
+disk floor, nothing deleted under a send, a failed move leaking nothing, 0 = off) and then the real `handle_link`,
+`redeliver_callback` and `_resolve_and_send` with the routes faked: download then button, one fetch and a document of the
+same bytes (photo and album too), the same link within and after the life, a different link, A-then-B, a failed send,
+`/deletemydata`, the startup wipe and the sweep, `/status`'s line, logs without the link or the id. Together 284 checks;
+48 deliberately broken copies (in `tests/.mirror`), 47 caught and 1 equivalent.
+
+Four joined them on 2026-10-17, with DownloaderBot's "the same link again" work and the one-time ⚡ gift. None needs
+a database or a network; `run.py` prints each under the title in quotes:
+
+- `test_canonical_links.py` -- "one post is one link, however it was shared" (128 checks). `platforms.canonical_link`,
+  applied at `detect_platform`, the one place a link enters the bot: the share-sheet trackers (`igsh`, `si`, `utm_*`,
+  a fragment) dropped by each platform's allow-list, the several YouTube and Instagram forms of one post coming out as
+  one link, a YouTube link with no 11-character ID left as it was, prose punctuation off the end, idempotence.
+- `test_link_dedupe.py` -- "the same link twice while the first is going is one job" (67 checks). The same person
+  sending the same link in the same chat while the first job is queued or running gets one 👌 reaction, no job and
+  no charge; any refusal clears the mark; two copies handled at once make one job; a mark older than an hour is
+  ignored; a job that outlives the hour leaves a newer copy's mark alone. Driven with the real `handle_link` and
+  `_spawn_download`.
+- `test_sent_files.py` -- "a post sent before is sent again by its file ids, and the table knows nobody" (291
+  checks). A post delivered once is re-sent by Telegram file ID without a download; the table holds no user data;
+  stale rows are re-confirmed with `resolvers.lookup`, at most 2 lookups at a time; any `BadRequest` from a stored-id
+  send drops the row; only a fresh fetch stores IDs, never a disk-cache hit. The five database functions are an
+  in-memory fake.
+- `test_gift.py` -- "the one-time gift: counted first, given once, told only to who got it" (295 checks). The family
+  command `gift` counts unless `--go`, gives once per person and tells only who got it; ManagerBot's `/gift` and its
+  Give it / Cancel card, whose buttons carry a nonce so an older card can never give or cancel a newer gift.
+- `test_manager_help.py` -- "ManagerBot's page per command" (559 checks, 2026-10-18). Twelve pages and four
+  aliases: owner-only, plain text, out of the menus, every number read from the code that enforces it (each
+  changed at runtime must show on its page); `/help <name>`; the page buttons under `/help` and `/start` (a tap
+  by the owner sends the page as a new message, a stranger's is refused by `guard`, a forged name gets an alert,
+  the handler sits before any catch-all callback, no `/help_<name>` command); the `--active` broadcast card; the
+  corrected usage strings.
+
+Broken on purpose, one way at a time, in a private copy of the code: 15, 16, 63 (plus 15 on the SQL) and 42 ways for
+the four, and 15 more for the fixes after the fresh review of the same day; every one caught.
 
 `test_pause_gate.py` joined it in v1.1.1 and is the odd one out: it reads the
 source rather than running it, and asks one question of each child bot --
@@ -210,11 +318,21 @@ the old long `/help`. It sends the burst as replies now and reaches the limit.
 it with `sim.build(bot_module, tele)`.
 
 **`python tests/help_scenarios.py`** — the family's `/help` template, in all
-four public bots: `/start` and `/help` show the bot's own short help with the
-full-guide button first, the button turns it into the full guide in place and
-back, and `/help full` goes straight there. Each bot runs its real `main()` on
-the simulator in a process of its own (their modules share names), with
-`ENV_FILES=off` so no bot's `.env` -- real tokens -- is read. Needs Postgres.
+four public bots: `/start` and `/help` show the bot's own short help with one
+button per command page (in the order of `HELP_PAGES`, two to a row, above the
+full-guide button), the full-guide button turns it into the full guide in place
+and back with the page buttons kept, and `/help full` and `/fullhelp` go
+straight there. Since 2026-10-18 also the page per command, in all three
+languages: a tap on each page button sends exactly one new message (the page,
+plain text, previews off, no keyboard) and leaves the help message as it was, a
+forged `helpdet:` name gets the "no longer exists" alert and sends nothing,
+`/help <name>` and the aliases give the same page, a typed `/help_<name>` is an
+unknown command, StickerBot's page tap works in the middle of a pack, the 4096
+limit, and every price and limit on a page changed at runtime to prove it is
+computed, not typed. Each bot runs its real `main()` on the simulator in a
+process of its own (their modules share names), with `ENV_FILES=off` so no
+bot's `.env` -- real tokens -- is read. It runs a bot from `tests/.mirror` when
+there is one (to run a broken copy). Needs Postgres.
 
 **`python tests/feedback_scenarios.py`** — ManagerBot's half of `/feedback`,
 on the same simulator: each piece reaching the owner as it arrives and naming
@@ -223,20 +341,41 @@ moving it there, a long piece cut with a way to the rest, a long night of
 feedback in messages of its own without costing the report, and a stranger
 getting nothing. Needs Postgres.
 
-**`python tests/credit_scenarios.py`** — 78 checks on the family's only
+**`python tests/credit_scenarios.py`** — 164 checks on the family's only
 money arithmetic, against a real Postgres: the lifetime ladder (a person's
 first 500 Stars at three times the ordinary rate, the next 500 at twice it,
 priced piece by piece across a step, and the same whether paid at once or in
 pieces), two payments at the same moment not both priced as somebody's first,
 bonus credit expiring while ordinary credit never does, spending taking the
 bonus first, corrections capping the bonus, that nothing takes a payment back,
-and the ledger adding up from zero row by row. Needs Postgres; uses three
-scratch user ids in the shared family tables and removes them afterwards.
+and the ledger adding up from zero row by row. Since 2026-10-17 it also covers
+the one-time ⚡ gift, `family_link.grant_bonus_once`: the claim, the credit and
+an expiring bonus lot are one transaction; the claim is the one
+`grant_stars_once` uses, so one key never pays twice; six threads racing on one
+person credit once; and the ledger line names the gift's last day. Needs
+Postgres; uses scratch user ids in the shared family tables and removes them
+afterwards.
 
 It pins the multiplier, the ladder and the expiry in its own environment rather than
 reading them from the deployment, because the assertions are about the
 arithmetic: a suite whose expected numbers move with a pricing change is a
 suite that tells you nothing.
+
+**`python tests/sent_files_db_scenarios.py`** — the `sent_files` table's SQL in
+`downloader_bot/db.py`, against a real Postgres (the scratch cluster,
+`TEST_DATABASE_URL`; it refuses a database that is not on this machine): 26
+checks in each of 3 session time zones (Pacific/Kiritimati, Pacific/Pago_Pago
+and UTC, because the row's day is the session's day). The table has exactly
+`post_key`, `items`, `confirmed_at` and `last_used` and nothing about a person;
+`init_db()` twice changes nothing; the upsert replaces the items and renews both
+times; `sent_files_used` touches the day and not the confirmation, and neither it
+nor `sent_files_confirmed` makes a row that is not there; `sent_files_drop` of a
+missing row is no error; the stored time makes a row fresh and the same row 13
+hours older stale; housekeeping (`prune_old_data`) deletes rows unused for more
+than `DBOT_FILEID_KEEP_DAYS` days and nothing else; `/deletemydata` leaves the
+table alone. `test_sent_files.py` checks the flow with these five functions
+faked in memory; this is the SQL a fake cannot check. Needs Postgres; makes a
+schema of its own and drops it.
 
 **The scripts below** are the older suite and they need a real Postgres.
 They cover the bots' own logic, which `run.py` deliberately does not.

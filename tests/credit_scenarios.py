@@ -27,6 +27,11 @@ What this covers, and why each one is here rather than assumed:
                           moment, and a failure between the claim and the credit leaves
                           no claim behind
   payments are final   -- there is no function that takes a payment back
+  the gift             -- the owner's one-time bonus credit for everyone: given once per
+                          person however many bots or threads ask, bonus and not ordinary
+                          credit (spent first, and taken back when it runs out), one claim
+                          with grant_stars_once, refused when it is out of bounds without
+                          writing anything, and never half done when the database fails
   the ledger           -- adds up from zero to the balance, row by row
 
 Run from the repo root:  python tests/credit_scenarios.py
@@ -36,7 +41,8 @@ uses a scratch schema of its own, never a bot's.
 import os
 import sys
 import threading
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,7 +74,8 @@ import family_link as fl  # noqa: E402
 import psycopg  # noqa: E402
 
 USER, OTHER, RACER = 909001, 909002, 909003
-USERS = [USER, OTHER, RACER]
+GIFTED, GIFT_RACE, GIFT_FAIL = 909005, 909006, 909007
+USERS = [USER, OTHER, RACER, GIFTED, GIFT_RACE, GIFT_FAIL]
 DUP = 909004                      # the wallet the double-delivery checks use (kept out of USERS: the overview counts wallets)
 
 failures: list[str] = []
@@ -265,6 +272,229 @@ def main() -> int:
     check("setting it to the same number again changes nothing",
           fl.set_star_balance(OTHER, 10000, "adjustment"), 10000)
 
+    print("\n== the gift ==")
+    GIFT_KEY = "gift-t909"
+    soon = (datetime.now(timezone.utc) + timedelta(days=30)).replace(microsecond=0)
+
+    def count(sql: str, *params) -> int:
+        with db.pooled() as conn:
+            return int(conn.execute(sql, params).fetchone()[0])
+
+    def claim_rows(key: str, user_id: int) -> int:
+        return count("SELECT count(*) FROM family.settings WHERE key = %s", f"stars:granted:{key}:{user_id}")
+
+    def wallet_rows(user_id: int) -> int:
+        return count("SELECT count(*) FROM family.star_balances WHERE user_id = %s", user_id)
+
+    def lot_rows(user_id: int) -> int:
+        return count("SELECT count(*) FROM family.star_bonus_lots WHERE user_id = %s", user_id)
+
+    def ledger_rows_of(user_id: int) -> int:
+        return count("SELECT count(*) FROM family.star_ledger WHERE user_id = %s", user_id)
+
+    check("nobody has a wallet before the gift, which is most people", wallet_rows(GIFTED), 0)
+    check("a first grant returns the new balance", fl.grant_bonus_once(GIFTED, 100, GIFT_KEY, soon), 100)
+    check("a second returns None", fl.grant_bonus_once(GIFTED, 100, GIFT_KEY, soon), None)
+    check("... and a third, from another bot's process, the same", fl.grant_bonus_once(GIFTED, 100, GIFT_KEY, soon), None)
+    check("the balance rose once", fl.star_balance(GIFTED), 100)
+    check("there is one claim, one lot and one ledger row",
+          (claim_rows(GIFT_KEY, GIFTED), lot_rows(GIFTED), ledger_rows_of(GIFTED)), (1, 1, 1))
+
+    totals = fl.star_totals(GIFTED)
+    check("the gift is bonus: all of the balance is bonus", totals["bonus"], 100)
+    check("... in one lot of the gift's size", totals["bonus_next_amount"], 100)
+    check("... that runs out when the gift does", totals["bonus_next_expiry"], soon)
+    check("it is credit, not money: nothing counts as paid", (totals["topped_up"], totals["stars_paid"]), (100, 0))
+    newest = fl.star_ledger_for(GIFTED, 1)[0]
+    check("the ledger row is a grant, for the whole gift",
+          (newest["reason"], newest["delta"], newest["balance_after"]), ("grant", 100, 100))
+    ok("... that says which gift it was and when it ends",
+       GIFT_KEY in (newest["detail"] or "") and f"{soon:%Y-%m-%d}" in (newest["detail"] or ""), str(newest["detail"]))
+
+    check("the key is the one grant_stars_once uses: it finds the gift given and credits nothing",
+          fl.grant_stars_once(GIFTED, 500, GIFT_KEY), None)
+    check("... and the balance did not move", fl.star_balance(GIFTED), 100)
+
+    check("ordinary credit given later is not bonus",
+          (fl.move_stars(GIFTED, 50, "adjustment", "by admin 1"), fl.star_totals(GIFTED)["bonus"]), (150, 100))
+    check("spending takes the gift before the ordinary credit", fl.spend_stars(GIFTED, 60, "spend", "gift first"), 90)
+    check("... 40 of the gift is left", fl.star_totals(GIFTED)["bonus"], 40)
+    check("... and the 50 ordinary are all still there",
+          fl.star_totals(GIFTED)["balance"] - fl.star_totals(GIFTED)["bonus"], 50)
+    run_out(GIFTED)
+    check("when the gift runs out only the unspent gift goes", fl.star_balance(GIFTED), 50)
+    newest = fl.star_ledger_for(GIFTED, 1)[0]
+    check("... and the ledger says it expired", (newest["reason"], newest["delta"]), ("expired", -40))
+    check("... nothing expires twice", fl.star_balance(GIFTED), 50)
+    check("a gift that has run out is not given again by the next run of the command",
+          fl.grant_bonus_once(GIFTED, 100, GIFT_KEY, soon), None)
+    check("... and the balance is what it was", fl.star_balance(GIFTED), 50)
+
+    check("the claim is shared the other way too: an ordinary grant first", fl.grant_stars_once(GIFTED, 25, "gift-t909-b"), 75)
+    check("... then the gift under the same key credits nothing", fl.grant_bonus_once(GIFTED, 100, "gift-t909-b", soon), None)
+    check("... no bonus appeared", (fl.star_totals(GIFTED)["bonus"], fl.star_balance(GIFTED)), (0, 75))
+    check("a different key is a different gift", fl.grant_bonus_once(GIFTED, 10, "gift-t909-c", soon), 85)
+    midnight = (datetime.now(timezone.utc) + timedelta(days=10)).replace(hour=0, minute=0, second=0, microsecond=0)
+    check("a gift that ends at midnight UTC, as /gift's last day does", fl.grant_bonus_once(GIFTED, 5, "gift-t909-d", midnight), 90)
+    detail = fl.star_ledger_for(GIFTED, 1)[0]["detail"] or ""
+    ok("... is written in the ledger with its last day, not the moment after it",
+       f"gift-t909-d, bonus through {midnight - timedelta(days=1):%Y-%m-%d}" in detail and f"{midnight:%Y-%m-%d}" not in detail, detail)
+
+    print("\n== the gift, to the same person at the same moment ==")
+    check("nobody has a wallet here either", wallet_rows(GIFT_RACE), 0)
+    results: list = []
+    barrier = threading.Barrier(6)
+
+    def race():
+        barrier.wait()
+        try:
+            results.append(fl.grant_bonus_once(GIFT_RACE, 100, GIFT_KEY, soon))
+        except Exception as exc:                              # noqa: BLE001 -- a failure is a failed check, below
+            results.append(exc)
+    racers = [threading.Thread(target=race) for _ in range(6)]
+    for racer in racers:
+        racer.start()
+    for racer in racers:
+        racer.join()
+    check("six at once: none of them failed", [r for r in results if isinstance(r, Exception)], [])
+    check("exactly one won, and was told the balance", sorted(r for r in results if r is not None), [100])
+    check("the others were told it was already given", sum(1 for r in results if r is None), 5)
+    check("the balance rose once", fl.star_balance(GIFT_RACE), 100)
+    check("one claim, one lot, one ledger row",
+          (claim_rows(GIFT_KEY, GIFT_RACE), lot_rows(GIFT_RACE), ledger_rows_of(GIFT_RACE)), (1, 1, 1))
+    check("and the lot is the whole gift", fl.star_totals(GIFT_RACE)["bonus"], 100)
+
+    print("\n== the gift, while another process holds the claim ==")
+
+    def blocked() -> bool:
+        """True once some session is waiting on a lock: the grant has met the other process's claim."""
+        with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as watcher:
+            for _ in range(200):
+                if watcher.execute("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                                   "AND datname = current_database()").fetchone()[0]:
+                    return True
+                time.sleep(0.05)
+        return False
+
+    def grant_while_held(key: str, finish: str):
+        """Another process has staked this gift's claim in a transaction it has not finished (the way a second bot
+        mid-grant looks), and this one asks. Returns (did it have to wait, what it came back with)."""
+        outcome: list = []
+
+        def ask():
+            try:
+                outcome.append(fl.grant_bonus_once(GIFT_RACE, 100, key, soon))
+            except Exception as exc:                          # noqa: BLE001 -- a failed check, below
+                outcome.append(exc)
+        holder = psycopg.connect(os.environ["DATABASE_URL"])
+        try:
+            holder.execute("INSERT INTO family.settings (key, value) VALUES (%s, %s)",
+                           (f"stars:granted:{key}:{GIFT_RACE}", "held"))
+            worker = threading.Thread(target=ask)
+            worker.start()
+            waited = blocked()
+            getattr(holder, finish)()
+        finally:
+            holder.close()
+        worker.join(30)
+        return waited, outcome
+
+    waited, outcome = grant_while_held("gift-t909-held", "commit")
+    check("the grant waits for the other process, and finds the gift taken once it has committed", (waited, outcome), (True, [None]))
+    check("... so the balance, the lots and the ledger are as they were",
+          (fl.star_balance(GIFT_RACE), lot_rows(GIFT_RACE), ledger_rows_of(GIFT_RACE)), (100, 1, 1))
+    waited, outcome = grant_while_held("gift-t909-held-2", "rollback")
+    check("if the other process gives up instead, the grant waits and then goes through", (waited, outcome), (True, [200]))
+    check("... once: one more lot and one more ledger row",
+          (fl.star_balance(GIFT_RACE), lot_rows(GIFT_RACE), ledger_rows_of(GIFT_RACE)), (200, 2, 2))
+
+    print("\n== a gift that is refused, and one that fails half way ==")
+    refused = [("no credits", dict(amount=0)),
+               ("a negative gift", dict(amount=-5)),
+               (f"one more than the most a gift may give ({fl.GIFT_MAX_CREDIT + 1})", dict(amount=fl.GIFT_MAX_CREDIT + 1)),
+               ("an expiry with no time zone", dict(expires=datetime.now() + timedelta(days=30))),
+               ("an expiry that has already passed", dict(expires=datetime.now(timezone.utc) - timedelta(seconds=1)))]
+    for label, change in refused:
+        try:
+            fl.grant_bonus_once(GIFT_FAIL, change.get("amount", 100), GIFT_KEY, change.get("expires", soon))
+        except ValueError:
+            ok(f"{label}: refused with ValueError", True)
+        except Exception as exc:                                  # noqa: BLE001 -- refused, but not the way callers expect
+            ok(f"{label}: refused with ValueError", False, f"{type(exc).__name__} instead: {exc}")
+        else:
+            ok(f"{label}: refused with ValueError", False, "it was accepted")
+    check("a refusal writes nothing: no claim, no wallet, no lot, no ledger row",
+          (claim_rows(GIFT_KEY, GIFT_FAIL), wallet_rows(GIFT_FAIL), lot_rows(GIFT_FAIL), ledger_rows_of(GIFT_FAIL)),
+          (0, 0, 0, 0))
+    check("... so the balance is unchanged", fl.star_balance(GIFT_FAIL), 0)
+
+    real_move = fl._move_in
+    calls = {"n": 0}
+
+    def fail_once(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the database went away between the claim and the credit")
+        return real_move(*args, **kwargs)
+    fl._move_in = fail_once
+    try:
+        fl.grant_bonus_once(GIFT_FAIL, fl.GIFT_MAX_CREDIT, GIFT_KEY, soon)
+        ok("a failure after the claim propagates", False, "it did not raise")
+    except RuntimeError:
+        ok("a failure after the claim propagates", True)
+    finally:
+        fl._move_in = real_move
+    check("... and leaves no claim, wallet, lot or ledger row: claim and credit stand or fall together",
+          (claim_rows(GIFT_KEY, GIFT_FAIL), wallet_rows(GIFT_FAIL), lot_rows(GIFT_FAIL), ledger_rows_of(GIFT_FAIL)),
+          (0, 0, 0, 0))
+
+    real_connect = fl._connect
+
+    class _NoLots:
+        """A connection that takes the claim and the credit and then cannot write the lot."""
+        def __init__(self, conn):
+            self._conn = conn
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+        def execute(self, sql, *args, **kwargs):
+            if "INSERT INTO family.star_bonus_lots" in str(sql):
+                raise RuntimeError("the database went away between the credit and the lot")
+            return self._conn.execute(sql, *args, **kwargs)
+
+    class _ConnectNoLots:
+        def __enter__(self):
+            self._cm = real_connect()
+            return _NoLots(self._cm.__enter__())
+
+        def __exit__(self, *exc):
+            return self._cm.__exit__(*exc)
+    fl._connect = _ConnectNoLots
+    try:
+        fl.grant_bonus_once(GIFT_FAIL, fl.GIFT_MAX_CREDIT, GIFT_KEY, soon)
+        ok("a failure after the credit, before the lot, propagates", False, "it did not raise")
+    except RuntimeError:
+        ok("a failure after the credit, before the lot, propagates", True)
+    finally:
+        fl._connect = real_connect
+    check("... and the credit is taken back with the claim: nothing was written",
+          (claim_rows(GIFT_KEY, GIFT_FAIL), wallet_rows(GIFT_FAIL), lot_rows(GIFT_FAIL), ledger_rows_of(GIFT_FAIL)),
+          (0, 0, 0, 0))
+
+    check("so the next run of the command gives it, even the most a gift may give",
+          fl.grant_bonus_once(GIFT_FAIL, fl.GIFT_MAX_CREDIT, GIFT_KEY, soon), fl.GIFT_MAX_CREDIT)
+    check("... as bonus, once",
+          (fl.star_totals(GIFT_FAIL)["bonus"], claim_rows(GIFT_KEY, GIFT_FAIL), lot_rows(GIFT_FAIL)),
+          (fl.GIFT_MAX_CREDIT, 1, 1))
+
+    run_out(GIFT_FAIL)
+    check("a second gift to somebody whose first has run out but not been collected yet: the new balance leaves the old gift out",
+          fl.grant_bonus_once(GIFT_FAIL, 10, "gift-t909-d", soon), 10)
+    check("... the ledger took the old one back first and then gave the new",
+          [row["reason"] for row in fl.star_ledger_for(GIFT_FAIL, 2)], ["grant", "expired"])
+    check("... and only the new gift is bonus", fl.star_totals(GIFT_FAIL)["bonus"], 10)
+
     print("\n== the ledger ==")
     for user_id in USERS:
         rows = fl.star_ledger_for(user_id, 100)
@@ -288,13 +518,15 @@ def main() -> int:
 
     print("\n== the overview ManagerBot prints ==")
     totals, top = fl.star_balance_overview(10)
-    check("it sees all three wallets", totals["wallets"], 3)
+    check("it sees every wallet made above", totals["wallets"], len(USERS))
     check("and totals the credit still outstanding", totals["outstanding"],
           sum(fl.star_balance(user_id) for user_id in USERS))
     check("and how much of that is bonus", totals["bonus"],
           sum(fl.star_totals(user_id)["bonus"] for user_id in USERS))
     check("a zero balance is left out of the list",
-          sorted(row["user_id"] for row in top), sorted([OTHER, RACER]))
+          sorted(row["user_id"] for row in top),
+          sorted(user_id for user_id in USERS if raw_balance(user_id) != 0))
+    ok("... and the wallet at zero is the one missing", raw_balance(USER) == 0 and USER not in {row["user_id"] for row in top})
 
     print("\n== a payment Telegram delivers twice ==")
     first = fl.topup(DUP, 100, "paid", "t909-charge-1")
@@ -436,6 +668,89 @@ def main() -> int:
     check("... and the payment was credited exactly once (not zero, not twice)",
           moved, once["base"] + once["bonus"])
     check("... with one claim for it", claims_for("t909-lost-answer"), 1)
+
+    print("\n== the 220 gift: started once, claimed by writing to a bot ==")
+    promo_people = [909011, 909012, 909013]
+
+    def promo_scrub() -> None:
+        """Its own people and the gift's own rows: the start, the stop, the
+        milestone notice, and the claims of these three only."""
+        with db.pooled() as conn:
+            for table in ("star_bonus_lots", "star_ledger", "star_balances"):
+                conn.execute(f"DELETE FROM family.{table} WHERE user_id = ANY(%s)", (promo_people,))
+            conn.execute("DELETE FROM family.settings WHERE key = ANY(%s)",
+                         ([fl.PROMO_STARTED, fl.PROMO_STOPPED, fl.PROMO_MILESTONE]
+                          + [f"stars:granted:{fl.PROMO_KEY}:{p}" for p in promo_people],))
+            conn.commit()
+        fl._promo_cache.update(at=None, started=None, stopped=None)
+
+    def promo_ledger_rows(user_id: int) -> int:
+        with db.pooled() as conn:
+            return conn.execute("SELECT count(*) FROM family.star_ledger WHERE user_id = %s",
+                                (user_id,)).fetchone()[0]
+
+    first, racer, late = promo_people
+    promo_scrub()
+    check("before the start a claim gives nothing", fl.claim_promo_gift(first), (fl.PROMO_CLOSED, None))
+    check("... and writes no wallet", fl.star_balance(first), 0)
+
+    starts, gate = [], threading.Barrier(4)
+
+    def start_one() -> None:
+        gate.wait()
+        starts.append(fl.start_promo())
+
+    threads = [threading.Thread(target=start_one) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    check("four starts at the same moment: exactly one starts it", sorted(won for _, won in starts),
+          [False, False, False, True])
+    check("... and all four read the same start", len({when for when, _ in starts}), 1)
+    started = starts[0][0]
+    check("a later start changes nothing", fl.start_promo(), (started, False))
+    check("it is open", fl.promo_open(fresh=True), True)
+
+    outcome, expires = fl.claim_promo_gift(first)
+    check("the first claim gives", outcome, fl.PROMO_GIVEN)
+    check("... 220 ⚡", fl.star_balance(first), fl.PROMO_CREDITS)
+    totals = fl.star_totals(first)
+    check("... all of it bonus, in one lot", (totals["bonus"], totals["bonus_next_amount"]), (220, 220))
+    check("... running out when the claim said", totals["bonus_next_expiry"], expires)
+    check("... at the end of the 28th day after today (UTC)",
+          expires, fl.promo_expiry(datetime.now(timezone.utc)))
+    check("a second claim by the same person: had it", fl.claim_promo_gift(first), (fl.PROMO_HAD, None))
+    check("... still 220, one ledger row", (fl.star_balance(first), promo_ledger_rows(first)), (220, 1))
+    check("promo_given_to knows", (fl.promo_given_to(first), fl.promo_given_to(racer)), (True, False))
+
+    outcomes, gate = [], threading.Barrier(6)
+
+    def claim_one() -> None:
+        gate.wait()
+        outcomes.append(fl.claim_promo_gift(racer)[0])
+
+    threads = [threading.Thread(target=claim_one) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    check("six claims by one person at the same moment: given once",
+          sorted(outcomes), sorted([fl.PROMO_GIVEN] + [fl.PROMO_HAD] * 5))
+    check("... 220 in the wallet, one ledger row", (fl.star_balance(racer), promo_ledger_rows(racer)), (220, 1))
+    check("two of these people have it", fl.promo_given_to(first) and fl.promo_given_to(racer), True)
+
+    check("the milestone notice: the first time", fl.note_promo_milestone(), True)
+    check("... and never again", fl.note_promo_milestone(), False)
+    ok("... and when it was reached is kept", fl.promo_milestone_at() is not None)
+
+    check("an open gift can be stopped", fl.stop_promo(), True)
+    check("a second stop does nothing", fl.stop_promo(), False)
+    check("after the stop a claim gives nothing", fl.claim_promo_gift(late), (fl.PROMO_CLOSED, None))
+    check("... and writes no wallet", fl.star_balance(late), 0)
+    check("credit already given stays", (fl.star_balance(first), fl.star_balance(racer)), (220, 220))
+    check("starting again after the stop is still refused", fl.start_promo()[1], False)
+    promo_scrub()
 
     scrub()
     with db.pooled() as conn:

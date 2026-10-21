@@ -29,10 +29,16 @@ _Last reviewed: 3 October 2026._
   kept until 15 minutes pass without a conversion of it, so the same file can
   be converted again. It is off unless you turn it on, the choice is
   remembered, and /cancel deletes the file sooner. A file waiting in the queue
-  is kept until its conversion has run.
+  is kept until its conversion has run. **If you change the text language**
+  under the format menu — the language the words in a picture or a scanned PDF
+  are read in: English, Russian or Uzbek — that choice is remembered too, for
+  your next file. Until you pick one it follows the language you use the bot
+  in; it is about the language, never about what the text says.
 - **A timestamp per use** — one row saying this id used the bot at this
   minute, so the operator can tell whether anybody is using it. It carries no
   content.
+- **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
+  tapped it.
 - **A payment ledger** — every payment and donation: the amount, the
   currency, what it was for, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger** — shared by the family's four bots:
@@ -40,8 +46,12 @@ _Last reviewed: 3 October 2026._
   and correction, with the amount, which bot, and why. This is what `/balance`
   and `/mystars` read and what credit returned after a failed conversion is issued against.
 - **Bonus credit, and when it expires** — for each payment that earned a
-  bonus: how much, how much of it is left, and the date it runs out. Bonus
-  that runs out unused is taken off the balance, and the ledger says so.
+  bonus and each gift: how much, how much of it is left, and the date it runs
+  out. Bonus that runs out unused is taken off the balance, and the ledger
+  says so.
+- **Gifts given** — that a gift, by its name, was given to your id and
+  when, so that it is given only once across the family. Kept like the ledger;
+  `/deletemydata` does not remove it.
 - **Problems, whenever one is shown to anybody** — the error code, an
   incident number, when it happened and the bot's version. This is written
   down automatically, because a fault nobody reports is still a fault, and
@@ -100,7 +110,10 @@ Nothing else. Files are converted on the machine the bot runs on — by
 ffmpeg, Pillow, PyMuPDF and a handful of other libraries, all of them running
 locally — and are never handed to an outside service. No conversion here
 uploads a file anywhere, which is the one thing most online converters cannot
-say. A file over 20 MB is fetched from Telegram and sent back to Telegram over
+say. That includes reading the text in a picture or a scanned PDF: it is
+recognised on the same machine, by the Tesseract engine inside PyMuPDF, never
+by an outside service, and the text it finds is kept no longer than the file
+it came from. A file over 20 MB is fetched from Telegram and sent back to Telegram over
 Telegram's own protocol rather than its Bot API; it still travels only between
 Telegram and the bot.
 
@@ -122,9 +135,11 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 | user id, language | until erased, or indefinitely while the bot is in use |
 | the file being converted | until the conversion ends; with "keep file" on, until 15 minutes pass without a conversion of it |
 | timestamp per use | about 90 days (`ACTIVITY_RETENTION_DAYS`) |
+| button tap counts | 45 days (`FAMILY_USAGE_RETENTION_DAYS`) |
 | work in progress | 12 hours (`DEPLOY_STATE_TTL_HOURS`) |
 | payment ledger | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the payment ledger |
+| gifts given (which gift was given to your id, and when) | kept, like the ledger |
 | feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it

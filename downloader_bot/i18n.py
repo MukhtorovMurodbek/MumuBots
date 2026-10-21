@@ -120,15 +120,28 @@ STRINGS = {
         "privacy_kept_heading": "What this bot keeps:",
         "privacy_stored": (
             "• your Telegram user id, your language, and your caption and quality settings\n"
-            "• the link you send, for as long as it takes to fetch what is behind it\n"
+            "• the links you send: each one while it is fetched, then the last five, so the "
+            "buttons under those downloads work. They are dropped after 12 hours without using "
+            "the bot\n"
+            "• what it has just sent you, for 5 minutes, so the button under it and the same "
+            "link sent again are answered without fetching it twice. Sending a different link, "
+            "/deletemydata or a restart deletes it sooner. All of it is deleted no later than 12 "
+            "hours after the download\n"
+            "• references to files the bot has already sent (Telegram's file IDs), filed under a "
+            "scrambled name of the post and not under who asked for it. They let the bot send the "
+            "same post again without downloading it. Before re-using one, the bot checks at least "
+            "every 12 hours that the post is still public. References nobody uses are deleted "
+            "after 90 days\n"
             "• one row per download — which platform and when, which is what the daily allowance "
             "counts\n"
             "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
             "using it\n"
+            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "• whatever the bot is in the middle of doing with you, until it is finished\n"
             "\n"
-            "The media itself is not kept. It is fetched, sent to you, and deleted."
+            "Apart from those 5 minutes the media itself is not kept. It is fetched, sent to you, "
+            "and deleted."
         ),
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
@@ -189,7 +202,7 @@ STRINGS = {
         "policy_full_text": "Full text: {url}",
         "policy_contact": "Questions, complaints or a data request: {contact}",
         "delete_data_confirm": "⚠️ This erases what this bot holds on you. There is no undo.",
-        "delete_data_consequences": 'Your language, your caption and quality settings, and every record of what you downloaded and when all go. Your daily allowance resets with them. Nothing you downloaded is affected — it was never kept here.\n\nDonation records stay, without your username, because a dispute about a payment is settled against them. Your ⚡ balance stays too, and is still yours if you come back.',
+        "delete_data_consequences": 'Your language, your caption and quality settings, and every record of what you downloaded and when all go. Your daily allowance resets with them. It also deletes the last download if it is still being held; nothing older was ever kept here.\n\nDonation records stay, without your username, because a dispute about a payment is settled against them. Your ⚡ balance stays too, and is still yours if you come back.',
         "delete_data_button_yes": "🗑 Erase it",
         "delete_data_button_no": "↩️ Keep my data",
         "delete_data_kept": "Nothing was erased.",
@@ -235,11 +248,51 @@ STRINGS = {
             "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
             "\n"
             "Main commands: /settings · /balance · /cancel\n"
-            "Every command: the full guide, below or /help full.\n"
+            "Every command: the full guide, below or /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
+        "help_page_everything": "The full guide: /fullhelp",
+        "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
+        "help_btn_download": "🔗 Sending a link",
+        "helppage_download": (
+            "🔗 Sending a link — how downloading works\n"
+            "\n"
+            "Paste a link to a post — no command needed — and I send back what's in it:\n"
+            "  - Instagram: reels, photos, whole carousels\n"
+            "  - TikTok: videos without the watermark, photo slideshows\n"
+            "  - Twitter/X: video and photos, or a clean picture of a text post\n"
+            "  - Pinterest: the pin, at full size\n"
+            "  - Reddit: the media of a media post, or a picture of a text post\n"
+            "\n"
+            "{quota}\n"
+            "• A download counts when it starts, even if it then fails. The 📄/🖼 button and the 📄 PDF / 🗜 ZIP buttons under a delivery count as one download each. The same link sent again while I'm still fetching it gets a 👌 and doesn't count.\n"
+            "• Up to {waiting} of your links can be on the way at once; I fetch {at_once} at a time, and the rest wait their turn.\n"
+            "\n"
+            "Size: free up to {free_mb} MB. {large}\n"
+            "\n"
+            "Under a delivery:\n"
+            "• \"📄 Get it as an uncompressed file\" (or \"🖼 Get it compressed instead\") sends the same post again in the other quality; each button works once.\n"
+            "• Under an album: 📄 PDF puts its photos in one PDF, 🗜 ZIP puts everything in one archive. Up to {merge_items} files and {merge_mb} MB.\n"
+            "• /settings: the caption, the quality, and large files.\n"
+            "\n"
+            "Example: paste a TikTok link like https://www.tiktok.com/@name/video/123 — the video comes back without the watermark."
+        ),
+        "helppage_download_quota": "It's free, up to {per_day} downloads in any 24 hours and {per_hour} in any hour. The count looks back from now; it doesn't reset at midnight. When you reach it, I say when the next one frees up. Anyone who has ever paid through /donate, any amount, gets {donor_day} a day and {donor_hour} an hour, for good.",
+        "helppage_download_quota_off": "It's free.",
+        "helppage_download_large": "Bigger, up to {max} MB, only if you turn on large files in /settings, in a private chat: ⚡{first} up to 100 MB, and each 100 MB after that adds less (⚡{top} for {max} MB). The ⚡ is taken only once the file has arrived, never if it fails.",
+        "helppage_download_large_off": "Anything bigger is refused.",
+        "helppage_settings": (
+            "⚙️ /settings — how your downloads arrive\n"
+            "\n"
+            "/settings shows your switches and how each is set. Tap one to change it; it stays that way for every later download.\n"
+            "• Caption (on at first): a \"via @{username}\" line under each download. Also /caption on or /caption off.\n"
+            "• Lossless (off at first). On: downloads come as files, exactly as the source had them, with no Telegram compression — but they don't play or show in the chat until you open them. Off: they come as photos and videos that play in the chat, compressed by Telegram. Also /lossless on or /lossless off. For one download only, use the 📄/🖼 button under it instead.\n"
+            "{large}\n"
+            "Example: send /lossless on, then an Instagram link: the photos come as files, at full quality."
+        ),
+        "helppage_settings_large": "• Large files (off at first). On: a download over {free_mb} MB is still fetched, up to {max} MB, and sent as a file for ⚡ credit — ⚡{first} up to 100 MB, ⚡{top} for {max} MB — taken only once it has arrived. Off: anything over {free_mb} MB is refused, and nothing is charged. In a private chat only.",
         "privacy_feedback_heading": "If you send /feedback:",
         "privacy_feedback": (
             "What you write reaches the person who runs these bots as a Telegram message, with "
@@ -252,7 +305,7 @@ STRINGS = {
             "Hey! Send me a link (Instagram, TikTok, Pinterest, Reddit, or "
             "Twitter/X) and I'll grab it for you.\n\n"
         ),
-        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
+        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nUnder an album I add two buttons: 📄 PDF puts its photos into one PDF, 🗜 ZIP puts everything into one archive.\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
         "caption_state_on": "ON",
         "caption_state_off": "OFF",
         "settings_heading": "⚙️ Your settings. Tap to change any of them.",
@@ -289,6 +342,8 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 I'm being updated right now, so I can't start anything new — please try again shortly. I'll message you when I'm back.",
         "update_will_reset": "🔧 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a few minutes.",
         "update_done_try_now": '✅ The update is done — go ahead and try again now.',
+        "gift_granted": '🎁 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, good until {date}. It pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}. Your balance: /balance',
+        "gift_claimed": "🎁 Gift received: {amount} ⚡ of free credit! Mumu bots have passed {users} users, and this is our thank-you.\nIt is good until {date} (UTC) and pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}.\nYour balance: /balance",
         "download_failed": "Couldn't download that: {error}",
         "download_blocked": "🚫 I tried every way I have of getting that one and the site turned all of them away. That is about where the request came from, not about your link. Try again in a bit — this usually sorts itself out.",
         "download_missing": "🔍 I couldn't find that post. Usually that means it was deleted, or it is from a private account. Public posts still work.",
@@ -309,6 +364,10 @@ STRINGS = {
             "/lossless to change how everything arrives."
         ),
         "album_delivered": "{count} files above.",
+        "merge_too_big": "📦 That's too much to pack into one file — I can do up to {items} files and {mb} MB in all. Everything is still in the chat above.",
+        "merge_picture_too_big": "📦 One of the pictures is too big for a PDF (over {mp} megapixels), so there's no PDF this time. The pictures are in the chat above.",
+        "merge_no_photos": "📄 A PDF needs at least two photos, and I found fewer than that in the post this time. Send the link again, or take the files from the chat above.",
+        "merge_failed": "😕 Something went wrong while I was putting them into one file, so there's no PDF or ZIP this time. The files above are fine — send the link again to retry.",
         "unknown_command": "I don't recognize that command. Send /help to see what I can do.",
     },
     "uz": {
@@ -366,7 +425,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• yuborgan havolangiz — undagi fayl olinguncha\n• har bir yuklab olish uchun bitta yozuv: qaysi platformadan va qachon; kunlik limit shu asosida hisoblanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n\nFaylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
+        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• siz yuborgan havolalar: har biri u bo'yicha fayl olinayotgan paytda, keyin esa oxirgi beshtasi — o'sha yuklamalar ostidagi tugmalar ishlashi uchun. Botdan 12 soat foydalanmasangiz, ular o'chiriladi\n• bot sizga hozirgina yuborgan fayl — 5 daqiqa davomida, uning ostidagi tugma va qayta yuborilgan o'sha havola faylni qaytadan yuklamasdan javob berishi uchun. Boshqa havola yuborsangiz, /deletemydata buyrug'ini bersangiz yoki bot qayta ishga tushsa, u oldinroq o'chiriladi. Bularning hammasi yuklab olinganidan keyin 12 soatdan kechiktirmay o'chiriladi\n• bot avval yuborgan fayllarning Telegram fayl ID'lari — postning qaytarib bo'lmaydigan kodi ostida saqlanadi, kim so'ragani esa saqlanmaydi. Ular yordamida bot o'sha postni qayta yuklab olmasdan yana yubora oladi. Fayl ID'sidan qayta foydalanishdan oldin bot post hali ham ochiq ekanini kamida har 12 soatda tekshiradi. Hech kim foydalanmagan fayl ID'lari 90 kundan keyin o'chiriladi\n• har bir yuklab olish uchun bitta yozuv: qaysi platformadan va qachon; kunlik limit shu asosida hisoblanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n\nShu 5 daqiqadan tashqari faylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -383,7 +442,7 @@ STRINGS = {
         "policy_full_text": "To'liq matn: {url}",
         "policy_contact": "Savol, shikoyat yoki ma'lumot so'rovi uchun: {contact}",
         "delete_data_confirm": "⚠️ Bot siz haqingizda saqlagan ma'lumotlar o'chiriladi. Buni ortga qaytarib bo'lmaydi.",
-        "delete_data_consequences": "Til, izoh va sifat sozlamalaringiz hamda nimani qachon yuklab olganingiz haqidagi qaydlar o'chiriladi. Kunlik limitingiz ham yangilanadi. Yuklab olgan fayllaringizga hech narsa qilmaydi — ular bu yerda umuman saqlanmagan.\n\nXayriya yozuvlari foydalanuvchi nomingizsiz saqlanib qoladi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi. ⚡ balansingiz ham saqlanadi — qaytib kelsangiz, u o'z joyida bo'ladi.",
+        "delete_data_consequences": "Til, izoh va sifat sozlamalaringiz hamda nimani qachon yuklab olganingiz haqidagi qaydlar o'chiriladi. Kunlik limitingiz ham yangilanadi. Oxirgi yuklama hali saqlanayotgan bo'lsa, u ham o'chiriladi; undan oldingilari bu yerda umuman saqlanmagan.\n\nXayriya yozuvlari foydalanuvchi nomingizsiz saqlanib qoladi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi. ⚡ balansingiz ham saqlanadi — qaytib kelsangiz, u o'z joyida bo'ladi.",
         "delete_data_button_yes": "🗑 O'chirilsin",
         "delete_data_button_no": "↩️ Ma'lumotlarim qolsin",
         "delete_data_kept": "Hech narsa o'chirilmadi.",
@@ -422,11 +481,51 @@ STRINGS = {
             "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
             "\n"
             "Asosiy buyruqlar: /settings · /balance · /cancel\n"
-            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
+        "help_page_everything": "To'liq qo'llanma: /fullhelp",
+        "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
+        "help_btn_download": "🔗 Havola yuborish",
+        "helppage_download": (
+            "🔗 Havola yuborish — yuklab olish qanday ishlaydi\n"
+            "\n"
+            "Postning havolasini yuboring — buyruq kerak emas — ichidagisini sizga yuboraman:\n"
+            "  - Instagram: reels, rasmlar, butun karusellar\n"
+            "  - TikTok: suv belgisisiz videolar, rasmli slayd-shoular\n"
+            "  - Twitter/X: video va rasmlar yoki matnli post uchun toza rasm-karta\n"
+            "  - Pinterest: pin, to'liq o'lchamda\n"
+            "  - Reddit: media post bo'lsa media, matnli bo'lsa rasm-karta\n"
+            "\n"
+            "{quota}\n"
+            "• Yuklab olish boshlanganda hisoblanadi, keyin xato bo'lsa ham. Yetkazilgan fayl ostidagi 📄/🖼 tugmasi hamda 📄 PDF / 🗜 ZIP tugmalari har biri bitta yuklab olish hisoblanadi. Hali yuklab olayotgan havolani qayta yuborsangiz, 👌 olasiz va u hisoblanmaydi.\n"
+            "• Bir vaqtda {waiting} tagacha havolangiz yo'lda bo'lishi mumkin; bir paytda {at_once} tasini yuklayman, qolganlari navbat kutadi.\n"
+            "\n"
+            "Hajm: {free_mb} MB gacha bepul. {large}\n"
+            "\n"
+            "Yetkazilgan fayl ostida:\n"
+            "• \"📄 Siqilmagan fayl sifatida olish\" (yoki \"🖼 Siqilgan holda olish\") o'sha postni boshqa sifatda yana yuboradi; har bir tugma bir marta ishlaydi.\n"
+            "• Albom ostida: 📄 PDF uning rasmlarini bitta PDF'ga, 🗜 ZIP hammasini bitta arxivga joylaydi. {merge_items} tagacha fayl va {merge_mb} MB gacha.\n"
+            "• /settings: izoh, sifat va katta fayllar.\n"
+            "\n"
+            "Misol: https://www.tiktok.com/@name/video/123 kabi TikTok havolasini yuboring — video suv belgisisiz keladi."
+        ),
+        "helppage_download_quota": "Bepul: istalgan 24 soatda {per_day} ta va istalgan bir soatda {per_hour} ta yuklab olish. Hisob hozirdan orqaga qarab yuritiladi, yarim tunda nolga tushmaydi. Chegaraga yetsangiz, keyingisi qachon bo'shashini aytaman. /donate orqali bir marta bo'lsa ham, istalgan miqdorda to'lagan har kim uchun chegara butunlay kuniga {donor_day} ta va soatiga {donor_hour} ta bo'ladi.",
+        "helppage_download_quota_off": "Bepul.",
+        "helppage_download_large": "Kattarog'i, {max} MB gacha, faqat /settings da katta fayllarni yoqsangiz va shaxsiy chatda: 100 MB gacha ⚡{first}, keyingi har 100 MB arzonroq ({max} MB uchun ⚡{top}). ⚡ fayl yetib kelgandan keyingina yechiladi, xato bo'lsa umuman yechilmaydi.",
+        "helppage_download_large_off": "Undan kattasi rad etiladi.",
+        "helppage_settings": (
+            "⚙️ /settings — yuklamalaringiz qanday kelishi\n"
+            "\n"
+            "/settings kalitlaringizni va ularning holatini ko'rsatadi. O'zgartirish uchun birini bosing; keyingi barcha yuklamalar uchun shunday qoladi.\n"
+            "• Izoh (dastlab yoniq): har bir yuklama ostida \"@{username} orqali\" qatori. Yana: /caption on yoki /caption off.\n"
+            "• Siqilmagan rejim (dastlab o'chiq). Yoniq: fayllar asl sifatida, hujjat ko'rinishida keladi, Telegram ularni siqmaydi — lekin ochmaguningizcha chatda ko'rinmaydi va ijro etilmaydi. O'chiq: chatda ko'rinadigan rasm va video bo'lib keladi, Telegram ularni siqadi. Yana: /lossless on yoki /lossless off. Faqat bitta yuklama uchun uning ostidagi 📄/🖼 tugmasidan foydalaning.\n"
+            "{large}\n"
+            "Misol: /lossless on yuboring, keyin Instagram havolasini: rasmlar to'liq sifatda, fayl bo'lib keladi."
+        ),
+        "helppage_settings_large": "• Katta fayllar (dastlab o'chiq). Yoniq: {free_mb} MB dan katta yuklama ham {max} MB gacha olinadi va ⚡ kredit evaziga fayl sifatida yuboriladi — 100 MB gacha ⚡{first}, {max} MB uchun ⚡{top} — fayl yetib kelgandan keyingina yechiladi. O'chiq: {free_mb} MB dan kattasi rad etiladi va hech narsa yechilmaydi. Faqat shaxsiy chatda.",
         "privacy_feedback_heading": "/feedback yuborsangiz:",
         "privacy_feedback": (
             "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
@@ -438,7 +537,7 @@ STRINGS = {
             "Salom! Menga havola yuboring (Instagram, TikTok, Pinterest, Reddit "
             "yoki Twitter/X) va men uni siz uchun yuklab beraman.\n\n"
         ),
-        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o\'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
+        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nAlbom ostida ikkita tugma chiqadi: 📄 PDF — rasmlarni bitta PDF faylga jamlaydi, 🗜 ZIP — hamma narsani bitta arxivga soladi.\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o\'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to\'liq qo\'llanma (/help - qisqasi)\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
         "caption_state_on": "YONIQ",
         "caption_state_off": "O'CHIQ",
         "settings_heading": "⚙️ Sozlamalaringiz. O'zgartirish uchun bosing.",
@@ -475,6 +574,8 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 Bot hozir yangilanmoqda, shuning uchun yangi ishni boshlab bo'lmaydi — birozdan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
         "update_will_reset": "🔧 Diqqat: bot yangilanadi va hozir bajarilayotgan ishingiz to'xtab qoladi. Bir necha daqiqadan keyin qaytadan boshlashingiz mumkin.",
         "update_done_try_now": "✅ Yangilanish tugadi — endi qaytadan urinib ko'rishingiz mumkin.",
+        "gift_granted": "🎁 Bizda 100 dan ortiq foydalanuvchi bo'ldi, rahmat! Sizga {amount} ⚡ bepul kredit berildi, u {date} gacha amal qiladi. Bu {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi. Balansingiz: /balance",
+        "gift_claimed": "🎁 Sovg'a: {amount} ⚡ bepul kredit! Mumu botlarida {users} dan ortiq foydalanuvchi bo'ldi, bu bizning minnatdorchiligimiz.\nU {date} gacha (UTC) amal qiladi va {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi.\nBalansingiz: /balance",
         "download_failed": "Buni yuklab bo'lmadi: {error}",
         "download_blocked": '🚫 Buni olishning barcha yo‘llarini sinab ko‘rdim, sayt hammasini rad etdi. Bu havolangizga emas, so‘rov qayerdan kelganiga bog‘liq. Birozdan so‘ng qayta urinib ko‘ring — odatda o‘zi tuzalib ketadi.',
         "download_missing": '🔍 Bu postni topa olmadim. Odatda bu post o‘chirilgan yoki yopiq akkauntdan ekanini bildiradi. Ochiq postlar ishlayveradi.',
@@ -488,6 +589,10 @@ STRINGS = {
         "redeliver_as_compressed": "🖼 Siqilgan holda olish",
         "redeliver_expired": "Bu tugmaning muddati o'tgan — havolani qaytadan yuboring yoki fayllar qanday kelishini /lossless orqali o'zgartiring.",
         "album_delivered": "Yuqorida {count} ta fayl.",
+        "merge_too_big": "📦 Bunchasini bitta faylga joylab bo'lmaydi — ko'pi bilan {items} ta fayl va jami {mb} MB. Fayllarning o'zi yuqorida turibdi.",
+        "merge_picture_too_big": "📦 Rasmlardan biri PDF uchun juda katta ({mp} megapikseldan katta), shuning uchun bu safar PDF chiqmaydi. Rasmlarning o'zi yuqorida turibdi.",
+        "merge_no_photos": "📄 PDF uchun kamida ikkita rasm kerak, postda esa bu safar ikkitadan kam rasm topildi. Havolani qayta yuboring yoki fayllarni yuqoridan oling.",
+        "merge_failed": "😕 Fayllarni bitta qilib yig'ishda nimadir xato ketdi, shuning uchun bu safar PDF ham, ZIP ham chiqmadi. Yuqoridagi fayllar joyida — qayta urinish uchun havolani yana yuboring.",
         "unknown_command": "Bunday buyruq yo'q. Bot nimalar qila olishini bilish uchun /help yuboring.",
     },
     "ru": {
@@ -574,15 +679,28 @@ STRINGS = {
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
             "• ваш числовой id в Telegram, язык и настройки подписи и качества\n"
-            "• присланную ссылку — на то время, пока бот достаёт то, что за ней\n"
+            "• ссылки, которые вы присылаете: каждую — пока загружается то, что по ней, затем "
+            "последние пять, чтобы работали кнопки под этими загрузками. Они удаляются, если вы "
+            "не пользуетесь ботом 12 часов\n"
+            "• то, что бот только что вам отправил, — 5 минут, чтобы кнопка под ним и та же ссылка, "
+            "присланная снова, срабатывали без повторной загрузки. Другая ссылка, /deletemydata "
+            "или перезапуск бота удаляют это раньше. Всё это удаляется не позже чем через "
+            "12 часов после скачивания\n"
+            "• file ID Telegram для файлов, которые бот уже отправлял, — под необратимым кодом "
+            "поста, без сведений о том, кто его запрашивал. Они позволяют отправить тот же пост "
+            "ещё раз, не скачивая его заново. Прежде чем снова использовать file ID, бот не "
+            "реже чем раз в 12 часов проверяет, что пост всё ещё публичный. File ID, которыми "
+            "никто не пользуется, удаляются через 90 дней\n"
             "• по одной записи на скачивание: с какой площадки и когда — по ним считается "
             "дневной лимит\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
+            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "• то, что бот в этот момент для вас делает — пока не закончит\n"
             "\n"
-            "Само видео или фото не хранится: бот его достаёт, отправляет вам и удаляет."
+            "Кроме этих 5 минут, сами файлы не хранятся: они загружаются, отправляются вам и "
+            "удаляются."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
@@ -628,7 +746,7 @@ STRINGS = {
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
         "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
-        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда вы скачивали, будут стёрты. Дневной лимит вместе с ними обнулится. На уже скачанное это никак не влияет — здесь оно и не хранилось.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
+        "delete_data_consequences": 'Язык, настройки подписи и качества и все записи о том, что и когда вы скачивали, будут стёрты. Дневной лимит вместе с ними обнулится. Заодно удаляется последняя загрузка, если бот ещё её хранит; более ранние загрузки здесь никогда не хранились.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
@@ -674,11 +792,51 @@ STRINGS = {
             "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
             "\n"
             "Основные команды: /settings · /balance · /cancel\n"
-            "Все команды — в полном руководстве: кнопка ниже или /help full.\n"
+            "Все команды — в полном руководстве: кнопка ниже или /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
+        "help_page_everything": "Полное руководство: /fullhelp",
+        "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
+        "help_btn_download": "🔗 Отправка ссылки",
+        "helppage_download": (
+            "🔗 Отправка ссылки — как устроено скачивание\n"
+            "\n"
+            "Пришлите ссылку на пост — команда не нужна, — и я пришлю, что в нём:\n"
+            "  - Instagram: рилсы, фото, карусели целиком\n"
+            "  - TikTok: видео без водяного знака, фото-слайдшоу\n"
+            "  - Twitter/X: видео и фото или аккуратная картинка текстового поста\n"
+            "  - Pinterest: пин в полном размере\n"
+            "  - Reddit: медиа из медиапоста или картинка текстового поста\n"
+            "\n"
+            "{quota}\n"
+            "• Загрузка засчитывается, когда начинается, даже если потом не удалась. Кнопка 📄/🖼 и кнопки 📄 PDF / 🗜 ZIP под доставкой — тоже по одной загрузке. Ту же ссылку, отправленную снова, пока я её ещё качаю, я отмечу 👌 и не засчитаю.\n"
+            "• В пути одновременно может быть до {waiting} ваших ссылок; качаю я по {at_once} за раз, остальные ждут очереди.\n"
+            "\n"
+            "Размер: бесплатно до {free_mb} МБ. {large}\n"
+            "\n"
+            "Под доставкой:\n"
+            "• «📄 Получить несжатым файлом» (или «🖼 Получить сжатым») присылает тот же пост ещё раз в другом качестве; каждая кнопка срабатывает один раз.\n"
+            "• Под альбомом: 📄 PDF собирает его фото в один PDF, 🗜 ZIP — всё в один архив. До {merge_items} файлов и {merge_mb} МБ.\n"
+            "• /settings: подпись, качество и большие файлы.\n"
+            "\n"
+            "Пример: пришлите ссылку TikTok вроде https://www.tiktok.com/@name/video/123 — видео придёт без водяного знака."
+        ),
+        "helppage_download_quota": "Бесплатно — до {per_day} загрузок за любые 24 часа и до {per_hour} за любой час. Счёт идёт назад от текущего момента и не обнуляется в полночь. Когда упрётесь в лимит, я скажу, когда освободится следующая загрузка. Каждый, кто хоть раз заплатил через /donate, любую сумму, получает навсегда {donor_day} в день и {donor_hour} в час.",
+        "helppage_download_quota_off": "Бесплатно.",
+        "helppage_download_large": "Больше — до {max} МБ — только если включить большие файлы в /settings, в личном чате: ⚡{first} до 100 МБ, каждые следующие 100 МБ дешевле ({max} МБ — ⚡{top}). ⚡ списывается, только когда файл уже скачан, и никогда — если не вышло.",
+        "helppage_download_large_off": "Больше — не принимаю.",
+        "helppage_settings": (
+            "⚙️ /settings — в каком виде приходят загрузки\n"
+            "\n"
+            "/settings показывает ваши переключатели и как они стоят. Нажмите любой, чтобы изменить; так и останется для всех следующих загрузок.\n"
+            "• Подпись (сначала вкл): строка «через @{username}» под каждой загрузкой. Ещё: /caption on или /caption off.\n"
+            "• Режим без потерь (сначала выкл). Вкл: загрузки приходят файлом, ровно такими, как в источнике, без сжатия Telegram, — но не проигрываются в чате, пока вы их не откроете. Выкл: приходят фото и видео, которые играют прямо в чате, сжатые Telegram. Ещё: /lossless on или /lossless off. Только для одной загрузки — кнопка 📄/🖼 под ней.\n"
+            "{large}\n"
+            "Пример: отправьте /lossless on, потом ссылку на Instagram — фото придут файлами, в полном качестве."
+        ),
+        "helppage_settings_large": "• Большие файлы (сначала выкл). Вкл: загрузку больше {free_mb} МБ я всё равно скачаю, до {max} МБ, и пришлю файлом за ⚡ кредит — ⚡{first} до 100 МБ, ⚡{top} за {max} МБ, — списываю, только когда файл уже скачан. Выкл: всё больше {free_mb} МБ отклоняется, и ничего не списывается. Только в личном чате.",
         "privacy_feedback_heading": "Если вы отправляете /feedback:",
         "privacy_feedback": (
             "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
@@ -689,7 +847,7 @@ STRINGS = {
             "Здравствуйте! Пришлите мне ссылку (Instagram, TikTok, Pinterest, Reddit "
             "или Twitter/X), и я скачаю это для вас.\n\n"
         ),
-        "help_text": 'Просто пришлите ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": 'Просто пришлите ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nПод альбомом появятся две кнопки: 📄 PDF собирает фото в один PDF, 🗜 ZIP — всё в один архив.\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "caption_state_on": "ВКЛ",
         "caption_state_off": "ВЫКЛ",
         "settings_heading": "⚙️ Ваши настройки. Нажмите, чтобы изменить.",
@@ -726,6 +884,8 @@ STRINGS = {
         "update_soon_try_later_soon": '🔧 Сейчас меня обновляют, поэтому я не могу начать ничего нового — попробуйте снова чуть позже. Я напишу, когда вернусь.',
         "update_will_reset": '🔧 Внимание: меня скоро обновят, и то, что вы сейчас начали, будет сброшено. Через несколько минут сможете начать заново.',
         "update_done_try_now": '✅ Обновление завершено — можете пробовать снова.',
+        "gift_granted": '🎁 Нас уже больше 100 — спасибо! Вам начислено {amount} ⚡ бесплатного кредита, он действует до {date}. Этого хватит примерно на {conversions} платных конвертаций в {convert} или на скачивание больших файлов в {download}. Ваш баланс: /balance',
+        "gift_claimed": "🎁 Подарок: {amount} ⚡ бесплатного кредита! У Mumu ботов уже больше {users} пользователей — это наше спасибо.\nОн действует до {date} (UTC). Этого хватит на платные конвертации (около {conversions}) в {convert} или на скачивание больших файлов в {download}.\nВаш баланс: /balance",
         "download_failed": "Не удалось это скачать: {error}",
         "download_blocked": '🚫 Я перебрал все способы достать это, и сайт отказал всем. Дело не в ссылке, а в том, откуда пришёл запрос. Попробуйте через некоторое время — обычно это проходит само.',
         "download_missing": '🔍 Не нашёл этот пост. Обычно это значит, что его удалили или он из закрытого аккаунта. Публичные посты работают.',
@@ -746,6 +906,10 @@ STRINGS = {
             "поменяйте способ доставки через /lossless."
         ),
         "album_delivered": "Выше {count} файл(ов).",
+        "merge_too_big": "📦 Слишком много, чтобы собрать в один файл. Мой предел: файлов — {items}, общий размер — {mb} МБ. Всё это по-прежнему в чате выше.",
+        "merge_picture_too_big": "📦 Одно из фото слишком большое для PDF (больше {mp} мегапикселей), поэтому в этот раз PDF не получится. Сами фото — в чате выше.",
+        "merge_no_photos": "📄 Для PDF нужно хотя бы два фото, а в этом посте сейчас нашлось меньше. Пришлите ссылку заново или возьмите файлы из чата выше.",
+        "merge_failed": "😕 Что-то пошло не так, пока я собирал всё в один файл, — ни PDF, ни ZIP в этот раз не вышло. Файлы выше целы; пришлите ссылку заново, чтобы попробовать ещё раз.",
         "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
     },
 }

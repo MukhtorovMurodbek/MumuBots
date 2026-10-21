@@ -29,16 +29,18 @@ it empty the bot refuses to start rather than run wide open), DATABASE_URL
 (the shared family database), DB_SCHEMA (default "manager_bot").
 """
 import asyncio
+import functools
 import hashlib
 import html
 import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 import time as time_module
 import zipfile
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from itertools import takewhile
 from datetime import datetime, time, timedelta, timezone
 from io import BytesIO
@@ -57,7 +59,7 @@ envfiles.load(__file__)
 
 from telegram import (
     BotCommand, BotCommandScopeChat, InlineKeyboardButton,
-    InlineKeyboardMarkup, Update,
+    InlineKeyboardMarkup, LinkPreviewOptions, Update,
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -299,12 +301,17 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
 # Sending
 # ---------------------------------------------------------------------------
 
-async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+async def notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    """Never raises. True if at least one owner got it -- a caller that must
+    not lose the message (the 220 gift's one notice) tries again on False."""
+    delivered = False
     for admin_id in ADMIN_IDS:
         try:
             await context.bot.send_message(chat_id=admin_id, text=text, parse_mode=ParseMode.HTML)
+            delivered = True
         except Exception:
             logger.exception("Couldn't deliver an alert to %s", admin_id)
+    return delivered
 
 
 async def send_long(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, filename: str = "output.txt") -> None:
@@ -338,10 +345,12 @@ def format_delta(seconds: float) -> str:
 # /status -- the board
 # ---------------------------------------------------------------------------
 
-def _build_board() -> str:
+def _build_board(sweep_line: str = "") -> str:
     """Runs entirely in a worker thread (it is all blocking SQL), so the
     caller wraps it in asyncio.to_thread. One query for the whole board --
-    see db.status_snapshot."""
+    see db.status_snapshot. The sweep timings live in memory and are mutated
+    by the event loop, so the caller reads them there (_sweep_line()) and
+    passes the finished line in; this function never touches them."""
     now = datetime.now(timezone.utc)
     snapshot = db.status_snapshot([b["schema"] for b in ALL_BOTS], now - timedelta(hours=1))
     beats = {row["bot_id"]: row for row in snapshot["beats"]}
@@ -381,6 +390,7 @@ def _build_board() -> str:
     alerts = "on" if snapshot["alerts"] == "on" else "OFF"
     stamp = now.strftime("%H:%M:%S UTC")
     return "\n".join([header, "", *lines, "", db_line,
+                      *([sweep_line] if sweep_line else []),
                       f"🔔 Alerts: {alerts} · 🕐 {stamp}"])
 
 
@@ -399,7 +409,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
         await update.message.reply_text(
             f"⚠️ Couldn't read the family database: {exc}\n\n"
@@ -563,6 +573,84 @@ async def usage_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report, parse_mode=ParseMode.HTML)
 
 
+# ---------------------------------------------------------------------------
+# /buttons -- how often each button is tapped (counts, nothing about who)
+# ---------------------------------------------------------------------------
+# Each public bot counts the taps of its buttons per day for the whole bot and
+# writes the counts with its usage sample (family.button_taps; the key is the
+# button's name, never an id or a link). DownloaderBot also counts a few events
+# that are not callbacks -- how long people take to tap "get it as a file", whether
+# the delivery cache answered it -- which are the numbers that decide how long that
+# cache should keep a download. ManagerBot's own buttons are not counted.
+BUTTONS_DEFAULT_DAYS = 7
+BUTTONS_MAX_DAYS = 90
+BUTTONS_MAX_LINES = 25            # keys listed per bot, then "+N more"
+BUTTONS_USAGE = f"Usage: /buttons [days] -- from 1 to {BUTTONS_MAX_DAYS} days, {BUTTONS_DEFAULT_DAYS} if not said."
+
+_REDO_KEYS = ("redo.to_file", "redo.to_compressed", "redo.expired", "redo.spent")
+_REDO_AFTER = (("lt1m", "<1m"), ("1-2m", "1-2m"), ("2-5m", "2-5m"), ("5-15m", "5-15m"),
+               ("15-60m", "15-60m"), ("gt60m", ">60m"), ("unknown", "unknown"))
+_DOWNLOADER_BLOCK = (set(_REDO_KEYS) | {f"redo.after.{name}" for name, _ in _REDO_AFTER}
+                     | {"redo.cache.hit", "redo.cache.miss", "cache.kept", "cache.not_kept",
+                        "link.again.cached", "link.again.not_cached"})
+
+
+def _downloader_block(counts: dict) -> list[str]:
+    n = lambda key: counts.get(key, 0)  # noqa: E731
+    return [
+        f"  Redo taps: {n('redo.to_file') + n('redo.to_compressed')} (to file {n('redo.to_file')}, "
+        f"to compressed {n('redo.to_compressed')}); expired {n('redo.expired')}, double {n('redo.spent')}",
+        "  Tap after: " + " \u00b7 ".join(f"{label} {n('redo.after.' + name)}" for name, label in _REDO_AFTER),
+        f"  Redo from cache: hit {n('redo.cache.hit')} \u00b7 miss {n('redo.cache.miss')}; "
+        f"deliveries kept {n('cache.kept')} \u00b7 not kept {n('cache.not_kept')}",
+        f"  Same link again: cached {n('link.again.cached')} \u00b7 not cached {n('link.again.not_cached')}",
+    ]
+
+
+def _buttons_report(days: int) -> str:
+    rows = family_link.button_taps_history(days)
+    if not rows:
+        return "No button taps recorded yet."
+    per_bot: dict[str, dict[str, int]] = {}
+    for row in rows:
+        per_bot.setdefault(row["bot_id"], {})[row["button"]] = int(row["taps"])
+    names = {child["id"]: child["name"] for child in CHILDREN}
+    order = [child["id"] for child in CHILDREN if child["id"] in per_bot]
+    order += sorted(bot_id for bot_id in per_bot if bot_id not in names)
+    lines = [f"Button taps, last {days} days (counts only, nothing about who)"]
+    for bot_id in order:
+        counts = per_bot[bot_id]
+        lines += ["", names.get(bot_id, bot_id)]
+        if bot_id == "downloaderbot":
+            lines += _downloader_block(counts)
+            counts = {key: taps for key, taps in counts.items() if key not in _DOWNLOADER_BLOCK}
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        lines += [f"  {key}: {taps}" for key, taps in ranked[:BUTTONS_MAX_LINES]]
+        if len(ranked) > BUTTONS_MAX_LINES:
+            lines.append(f"  +{len(ranked) - BUTTONS_MAX_LINES} more")
+    return "\n".join(lines)
+
+
+async def buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await guard(update, context):
+        return
+    days = BUTTONS_DEFAULT_DAYS
+    if context.args:
+        try:
+            days = int(context.args[0])
+        except ValueError:
+            days = 0
+        if len(context.args) > 1 or not 1 <= days <= BUTTONS_MAX_DAYS:
+            await update.message.reply_text(BUTTONS_USAGE)
+            return
+    try:
+        report = await asyncio.to_thread(_buttons_report, days)
+    except Exception as exc:
+        await update.message.reply_text(f"\u26a0\ufe0f Couldn't read the button taps: {exc}")
+        return
+    await send_long(context, update.effective_chat.id, report, "buttons.txt")
+
+
 async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The three buttons under the /status board."""
     if not await guard(update, context):
@@ -587,7 +675,7 @@ async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
         # A second query.answer() on the same callback is rejected by
         # Telegram, and this one has already been answered above -- so say it
@@ -646,6 +734,7 @@ COMMAND_SINCE = {
     "providers": "1.2.3",
     "stars": "1.2.3",
     "crashtest": "1.2.3",
+    "gift": "2.2.0",
 }
 
 
@@ -1417,6 +1506,13 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"  {bot['name']}: — (no tables yet)")
         else:
             lines.append(f"  {bot['name']}: {counts[0]}  [{counts[1]}]")
+    # Counted now, not taken from the 15-minute job's last answer: this is the
+    # figure to look at when deciding whether the 220 gift can start.
+    try:
+        people = await asyncio.to_thread(db.unique_people, [b["schema"] for b in CHILDREN])
+        lines.append(f"👤 Unique people across all bots: {people} (the gift's mark is {family_link.PROMO_USERS})")
+    except Exception as exc:
+        lines.append(f"👤 Unique people across all bots: could not count ({type(exc).__name__})")
     await update.message.reply_text("\n".join(lines))
 
 
@@ -1487,6 +1583,12 @@ def _ledger_lines(rows) -> list:
     return out
 
 
+# How many rows /balance shows: the largest balances in the family overview, and
+# the latest movements of one person. The balance page under /help prints them.
+BALANCE_OVERVIEW_ROWS = 20
+BALANCE_HISTORY_ROWS = 12
+
+
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/balance                -- the family-wide picture
        /balance <user_id>      -- one person, with their last movements
@@ -1499,7 +1601,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
 
     if not args:
-        totals, rows = await asyncio.to_thread(family_link.star_balance_overview, 20)
+        totals, rows = await asyncio.to_thread(family_link.star_balance_overview, BALANCE_OVERVIEW_ROWS)
         lines = [
             "⚡ Credit balances, whole family",
             "",
@@ -1561,7 +1663,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚡ <code>{user_id}</code>: {what}", parse_mode=ParseMode.HTML)
 
     totals = await asyncio.to_thread(family_link.star_totals, user_id)
-    rows = await asyncio.to_thread(family_link.star_ledger_for, user_id, 12)
+    rows = await asyncio.to_thread(family_link.star_ledger_for, user_id, BALANCE_HISTORY_ROWS)
     lines = [
         f"⚡ <code>{user_id}</code>",
         "",
@@ -1612,14 +1714,19 @@ async def addcredit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML)
 
 
+# /events: how many it shows when no number is given, and the most it will.
+EVENTS_DEFAULT = 15
+EVENTS_MAX = 60
+
+
 async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
-    limit = 15
+    limit = EVENTS_DEFAULT
     bot_id = None
     for arg in context.args:
         if arg.isdigit():
-            limit = min(int(arg), 60)
+            limit = min(int(arg), EVENTS_MAX)
         else:
             match = resolve_bot(arg)
             if match:
@@ -1662,7 +1769,7 @@ async def sql_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     body = [" | ".join(cols), "-" * 40]
     body += [" | ".join("NULL" if v is None else str(v) for v in row) for row in rows]
-    body.append(f"\n({len(rows)} row(s), capped at 50)")
+    body.append(f"\n({len(rows)} row(s), capped at {db.SQL_MAX_ROWS})")
     await send_long(context, update.effective_chat.id, "\n".join(body), "query.txt")
 
 
@@ -2160,6 +2267,9 @@ FEEDBACK_READ_ONLY = "read only: it names nobody, so there is nobody to answer"
 # A message holds 4096 characters; one piece of feedback can be that long by
 # itself, so what is shown of one is capped and /feedback <id> shows the rest.
 FEEDBACK_SHOWN_CHARS = 3000
+# Rows /feedback lists, and how far back /feedback <n> looks for one piece.
+FEEDBACK_LIST_ROWS = 10
+FEEDBACK_SEARCH_ROWS = 50
 _feedback_mode_cache = {"value": None, "read_at": 0.0}
 
 
@@ -2231,7 +2341,7 @@ def _feedback_mode_line(mode: str) -> str:
 
 
 async def _feedback_overview(mode: str) -> str:
-    items = await asyncio.to_thread(family_link.recent_feedback, 10)
+    items = await asyncio.to_thread(family_link.recent_feedback, FEEDBACK_LIST_ROWS)
     lines = ["💬 <b>Feedback</b>", f"<i>{FEEDBACK_READ_ONLY}.</i>", _feedback_mode_line(mode), ""]
     if not items:
         lines.append("Nobody has sent any yet.")
@@ -2256,10 +2366,11 @@ async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if args and args[0].lstrip("#").isdigit():
         wanted = int(args[0].lstrip("#"))
-        items = await asyncio.to_thread(family_link.recent_feedback, 50)
+        items = await asyncio.to_thread(family_link.recent_feedback, FEEDBACK_SEARCH_ROWS)
         item = next((i for i in items if i["id"] == wanted), None)
         if item is None:
-            await update.message.reply_text(f"No feedback #{wanted} among the latest 50.")
+            await update.message.reply_text(
+                f"No feedback #{wanted} among the latest {FEEDBACK_SEARCH_ROWS}.")
             return
         await _send_feedback_one(context, update.effective_chat.id, item)
         return
@@ -2292,13 +2403,17 @@ async def feedback_mode_button(update: Update, context: ContextTypes.DEFAULT_TYP
                         parse_mode=ParseMode.HTML, reply_markup=_feedback_keyboard(mode))
 
 
+# The furthest back /problems will look, in hours (a week).
+PROBLEMS_MAX_HOURS = 168
+
+
 async def nightly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/nightly [hours] -- the report the owner gets at 22:00, on demand."""
     if not await guard(update, context):
         return
     hours = int(context.args[0]) if context.args and context.args[0].isdigit() \
         else NIGHTLY_REPORT_HOURS
-    hours = max(1, min(hours, 168))
+    hours = max(1, min(hours, PROBLEMS_MAX_HOURS))
     rows = await asyncio.to_thread(family_link.recent_problem_reports_since, hours)
     # On demand it only counts the feedback: taking it here would mark it as
     # sent, and the 22:00 report would then leave out what it was asked for.
@@ -2591,14 +2706,82 @@ async def event_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
 # queue, and the whole delivery mechanism now that there is no push.
 _last_pumped = {"result": 0.0, "event": 0.0}
 
+# The sweep runs as a task of its own, so the 1 s tick that decides *whether* to
+# sweep returns at once. Awaited inside the tick, a sweep of two database round
+# trips (events, then feedback) that outlasted one second made the scheduler
+# skip every following tick with "maximum number of running instances" -- about
+# 2,800 warning lines a day in production, and the same line a real stall
+# prints. Now a skip can only mean the tick itself is stuck, and a sweep that
+# really is stuck is named here instead.
+_pump_tasks: dict[str, "asyncio.Task"] = {}
+_pump_started: dict[str, float] = {}
+_pump_stall_logged: set[str] = set()
+PUMP_STALL_WARN_SECONDS = int(os.environ.get("MBOT_PUMP_STALL_WARN_SECONDS", "60"))
+
+# How long each sweep took, for the /status board: the slowest in the last
+# 15 minutes and the slowest since start, so a sweep that is slow every time
+# (the database round trip from Railway) can be told from a one-off. In memory
+# only -- a restart starts it again, nothing is written to the database. Per
+# pump key, (finished at, seconds) on the monotonic clock. Only the event loop
+# touches these (the done callback and _sweep_line run on it), which is why
+# the board gets its line passed in rather than reading these from its thread.
+SWEEP_WINDOW_SECONDS = 900
+_sweep_recent: dict[str, "deque[tuple[float, float]]"] = {}
+_sweep_slowest: dict[str, float] = {}
+
+
+def _note_sweep(key: str, started: float, task=None) -> None:
+    """Done callback of a sweep task: it ended, however it ended (finished,
+    raised or was cancelled), so it is counted. Never raises."""
+    try:
+        now = time_module.monotonic()
+        seconds = max(0.0, now - started)
+        recent = _sweep_recent.setdefault(key, deque())
+        recent.append((now, seconds))
+        while recent and now - recent[0][0] > SWEEP_WINDOW_SECONDS:
+            recent.popleft()
+        _sweep_slowest[key] = max(_sweep_slowest.get(key, 0.0), seconds)
+    except Exception as exc:
+        logger.debug("Could not note how long the %s sweep took (%s).", key, type(exc).__name__)
+
+
+def _sweep_line(key: str = "event") -> str:
+    """The /status line about how long the sweeps take. Called on the event
+    loop, not in a thread: the deque is mutated by the loop."""
+    now = time_module.monotonic()
+    name = key.capitalize()
+    if key not in _sweep_slowest:
+        return f"⏱ {name} sweep: none finished yet since start"
+    since_start = f"{_sweep_slowest[key]:.2f} s"
+    window = f"{SWEEP_WINDOW_SECONDS // 60} min"
+    recent = [seconds for finished, seconds in _sweep_recent.get(key, ())
+              if now - finished <= SWEEP_WINDOW_SECONDS]
+    if not recent:
+        return f"⏱ {name} sweep: none in the last {window} · slowest since start {since_start}"
+    return (f"⏱ {name} sweep: slowest {max(recent):.2f} s in the last {window} "
+            f"({len(recent)} sweep{'' if len(recent) == 1 else 's'}) · {since_start} since start")
+
 
 async def _pump_if_due(context, key: str, pump, fast: int, idle: int) -> None:
-    due = fast if family_link.bus_is_active() else idle
     now = time_module.monotonic()
+    task = _pump_tasks.get(key)
+    if task is not None and not task.done():
+        # Still sweeping: nothing to add, never a second sweep on top of it.
+        if (now - _pump_started[key] > PUMP_STALL_WARN_SECONDS
+                and key not in _pump_stall_logged):
+            _pump_stall_logged.add(key)
+            logger.warning("The %s sweep has been running for %d s.", key, now - _pump_started[key])
+        return
+    _pump_stall_logged.discard(key)
+    due = fast if family_link.bus_is_active() else idle
     if now - _last_pumped[key] < due:
         return
     _last_pumped[key] = now
-    await pump(context)
+    _pump_started[key] = now
+    # The application owns the task: it keeps it alive, waits for it on
+    # shutdown and sends an exception from it to the error handler.
+    _pump_tasks[key] = context.application.create_task(pump(context), name=f"{key}-sweep")
+    _pump_tasks[key].add_done_callback(functools.partial(_note_sweep, key, now))
 
 
 async def _result_backstop(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2683,7 +2866,7 @@ async def result_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        board = await asyncio.to_thread(_build_board)
+        board = await asyncio.to_thread(_build_board, _sweep_line())
     except Exception as exc:
         await notify_owner(context, f"🚨 Daily check failed: {html.escape(str(exc))}")
         return
@@ -2694,21 +2877,26 @@ async def daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
 # /start, /help
 # ---------------------------------------------------------------------------
 
-HELP = """👪 <b>ManagerBot</b> — the family's manager.
+# An f-string for the numbers it quotes; {{bots}} stays a placeholder for start_command.
+HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Is everything alright</b>
 /status — every bot: up/down, uptime, host, errors, users (with Refresh /
     Alerts / Ping buttons under it)
-/problems [hours] [mine] — what the bots showed people, laid out: urgent
+/problems [hours] — what the bots showed people, laid out: urgent
     listed, faults grouped, the rest by what kind of thing it was. The 22:00
     report, on demand
+/reports [n] [mine] — the latest problems, newest first, each with its
+    incident code; mine: only those somebody attached their details to
 /report &lt;incident&gt; — one problem in full, with whoever volunteered to be named
 /errors — what each bot has hit since it started (live; a redeploy clears it)
 /events [bot] [n] — recent crashes, startups, payments
 /ping [bot] — no bot named pings all of them, fastest first
-/logs [bot] [n] — tail a log; say "bot" or "problems" for the other two
+/logs &lt;bot&gt; [n] [bot|problems] — tail a log: errors by default, "bot" or
+    "problems" for the other two
 /usage [bot] — memory, peaks, and what they cost
 /idle [bot] — how quiet each bot is, and whether sleeping would pay
+/buttons [days] — how often each button is tapped, per bot (counts only)
 /providers — which of DownloaderBot's download routes work, which rest
 /probe — test every download route, from DownloaderBot's container
 /alerts on|off — mute or unmute unprompted alerts
@@ -2725,7 +2913,7 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Talking to people</b>
 /say &lt;bot&gt; &lt;user_id&gt; &lt;text&gt; — DM someone <i>as</i> that bot
-/broadcast &lt;bot|all&gt; &lt;text&gt; — one message to everyone, <i>as</i> that bot
+/broadcast &lt;bot|all&gt; [--active] &lt;text&gt; — one message to everyone, <i>as</i> that bot
 /whois &lt;bot&gt; &lt;user_id&gt; — look someone up through that bot
 /users [hours] — active users per bot, default 24h
 /feedback [instant|nightly] — what people sent with /feedback (read only: it
@@ -2735,6 +2923,10 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 <b>Money</b>
 /balance [id] [±n|=n] — see or change a credit balance
 /addcredit &lt;id&gt; &lt;amount&gt; — put ⚡ into an account
+/gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day&gt; — bonus ⚡ for everyone,
+    once each: each bot counts first, and nothing is given until you say so
+/promo [stop] — the {family_link.PROMO_CREDITS} ⚡ gift: start it (once), see how it
+    goes, end it early
 /donations — paid donations per bot
 /stars — ConvertBot's Stars: paid, refunded, recent
 
@@ -2746,19 +2938,350 @@ HELP = """👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Still works, not in the menu</b>
 Renamed in 1.7.0, with the old names kept so a habit does not break:
-/nightly and /reports → /problems · /finishupdates → /resume ·
+/nightly → /problems · /finishupdates → /resume ·
 /errorlog, /botlog and /problemlog → /logs · /me → /status
 /crashtest &lt;bot&gt; makes a bot raise on purpose, to check the alert arrives
     (no bot named crashes ManagerBot itself)
 
-Bots: <code>{bots}</code>
+Bots: <code>{{bots}}</code>
 Any unambiguous prefix works — <code>/logs stick</code> is fine."""
+
+
+# ---------------------------------------------------------------------------
+# /help <name> and the buttons under /help: a page per command
+# ---------------------------------------------------------------------------
+# The owner, 2026-10-17: each command that is complex or has options gets a
+# page, "a detailed explanation and one simple example". 2026-10-18: "make it
+# work like the ping command works" -- so /help carries one button per page, a
+# tap sends the page as a new message, and /help pause is the same page.
+# Every number on a page is read when the page is shown, from the code that
+# enforces it, so a page cannot drift from the command it describes. Plain
+# text, because the pages contain < and >, and with link previews off.
+
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
+
+def _help_page_pause() -> str:
+    minutes = lifecycle.DEFAULT_MAINTENANCE_MINUTES
+    timeout = COMMAND_TIMEOUT_SECONDS
+    return f"""⏸ Updating the bots: /pause, /warn, /resume
+
+In this order:
+1. /pause — the bots stop starting new long work, the kind an update would cut off. Whoever asks for some is told to come back in about {minutes} minutes, and written down. Work already running carries on.
+2. /warn — only the people in the middle of something right now are told it is about to be reset. It changes nothing, and you can send it again.
+3. Deploy, as many times as it takes. The pause survives restarts and redeploys, and it never ends by itself: the minutes are only what people are told.
+4. /resume — the bots take work again, and everyone who was turned away is told they can try again (each person once).
+
+Forms:
+/pause — all four bots, people told {minutes} minutes
+/pause 30 — all four, 30 minutes
+/pause convert — one bot (any unambiguous start of its name)
+/pause convert 30 — one bot, 30 minutes
+/warn [bot|all] and /resume [bot|all] — the same choice of bots
+/finishupdates is the old name of /resume.
+
+Each bot answers for itself: how many people it warned, or that it is open again and how many it told. A bot that is down gets nothing: after {timeout} seconds without an answer you are told it looks down; send the command again once it is up. ManagerBot itself is never paused.
+
+Example: /pause 20, then /warn, deploy, check /status, then /resume.
+"""
+
+
+def _help_page_gift() -> str:
+    key_rule = family_link.GIFT_KEY_RULE
+    max_credit = family_link.GIFT_MAX_CREDIT
+    days = family_link.GIFT_MAX_DAYS
+    return f"""🎁 /gift — bonus ⚡ for everyone a bot knows, once each
+
+/gift <bot|all> <key> <credits> <last day>
+• bot|all — one bot (any unambiguous start of its name) or all four. Somebody who uses two bots still gets it once.
+• key — names this gift. {key_rule} A key is given at most once per person, across the whole family, for ever: sending the same /gift twice is safe, and a new gift needs a new key.
+• credits — a whole number from 1 to {max_credit}.
+• last day — YYYY-MM-DD, from tomorrow up to {days} days ahead. The credit is bonus: spent before ordinary credit, and whatever is left disappears at the end of that day, UTC.
+
+What happens:
+1. Each bot first only counts, and says so in a message of its own: how many people it knows, how many would get it, how much ⚡ in all, and the notice they will read. Nothing is given.
+2. A card names the amount, the last day and the key, with "Give it" and "Cancel". Nothing is given until you press Give it, and that cannot be taken back. Only the newest /gift can be given; an older card's buttons give nothing.
+3. Each bot goes through its people and reports how many it gave it to. Each person is told, in their own language. If a bot fails partway, send the same /gift again: those who already have it are skipped.
+
+/run <bot> gift … --go gives at once, with no count and no card.
+
+Example: /gift all welcome-200 200 2027-01-15
+"""
+
+
+def _help_page_promo() -> str:
+    amount = family_link.PROMO_CREDITS
+    users = family_link.PROMO_USERS
+    claim_days = family_link.PROMO_CLAIM_DAYS
+    spend_days = family_link.PROMO_SPEND_DAYS
+    minutes = PROMO_COUNT_SECONDS // 60
+    return f"""🎉 /promo — the {amount} ⚡ gift for everyone who writes to ConvertBot or DownloaderBot
+
+/promo
+/promo stop
+
+The count and the notice:
+• Every {minutes} minutes ManagerBot counts the unique people across all the bots, each person once however many bots they use. The first time the count reaches {users} it messages you, once. /users shows the count too.
+
+What /promo shows depends on where the gift stands:
+• Not started, under {users} people: the count so far. Nothing to do; you will be told when it is reached.
+• Not started, {users} reached: a card with the ad people will see and two buttons, Start the gift and Cancel. Starting can be done once, ever, and it cannot be undone. Only the newest card works.
+• Started: when it started, when claiming closes, how many people claimed it, and how many people AnonBot showed the ad to.
+
+Once started:
+• Claiming stays open for {claim_days} days: until midnight UTC at the end of the {claim_days}th day after the start.
+• The first message a person sends to ConvertBot or DownloaderBot in that time gives them {amount} ⚡ of bonus credit, once in all, not once per bot. They are told in their own language.
+• Each gift can be spent for {spend_days} days from the day it was claimed. What is left then disappears at the end of that day, UTC.
+• AnonBot shows the ad once to each person who writes to it and does not have the gift yet: not on the first /start of an inbox link, not in the middle of a question, and not again after a restart.
+
+/promo stop ends the claiming at once. Credit already given stays and can be spent until it runs out. Before the start, or after the end, there is nothing to stop.
+
+/gift is the separate, general tool for any gift under its own key. /promo is this one gift only.
+
+Example: /promo stop
+"""
+
+
+def _help_page_broadcast() -> str:
+    active_days = family_link.BROADCAST_ACTIVE_DAYS
+    per_second = f"{family_link.BROADCAST_PER_SECOND:g}"
+    return f"""📢 /broadcast — one message to everyone a bot knows, as that bot
+
+/broadcast <bot|all> <text>
+/broadcast <bot|all> --active <text>
+• The first word must be a bot (any unambiguous start of its name) or all: "/broadcast hello there" is refused, because "hello" is not a bot.
+• --active, right after the bot: only people who used that bot in the last {active_days} days. A bot that cannot tell who is active sends nothing, and says so.
+• The text goes as plain text, with no formatting. Line breaks and double spaces are not kept: it arrives as one paragraph.
+• First you get a card with the text and "Send it" / "Cancel". Nothing is sent before Send it, and nothing can be taken back after. A newer /broadcast replaces the one waiting.
+• Each bot sends at most {per_second} messages a second, skips people who blocked it, and reports how many it reached.
+
+/run <bot> broadcast … sends at once, with no card.
+
+Example: /broadcast all --active The bots stop for an update at 22:00 UTC, for about 10 minutes.
+"""
+
+
+def _help_page_balance() -> str:
+    top = BALANCE_OVERVIEW_ROWS
+    rows = BALANCE_HISTORY_ROWS
+    return f"""⚡ /balance — see or change one person's credit
+
+/balance — the family's overview, with the {top} largest balances.
+/balance <id> — that person's balance, what they paid and spent, their bonus and when it runs out, and their last {rows} movements.
+/balance <id> +100 — add 100 ⚡
+/balance <id> -100 — take 100 ⚡ away (the balance may go below zero)
+/balance <id> =0 — set it to exactly 0
+• id is the person's numeric Telegram id. Not sure who it is? /whois <bot> <id>.
+• A bare number ("/balance 123 500") is refused on purpose: say +, - or =.
+• A change happens at once, with no confirmation. The person's /balance shows it as "adjustment", and it is in /events.
+• It is one wallet for the whole family: the same balance in every bot.
+• /addcredit is the short way to add credit that never expires; /gift is for everyone at once.
+
+Example: /balance 123456789 +50
+"""
+
+
+def _help_page_addcredit() -> str:
+    return """➕ /addcredit — put ⚡ into one account
+
+/addcredit <id> <amount>
+• id: the person's numeric Telegram id. amount: a whole number above 0.
+• It is ordinary credit: it never expires. The person's /balance shows it as "grant".
+• It happens at once, with no confirmation, and nothing checks that the id is somebody a bot knows: check with /whois <bot> <id> first.
+• To take credit away or set an exact amount: /balance <id> -n or =n.
+
+Example: /addcredit 123456789 100
+"""
+
+
+def _help_page_run() -> str:
+    timeout = COMMAND_TIMEOUT_SECONDS
+    return f"""🛠 /run — any command, inside one bot
+
+/run <bot> <command> [args]
+• /run on its own lists the bots and every command, with the ones only one bot has.
+• bot: any unambiguous start of its name. ManagerBot itself is refused; use its own commands.
+• The bot must know the command: one its version doesn't have is refused before anything is sent.
+• You see "queued as #n" at once; the bot's answer comes as a second message. No answer in {timeout} seconds means the bot looks down.
+• No confirmation: /run <bot> broadcast … sends at once, and /run <bot> gift … --go gives at once. /broadcast and /gift are the ones that ask first.
+• Shortcuts for the usual ones: /logs, /say, /stars, /probe, /providers.
+
+Example: /run convert status
+"""
+
+
+def _help_page_logs() -> str:
+    default = family_link.LOG_TAIL_DEFAULT
+    most = family_link.LOG_TAIL_MAX
+    return f"""📜 /logs — the end of one bot's log
+
+/logs <bot> [lines] [bot|problems]
+• bot: any unambiguous start of its name. One bot at a time.
+• lines: how many from the end, {default} if not said, at most {most}. It must come straight after the bot's name.
+• The last word picks the log: nothing (or anything else) — errors.log, its errors; "bot" or "all" — bot.log, everything it logged; "problems" — problems.log, what it showed people. ("all" means all of bot.log, not all bots.)
+• If the bot's host keeps no log files, you get its in-memory copy since it started, and it says so.
+• /errorlog, /botlog and /problemlog ask which bot with buttons.
+
+Example: /logs convert 100 problems
+"""
+
+
+# One sentence on /reports, for the problems page of /help: the same facts as its line in HELP.
+REPORTS_LINE = ("/reports [n] lists the latest problems, newest first, each with its "
+                "incident code; /reports mine only the ones somebody attached their "
+                "details to.")
+
+
+def _help_page_problems() -> str:
+    default = NIGHTLY_REPORT_HOURS
+    most = PROBLEMS_MAX_HOURS
+    # MBOT_NIGHTLY_UTC left blank turns the daily report off.
+    daily = (f"The same report arrives by itself every day at {NIGHTLY_REPORT_AT_UTC} UTC."
+             if NIGHTLY_REPORT_AT_UTC else "The daily report is off (MBOT_NIGHTLY_UTC is blank).")
+    reports_line = REPORTS_LINE
+    return f"""🩺 /problems — the 22:00 report, on demand
+
+/problems [hours]
+• hours: how far back, {default} if not said, from 1 to {most}.
+• What the bots showed people in that time, laid out: urgent ones listed, faults grouped, the rest by what kind of thing it was. A note says how many /feedback messages came in.
+• Too long for one message: the start comes here, and the whole of it as problems.txt.
+• {daily} /nightly is the same command.
+• One problem in full: /report <incident>. {reports_line}
+
+Example: /problems 72
+"""
+
+
+def _help_page_events() -> str:
+    default = EVENTS_DEFAULT
+    most = EVENTS_MAX
+    return f"""🗒 /events — crashes, startups and payments, as they happened
+
+/events [bot] [n]
+• n: how many, {default} if not said, at most {most}. bot: only that bot's events (any unambiguous start of its name). Either order.
+• A word that is not a bot is ignored, so a typo shows every bot's events: check that the heading says "from" the bot you meant.
+• Each line: date and time, the bot, what happened, with an icon for how serious it was.
+• Too long for one message: the start comes here, and the whole of it as events.txt.
+
+Example: /events convert 30
+"""
+
+
+def _help_page_feedback() -> str:
+    latest = FEEDBACK_LIST_ROWS
+    search = FEEDBACK_SEARCH_ROWS
+    days = family_link.FEEDBACK_RETENTION_DAYS
+    return f"""💬 /feedback — what people sent with /feedback
+
+/feedback — the latest {latest}, newest first, with two buttons: 🔔 As it arrives / 🌙 With the 22:00 report (✓ on the one in force).
+/feedback instant — each one reaches you the moment it is sent.
+/feedback nightly — they wait for the 22:00 report.
+/feedback <n> or #<n> — one in full (among the latest {search}).
+• Read only. A message carries the bot it came from and the language, never who sent it, so there is nobody to answer.
+• Each is kept {days} days, then deleted.
+
+Example: /feedback nightly
+"""
+
+
+def _help_page_sql() -> str:
+    timeout = db.SQL_TIMEOUT_SECONDS
+    rows = db.SQL_MAX_ROWS
+    return f"""🔎 /sql — a read-only query on the shared database
+
+/sql SELECT …
+• It must start with SELECT, WITH, TABLE, EXPLAIN or SHOW, and be one statement.
+• The database itself keeps it read-only, and stops it after {timeout} seconds.
+• At most {rows} rows come back, as text with | between the columns. Longer than a message: the start comes here, and all of it as query.txt.
+• Every bot's tables are there, each bot in its own schema.
+• An error comes back as ⚠️ and the database's own message.
+
+Example: /sql SELECT count(*) FROM sticker_bot.packs
+"""
+
+
+def _help_page_say() -> str:
+    return """✉️ /say — a message to one person, as one of the bots
+
+/say <bot> <user_id> <text>
+• One bot (any unambiguous start of its name), never all, and the person's numeric Telegram id.
+• Plain text, no formatting; line breaks and double spaces are not kept.
+• It goes at once: no confirmation, and it cannot be taken back. It arrives from that bot, as if the bot wrote it.
+• "Sent." means Telegram took it. If the person blocked the bot or never started it, you get Telegram's refusal instead.
+
+Example: /say convert 123456789 The fix is live — try your file again.
+"""
+
+
+# Name -> function() -> text, in the order /help lists them (a dict literal with
+# string keys: tests read it with ast). An alias is a name that also answers:
+# the old and the paired commands show the page of the one they belong with.
+HELP_PAGES = {
+    "pause": _help_page_pause,
+    "gift": _help_page_gift,
+    "promo": _help_page_promo,
+    "broadcast": _help_page_broadcast,
+    "balance": _help_page_balance,
+    "addcredit": _help_page_addcredit,
+    "run": _help_page_run,
+    "logs": _help_page_logs,
+    "problems": _help_page_problems,
+    "events": _help_page_events,
+    "feedback": _help_page_feedback,
+    "sql": _help_page_sql,
+    "say": _help_page_say,
+}
+HELP_ALIASES = {"warn": "pause", "resume": "pause", "finishupdates": "pause", "nightly": "problems"}
+
+
+def help_page_name(context) -> "str | None":
+    """The page `/help <word>` asks for, or None. Only the first word is read:
+    lower case, a leading "/" and anything from "@" on dropped, then a leading
+    "help_" (so /help help_pause and /help pause@Bot both work), then the aliases."""
+    if not context.args:
+        return None
+    word = context.args[0].lower().lstrip("/").split("@", 1)[0].removeprefix("help_")
+    word = HELP_ALIASES.get(word, word)
+    return word if word in HELP_PAGES else None
+
+
+def help_page_text(name: str) -> str:
+    """One page, then the way back to /help."""
+    return HELP_PAGES[name]().rstrip() + "\n\nEverything: /help"
+
+
+def _help_keyboard() -> InlineKeyboardMarkup:
+    """One button per page, two to a row, under /help and /start -- the way
+    /ping has one per bot. A tap sends the page (help_page_button)."""
+    buttons = [InlineKeyboardButton("/" + name, callback_data=f"helpdet:{name}") for name in HELP_PAGES]
+    return InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)])
+
+
+async def help_page_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on one of those buttons: the page arrives as a new message, so the
+    help above it stays to be tapped again."""
+    if not await guard(update, context):
+        return
+    query = update.callback_query
+    name = query.data.split(":", 1)[1]
+    if name not in HELP_PAGES:
+        # A button from before a redeploy that dropped the page.
+        await query.answer("That help page no longer exists. Send /help.", show_alert=True)
+        return
+    await query.answer()
+    await context.bot.send_message(chat_id=query.message.chat_id, text=help_page_text(name),
+                                   link_preview_options=NO_PREVIEW)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await guard(update, context):
         return
-    await update.message.reply_text(HELP.format(bots=bot_list_hint()), parse_mode=ParseMode.HTML)
+    page = help_page_name(context)
+    if page:
+        await update.message.reply_text(help_page_text(page), link_preview_options=NO_PREVIEW)
+        return
+    await update.message.reply_text(
+        HELP.format(bots=bot_list_hint()), parse_mode=ParseMode.HTML, reply_markup=_help_keyboard())
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2864,7 +3387,7 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _fan_out(
         update, context, targets, "pause", minutes or "",
         f"⏸ Paused — telling users to come back in about {promised} minute(s).\n"
-        f"They stay paused until /finishupdates, however many deploys that takes.",
+        f"They stay paused until /resume, however many deploys that takes.",
     )
 
 
@@ -2894,7 +3417,7 @@ async def finish_updates_command(update: Update, context: ContextTypes.DEFAULT_T
     targets = _targets(context.args[0] if context.args else None)
     if targets is None:
         await update.message.reply_text(
-            f"Usage: /finishupdates [bot|all]. Known: {bot_list_hint()}"
+            f"Usage: /resume [bot|all]. Known: {bot_list_hint()}"
         )
         return
     await _fan_out(
@@ -2919,7 +3442,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if len(context.args) < 2:
         await update.message.reply_text(
-            f"Usage: /broadcast &lt;bot|all&gt; &lt;text&gt;\nKnown: {bot_list_hint()}",
+            f"Usage: /broadcast &lt;bot|all&gt; [--active] &lt;text&gt;\nKnown: {bot_list_hint()}",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2930,7 +3453,11 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     text = " ".join(context.args[1:]).strip()
-    if not text:
+    # "--active" first in the text aims it at recent users. The child bot reads
+    # the flag, so it stays in what is queued; the card shows the words without it.
+    aimed = text.split(" ", 1)[0] == "--active"
+    shown = text.partition(" ")[2].strip() if aimed else text
+    if not shown:
         await update.message.reply_text("Nothing to say — give it some text.")
         return
 
@@ -2939,13 +3466,15 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "text": text,
     }
     names = ", ".join(b["name"] for b in targets)
+    audience = (f"active in the last {family_link.BROADCAST_ACTIVE_DAYS} day(s)"
+                if aimed else "they know")
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("Send it", callback_data="upd:send"),
         InlineKeyboardButton("Cancel", callback_data="upd:cancel"),
     ]])
     await update.message.reply_text(
-        f"📢 <b>Send as {html.escape(names)}, to everyone they know?</b>\n\n"
-        f"<pre>{html.escape(text[:BROADCAST_PREVIEW])}</pre>\n"
+        f"📢 <b>Send as {html.escape(names)}, to everyone {audience}?</b>\n\n"
+        f"<pre>{html.escape(shown[:BROADCAST_PREVIEW])}</pre>\n"
         f"This cannot be taken back.",
         parse_mode=ParseMode.HTML, reply_markup=kb,
     )
@@ -2980,6 +3509,339 @@ async def broadcast_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ---- /gift, which counts before it gives ----------------------------------
+# Bonus credit for everyone a bot knows, once per person across the family
+# (family_link.grant_bonus_once). Like /broadcast it reaches everyone and cannot
+# be taken back, and it is money: so the first step only asks each bot to count,
+# and the giving waits for a button.
+#
+# Only the latest /gift waits, and its buttons carry its own nonce
+# (gift:go:<nonce>): a tap on an older card -- another key, another amount --
+# must never give the newer gift, nor cancel it.
+
+GIFT_PENDING = "gift_pending"
+GIFT_DONE = "gift_done"          # the nonce of the card last given or cancelled
+
+
+async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/gift <bot|all> <key> <credits> <last day YYYY-MM-DD>"""
+    if not await guard(update, context):
+        return
+    if len(context.args) != 4:
+        await update.message.reply_text(
+            "Usage: /gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day YYYY-MM-DD&gt;\n"
+            "e.g. <code>/gift all gift-100-users 100 2027-01-15</code>\n"
+            f"Known: {bot_list_hint()}",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    targets = _targets(context.args[0])
+    if targets is None:
+        await update.message.reply_text(
+            f"No such bot: {context.args[0]}. Known: {bot_list_hint()}"
+        )
+        return
+    parsed = family_link._gift_args(context.args[1:])
+    if isinstance(parsed, str):
+        await update.message.reply_text(parsed)
+        return
+    key, amount, _expires, raw_day = parsed
+    args = f"{key} {amount} {raw_day}"
+    for bot in targets:
+        await asyncio.to_thread(
+            db.queue_command, bot["id"], "gift", args,
+            update.effective_user.id, update.effective_chat.id,
+        )
+    nonce = secrets.token_hex(4)
+    context.user_data[GIFT_PENDING] = {"bots": [b["id"] for b in targets], "args": args,
+                                       "nonce": nonce}
+    names = ", ".join(b["name"] for b in targets)
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Give it", callback_data=f"gift:go:{nonce}"),
+        InlineKeyboardButton("Cancel", callback_data=f"gift:cancel:{nonce}"),
+    ]])
+    await update.message.reply_text(
+        f"🎁 <b>{amount} ⚡ of bonus credit, good until {html.escape(raw_day)}</b>, "
+        f"to everyone {html.escape(names)} know(s), once per person "
+        f"(key <code>{html.escape(key)}</code>).\n\n"
+        f"Each bot is counting now and will report how many people it would give "
+        f"it to, with the notice they would read. Nothing is given until you press "
+        f"<b>Give it</b>, and that cannot be taken back.",
+        parse_mode=ParseMode.HTML, reply_markup=kb,
+    )
+
+
+async def gift_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not await guard(update, context):
+        return
+    await query.answer()
+    # The check and the pop are one synchronous stretch, so two taps cannot both
+    # give. A card that is not the waiting one's (an older /gift, or a card from
+    # before the nonce) leaves the waiting gift alone.
+    action, _, nonce = query.data.removeprefix("gift:").partition(":")
+    if nonce and nonce == context.user_data.get(GIFT_DONE):
+        # A second tap on the card just given or cancelled: its text already
+        # says what happened, and "no longer waiting" over "Giving" would read
+        # as if nothing had been given.
+        return
+    pending = context.user_data.get(GIFT_PENDING)
+    if not pending:
+        await edit_in_place(query.message, context.bot,
+                            "That gift is no longer waiting. Send /gift again.")
+        return
+    if not nonce or nonce != pending.get("nonce"):
+        await edit_in_place(
+            query.message, context.bot,
+            "That card is not the one waiting (a newer /gift replaced it, or the "
+            "card is from before an update). Nothing was given. Use the newest "
+            "card, or send /gift again.",
+        )
+        return
+    context.user_data.pop(GIFT_PENDING, None)
+    context.user_data[GIFT_DONE] = nonce
+    key, amount = pending["args"].split()[:2]
+    if action != "go":
+        await edit_in_place(query.message, context.bot,
+                            f"Cancelled — nothing was given ({amount} ⚡, key {key}).")
+        return
+    queued, failed = [], []
+    for bot_id in pending["bots"]:
+        try:
+            await asyncio.to_thread(
+                db.queue_command, bot_id, "gift", pending["args"] + " --go",
+                update.effective_user.id, update.effective_chat.id,
+            )
+            queued.append(bot_id)
+        except Exception as exc:
+            failed.append(bot_id)
+            logger.warning("Gift %s: could not be queued for %s (%s)", key, bot_id, type(exc).__name__)
+    if queued:
+        text = (f"🎁 Giving {amount} ⚡ (key {key}), through {', '.join(queued)}. "
+                f"Each bot reports back how many people it gave it to when it has been "
+                f"through its list.")
+    else:
+        text = f"🎁 Nothing was given ({amount} ⚡, key {key}): no bot could be asked."
+    if failed:
+        # Safe to repeat: a bot gives a key only to people who have not had it.
+        text += (f"\n\n⚠️ Could not ask {', '.join(failed)} (a database error, see "
+                 f"the log). Send the same /gift again and press Give it: nobody "
+                 f"gets it twice.")
+    await edit_in_place(query.message, context.bot, text)
+
+
+# ---- the 220 ⚡ gift: the count, the owner's notice and /promo -------------
+# The owner, 2026-10-18: a unique-user counter across all the bots, a message to
+# him when it reaches 220, and one short command that starts the gift. This one
+# gift is not general ("it dies after first usage"): family_link keeps the start
+# as a row written once, ever, and everything below only asks it. A job counts
+# the people every 15 minutes and tells the owner the first time the mark is
+# reached; /promo shows where the gift stands and, once, starts it; /promo stop
+# ends the claiming early. Every state /promo shows is read fresh from the
+# database, never from a cache, because the owner acts on it.
+
+PROMO_COUNT_SECONDS = 15 * 60
+PROMO_COUNT_FIRST_SECONDS = 60
+PROMO_PENDING = "promo_pending"      # the nonce of the card waiting for a tap
+PROMO_DONE = "promo_done"            # the nonce of the card last started or cancelled
+PROMO_BUTTON_PATTERN = r"^promo:(go|cancel):[0-9a-f]{8}$"
+# What the 15-minute job last counted, {"count", "at"}, for anything that wants
+# the figure without a database trip. /users and /promo count afresh instead.
+_promo_count: dict = {"count": None, "at": None}
+
+
+def _promo_schemas() -> list[str]:
+    return [child["schema"] for child in CHILDREN]
+
+
+def _promo_moment(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _promo_last_day(closes: datetime) -> str:
+    """The last day somebody can claim, from the midnight claiming closes at."""
+    return (closes - timedelta(days=1)).strftime("%d.%m.%Y")
+
+
+def _promo_db_error(exc: Exception) -> str:
+    return f"Could not read the gift's state ({type(exc).__name__}). Nothing was changed."
+
+
+async def count_unique_people(context: ContextTypes.DEFAULT_TYPE):
+    """The 15-minute job: count the people across all the bots, and the first
+    time the count reaches the mark, tell the owner once.
+
+    The notice is sent first and the milestone written only after it went, so a
+    failed send is tried again at the next count. (Two ManagerBots overlapping
+    during a deploy could both send it; that is harmless, and the milestone is
+    still written once.) Any error is a warning naming the kind and nothing
+    more: the next count tries again."""
+    try:
+        count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+        _promo_count.update(count=count, at=datetime.now(timezone.utc))
+        if count < family_link.PROMO_USERS:
+            return
+        if await asyncio.to_thread(family_link.promo_milestone_at) is not None:
+            return
+        # Already started (the owner saw the count in /users and did not wait
+        # for this): "start it with /promo" would be stale, so only note it.
+        started = await asyncio.to_thread(family_link.promo_window, True)
+        if started is not None:
+            await asyncio.to_thread(family_link.note_promo_milestone)
+            return
+        delivered = await notify_owner(
+            context,
+            f"🎉 Mumu bots have reached {count} unique users (everyone who has used any of the bots, "
+            f"counted once). That's the mark for the {family_link.PROMO_CREDITS} ⚡ gift: start it with /promo.",
+        )
+        if delivered is False:
+            logger.warning("The gift's milestone notice could not be delivered; trying again at the next count")
+            return
+        await asyncio.to_thread(family_link.note_promo_milestone)
+    except Exception as exc:
+        logger.warning("The unique-people count did not finish (%s); trying again at the next one",
+                       type(exc).__name__)
+
+
+def _promo_status_text(started: datetime, closes: datetime, claims: int, seen: "int | None") -> str:
+    now = datetime.now(timezone.utc)
+    is_open = now < closes
+    stopped_early = closes < family_link.promo_closes_for(started)
+    text = (f"The {family_link.PROMO_CREDITS} ⚡ gift started {_promo_moment(started)}.\n"
+            f"Claims {'are open until' if is_open else 'closed at'} {_promo_moment(closes)}"
+            f"{' -- stopped early' if stopped_early else ''}.\n"
+            f"Claimed by {claims} people. AnonBot showed the ad to {'?' if seen is None else seen} people.")
+    if is_open:
+        text += "\nTo end the claiming now: /promo stop"
+    return text
+
+
+def _promo_card_text(count: int) -> str:
+    """The card, in HTML. Everything on it is a number or a date from the code
+    except the ad itself, which is HTML on purpose (its last paragraph is in
+    italics), so the rest is escaped and the ad is not."""
+    closes = family_link.promo_closes_for(datetime.now(timezone.utc))
+    claim_by = html.escape(_promo_last_day(closes))
+    amount, spend_days = family_link.PROMO_CREDITS, family_link.PROMO_SPEND_DAYS
+    return (
+        f"Start the {amount} ⚡ gift? This can be done once.\n"
+        f"• Anyone who writes to ConvertBot or DownloaderBot until {claim_by} (the end of that day, UTC) "
+        f"gets {amount} ⚡ of bonus credit, once, automatically, and a notice.\n"
+        f"• Each gift can be spent for {spend_days} days from the day it is claimed.\n"
+        f"• AnonBot shows this ad once to each person who writes to it, until then:\n\n"
+        f"{family_link.promo_ad('en', closes)}\n\n"
+        f"Unique users now: {count}."
+    )
+
+
+async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/promo -- where the 220 ⚡ gift stands, and once the mark is reached a
+    card to start it; /promo stop -- end the claiming early."""
+    if not await guard(update, context):
+        return
+    args = [arg.lower() for arg in context.args]
+    if args == ["stop"]:
+        await _promo_stop(update)
+        return
+    if args:
+        await update.message.reply_text("Usage: /promo, or /promo stop.")
+        return
+    try:
+        window = await asyncio.to_thread(family_link.promo_window, True)
+        if window is not None:
+            claims = await asyncio.to_thread(family_link.promo_claim_count)
+            anon = next((child for child in CHILDREN if child["id"] == "anonbot"), None)
+            seen = (await asyncio.to_thread(db.promo_seen_count, anon["schema"], family_link.PROMO_KEY)
+                    if anon else None)
+            await update.message.reply_text(_promo_status_text(window[0], window[1], claims, seen))
+            return
+        count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+        milestone = await asyncio.to_thread(family_link.promo_milestone_at)
+    except Exception as exc:
+        await update.message.reply_text(_promo_db_error(exc))
+        return
+    if count < family_link.PROMO_USERS and milestone is None:
+        await update.message.reply_text(
+            f"The {family_link.PROMO_CREDITS} ⚡ gift can start once the bots have {family_link.PROMO_USERS} "
+            f"unique users. Now: {count}. I'll message you when it happens.")
+        return
+    nonce = secrets.token_hex(4)
+    context.user_data[PROMO_PENDING] = nonce
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("▶️ Start the gift", callback_data=f"promo:go:{nonce}"),
+        InlineKeyboardButton("Cancel", callback_data=f"promo:cancel:{nonce}"),
+    ]])
+    await update.message.reply_text(_promo_card_text(count), parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def _promo_stop(update: Update):
+    try:
+        stopped = await asyncio.to_thread(family_link.stop_promo)
+    except Exception as exc:
+        await update.message.reply_text(_promo_db_error(exc))
+        return
+    if not stopped:
+        await update.message.reply_text("The gift is not open (not started yet, or already over). Nothing to stop.")
+        return
+    try:
+        claims = await asyncio.to_thread(family_link.promo_claim_count)
+    except Exception:
+        claims = "?"
+    await update.message.reply_text(
+        f"Stopped. Nobody can claim the gift any more; the {claims} people who have it keep it until it runs out.")
+
+
+async def promo_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on the card. Like gift_button, only the waiting card's nonce counts,
+    and the check and the pop are one synchronous stretch, so two taps cannot
+    both start it; family_link.start_promo is once-only in the database besides."""
+    query = update.callback_query
+    if not await guard(update, context):
+        return
+    await query.answer()
+    action, _, nonce = query.data.removeprefix("promo:").partition(":")
+    if nonce and nonce == context.user_data.get(PROMO_DONE):
+        # A second tap on the card just started or cancelled: its text already
+        # says what happened.
+        return
+    if not nonce or nonce != context.user_data.get(PROMO_PENDING):
+        await edit_in_place(
+            query.message, context.bot,
+            "That card is not the one waiting (a newer /promo replaced it, or it is from before an "
+            "update). Nothing was started. Send /promo again.",
+        )
+        return
+    context.user_data.pop(PROMO_PENDING, None)
+    context.user_data[PROMO_DONE] = nonce
+    if action != "go":
+        await edit_in_place(query.message, context.bot, "Cancelled. Nothing was started.")
+        return
+    # Look again now: the card may be minutes old, and the gift may have been
+    # started from another card, or the count may be what the card said.
+    try:
+        window = await asyncio.to_thread(family_link.promo_window, True)
+        if window is not None:
+            text = f"It had already started {_promo_moment(window[0])}. Nothing changed."
+        else:
+            count = await asyncio.to_thread(db.unique_people, _promo_schemas())
+            reached = count >= family_link.PROMO_USERS or (
+                await asyncio.to_thread(family_link.promo_milestone_at)) is not None
+            if not reached:
+                text = (f"Not yet: {count} unique users of {family_link.PROMO_USERS}. "
+                        f"Nothing was started.")
+            else:
+                started, won = await asyncio.to_thread(family_link.start_promo)
+                if won:
+                    text = (f"Started {_promo_moment(started)}. Claims close "
+                            f"{_promo_last_day(family_link.promo_closes_for(started))} "
+                            f"(the end of that day, UTC). /promo shows how it goes.")
+                else:
+                    text = f"It had already started {_promo_moment(started)}. Nothing changed."
+    except Exception as exc:
+        text = f"Could not start it ({type(exc).__name__}). Nothing was started; send /promo again."
+    await edit_in_place(query.message, context.bot, text)
+
+
 # The menu the owner sees, in the order HELP lists them: watching, reaching
 # into a bot, shipping an update, then the family-wide reads. It is a private
 # bot with one user, so a command left out of the menu is a command that has to
@@ -3002,8 +3864,14 @@ BOT_COMMANDS = [
     #
     # Gone from here, still working, because they are second names: /me (its
     # own status, which /status already carries), /errorlog, /botlog and
-    # /problemlog (/logs asks which), /reports and /nightly (both are
-    # /problems now), /finishupdates (/resume). And /crashtest, which makes a
+    # /problemlog (/logs asks which), /finishupdates (/resume). Not /nightly or
+    # /reports, which the owner looked for in the menu and did not find
+    # (2026-10-10): /nightly is the same report as /problems and is listed under
+    # the name he knows it by; and /reports: it is its own command, the raw list of recent
+    # problems with their incident codes, which /report <code> then opens. It
+    # was written off here as "/problems now" and so left out of the menu for
+    # three versions, while /report beside it was offered (found by the owner,
+    # 2026-10-10). And /crashtest, which makes a
     # bot raise on purpose and page the owner -- a command a stray tap on the
     # menu should not be able to send. /help names every one of them.
     #
@@ -3013,7 +3881,9 @@ BOT_COMMANDS = [
     # which is how a command becomes one nobody is offered.
     BotCommand("status", "Every bot: up, version, errors, users"),
     BotCommand("problems", "The 22:00 problems report, on demand"),
+    BotCommand("nightly", "The same report, under its old name"),
     BotCommand("feedback", "What people sent with /feedback"),
+    BotCommand("reports", "Latest problems, each with its incident code"),
     BotCommand("report", "One problem in full, by its incident code"),
     BotCommand("errors", "What each bot has hit since it started"),
     BotCommand("events", "Crashes, restarts and payments as they happened"),
@@ -3023,6 +3893,7 @@ BOT_COMMANDS = [
     BotCommand("logs", "Tail a bot's log"),
     BotCommand("usage", "Memory, peaks, and what they cost"),
     BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
+    BotCommand("buttons", "Button taps per bot, counts only"),
     BotCommand("run", "Run a command inside another bot"),
     BotCommand("restart", "Restart a bot's process"),
     BotCommand("pause", "Stop the bots taking work an update would lose"),
@@ -3034,6 +3905,8 @@ BOT_COMMANDS = [
     BotCommand("users", "Active users per bot"),
     BotCommand("balance", "See or change a credit balance"),
     BotCommand("addcredit", "Add ⚡ credit to an account by Telegram id"),
+    BotCommand("gift", "Bonus ⚡ for everyone; counts, then asks"),
+    BotCommand("promo", "The 220 ⚡ gift: start, status, stop"),
     BotCommand("donations", "Paid donations per bot"),
     BotCommand("stars", "ConvertBot's Stars: paid, refunded, recent"),
     BotCommand("backup", "Whole database, restorable, pinned here"),
@@ -3171,6 +4044,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("usage", usage_command))
     app.add_handler(CommandHandler("idle", idle_command))
+    app.add_handler(CommandHandler("buttons", buttons_command))
     app.add_handler(CommandHandler("me", me_command))
     app.add_handler(CommandHandler("run", run_command))
     app.add_handler(CommandHandler("ping", broadcast_ping))
@@ -3184,8 +4058,8 @@ def main():
     app.add_handler(CommandHandler("reports", reports_command))
     app.add_handler(CommandHandler("report", report_command))
     # /problems is the name; /nightly is what it was called when it was only
-    # the thing that ran at midnight, and /reports was the raw list it
-    # replaced. Both still work.
+    # the thing that ran at midnight, and still works. /reports is not a name
+    # for it: it is the raw list of recent problems with their incident codes.
     app.add_handler(CommandHandler(["problems", "nightly"], nightly_command))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("decode", decode_command))
@@ -3196,7 +4070,7 @@ def main():
     app.add_handler(CommandHandler("errorlog", _log_shortcut("errorlog")))
     app.add_handler(CommandHandler("botlog", _log_shortcut("botlog")))
     app.add_handler(CommandHandler("problemlog", _log_shortcut("problemlog")))
-    app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|all]")))
+    app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|problems]")))
     app.add_handler(CommandHandler("dbdump", _shortcut("dbdump", 1, "Usage: /dbdump <bot> — or /backup for everything")))
     app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot>")))
     app.add_handler(CommandHandler("whois", _shortcut("whois", 2, "Usage: /whois <bot> <user_id>")))
@@ -3210,6 +4084,8 @@ def main():
     app.add_handler(CommandHandler("stars", _shortcut("stars", 0, "", default_bot="convertbot")))
 
     app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("gift", gift_command))
+    app.add_handler(CommandHandler("promo", promo_command))
     app.add_handler(CommandHandler("pause", pause_command))
     app.add_handler(CommandHandler("warn", warn_command))
     # /pause stops the bots for an update, so its opposite should be called
@@ -3219,7 +4095,10 @@ def main():
 
     app.add_handler(CallbackQueryHandler(board_button, pattern=r"^board:"))
     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
+    app.add_handler(CallbackQueryHandler(help_page_button, pattern=r"^helpdet:[a-z]{1,20}$"))
     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
+    app.add_handler(CallbackQueryHandler(gift_button, pattern=r"^gift:"))
+    app.add_handler(CallbackQueryHandler(promo_button, pattern=PROMO_BUTTON_PATTERN))
     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))
     app.add_handler(CallbackQueryHandler(feedback_mode_button, pattern=r"^fbmode:"))
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
@@ -3240,6 +4119,9 @@ def main():
     # family.bot_state and the watchdog has nothing left to announce.
     app.job_queue.run_once(startup_rollcall, when=STARTUP_ROLLCALL_SECONDS)
     app.job_queue.run_repeating(watchdog, interval=60, first=20)
+    # The 220 gift's counter: the owner is told once when the bots reach the mark.
+    app.job_queue.run_repeating(count_unique_people, interval=PROMO_COUNT_SECONDS,
+                                first=PROMO_COUNT_FIRST_SECONDS)
     # ManagerBot collects command results and child-bot events on the same
     # adaptive poll the child bots run for the command queue: a fast tick that
     # decides each time whether to sweep -- every *_POLL_FAST_SECONDS while the

@@ -15,16 +15,21 @@ several-hundred extractor modules, and a bot that goes a whole day without
 anyone pasting a link should not be paying that the whole time. The first
 download pays it once, and it stays loaded from then on.
 """
+import asyncio
 import contextlib
 import glob
+import json
 import logging
+import math
 import os
 import re
+import shutil
 import sys
 import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 
 # Telegram itself refuses uploads over 50 MB without a local Bot API server,
 # so anything larger was always going to be downloaded and then thrown away.
@@ -519,3 +524,201 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
             "download was stopped."
         )
     return path
+
+
+# ---------------------------------------------------------------------------
+# The shape of a video, for the send
+# ---------------------------------------------------------------------------
+# Telegram draws a video from the width, height and duration the sender gives
+# it. Left out, the clients fall back to a 1:1 square and crop into it, so a
+# 9:16 reel arrived as a square (reported by the owner's friend, 2026-10-12).
+# bot.py's _send_media measures each video it sends as a video, with the ffprobe
+# that comes with ffmpeg, and passes the three numbers. It is a nicety and never
+# a gate: whatever goes wrong here, the video is sent exactly as it was before.
+PROBE_SECONDS = 5
+# And one delivery (an album, a large download's items) gets this much probing in
+# all, however many videos it holds; past it the rest are sent without measuring.
+PROBE_BUDGET_SECONDS = 10
+PROBE_MAX_BYTES = 64 * 1024
+MAX_SIDE = 16384
+MAX_SECONDS = 2 ** 31 - 1      # a file can claim any length; Telegram's field is a 32-bit integer
+
+
+@dataclass(frozen=True)
+class VideoShape:
+    """What the player will show: the DISPLAYED size (the stored size, widened
+    by a non-square pixel and turned a quarter when the file says so) and the
+    length in whole seconds, or None when ffprobe did not say."""
+    width: int
+    height: int
+    duration: "int | None" = None
+
+
+class ProbeRun:
+    """One delivery's probing. `timed_out` is set by probe() when ffprobe was
+    killed for taking too long, so that the rest of an album is sent without
+    asking again: a hostile album must not cost PROBE_SECONDS for each file. And
+    `spent` adds up the seconds every probe of the delivery has taken, which may
+    not pass PROBE_BUDGET_SECONDS in all: slow-but-not-stalled files cannot add up
+    to a long wait either."""
+
+    def __init__(self):
+        self.timed_out = False
+        self.spent = 0.0
+
+    @property
+    def exhausted(self) -> bool:
+        """No more probing for this delivery."""
+        return self.timed_out or self.spent >= PROBE_BUDGET_SECONDS
+
+    def allowance(self) -> float:
+        """How long the next probe may take: its own limit, or what is left of
+        the delivery's budget if that is less."""
+        return min(PROBE_SECONDS, max(0.0, PROBE_BUDGET_SECONDS - self.spent))
+
+
+def _side(value) -> "int | None":
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_SIDE:
+        return None
+    return value
+
+
+def _quarter_turn(stream: dict) -> bool:
+    """Whether the player turns the picture 90 or 270 degrees, which swaps its
+    sides. The display matrix (side data) is asked first and the older `rotate`
+    tag only when there is none, so a file that carries both is not turned
+    twice. ffprobe rounds (89.99999 happens), hence round() and not int()."""
+    turn = None
+    side_data = stream.get("side_data_list")
+    for data in side_data if isinstance(side_data, list) else ():
+        if isinstance(data, dict) and "rotation" in data:
+            turn = data["rotation"]
+            break
+    if turn is None:
+        tags = stream.get("tags")
+        turn = tags.get("rotate") if isinstance(tags, dict) else None
+    try:
+        turn = float(turn)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(turn):
+        return False
+    return round(abs(turn) / 90) % 2 == 1
+
+
+def _display_width(width: int, ratio) -> int:
+    """`width` widened by a non-square pixel ("N:D"), as the player shows it."""
+    if isinstance(ratio, str) and ratio.count(":") == 1:
+        try:
+            n, d = (int(part) for part in ratio.split(":"))
+            if n > 0 and d > 0 and n != d:
+                return min(MAX_SIDE, max(1, round(width * n / d)))
+        except (ValueError, OverflowError):
+            pass
+    return width
+
+
+def shape_from_ffprobe(data) -> "VideoShape | None":
+    """The shape from ffprobe's JSON, or None for anything that is not a
+    plausible picture. Pure."""
+    try:
+        streams = data["streams"]
+        stream = streams[0]
+        width, height = _side(stream.get("width")), _side(stream.get("height"))
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
+    if width is None or height is None:
+        return None
+    width = _display_width(width, stream.get("sample_aspect_ratio"))
+    if _quarter_turn(stream):
+        width, height = height, width
+    duration = None
+    try:
+        seconds = float(data["format"]["duration"])
+        if math.isfinite(seconds) and 0 <= seconds <= MAX_SECONDS:
+            duration = int(round(seconds))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    return VideoShape(width, height, duration)
+
+
+def _ffprobe_argv() -> "list[str] | None":
+    """The command that starts ffprobe, or None. There is no configured ffmpeg
+    location in this bot (yt-dlp finds ffmpeg on PATH, and the image installs
+    both programs from Debian's one `ffmpeg` package), so ffprobe is found the
+    same way."""
+    found = shutil.which("ffprobe")
+    return [found] if found else None
+
+
+async def _read_capped(stream, limit: int) -> "bytes | None":
+    """Everything on `stream`, or None once it is more than `limit` bytes."""
+    data = b""
+    while True:
+        chunk = await stream.read(limit + 1 - len(data))
+        if not chunk:
+            return data
+        data += chunk
+        if len(data) > limit:
+            return None
+
+
+async def probe(path: str, run: "ProbeRun | None" = None) -> "VideoShape | None":
+    """The width, height and duration of the video at `path`, or None.
+
+    One ffprobe, started without a shell, with nothing to read from and nothing
+    to say; killed and reaped after PROBE_SECONDS. `file:` and a protocol
+    whitelist because ffprobe goes by what a file CONTAINS, not what it is
+    called: a downloaded "video" that is really a playlist must not make this
+    server fetch anything. Never raises, and logs numbers only: no path, no link."""
+    argv = _ffprobe_argv()
+    if argv is None:
+        return None
+    if run is not None and run.exhausted:
+        return None
+    limit = PROBE_SECONDS if run is None else run.allowance()
+    started = time.monotonic()
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv, "-v", "error", "-protocol_whitelist", "file", "-select_streams", "v:0",
+            "-show_entries",
+            "stream=width,height,sample_aspect_ratio:stream_tags=rotate:stream_side_data=rotation:format=duration",
+            "-of", "json", "file:" + str(path),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        async def answer():
+            said = await _read_capped(process.stdout, PROBE_MAX_BYTES)
+            if said is not None:
+                await process.wait()
+            return said
+
+        output = await asyncio.wait_for(answer(), limit)
+        if output is None:
+            logger.debug("ffprobe said more than %d bytes; ignored", PROBE_MAX_BYTES)
+            return None
+        if process.returncode != 0:
+            return None
+        return shape_from_ffprobe(json.loads(output))
+    except asyncio.TimeoutError:
+        if run is not None:
+            run.timed_out = True
+        logger.debug("ffprobe took more than %s s", limit)
+        return None
+    except Exception as exc:
+        logger.debug("ffprobe failed: %s", type(exc).__name__)
+        return None
+    finally:
+        if process is not None and process.returncode is None:
+            # Out of time, over the cap, or cancelled: it is killed and its exit
+            # collected, so that no child is left running or unreaped.
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await process.wait()
+            except Exception:  # noqa: BLE001 - nothing here may stop the delivery
+                pass
+        if run is not None:
+            run.spent += time.monotonic() - started

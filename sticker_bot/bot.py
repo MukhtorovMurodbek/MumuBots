@@ -77,11 +77,14 @@ from telegram.ext import (
     filters,
 )
 
+import emoji_utils
 import family_link
 import i18n
+import import_utils
 import problems
 import lifecycle
 import live_message
+import video_sticker
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -151,8 +154,14 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    NO_PREVIEW,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout_callback,
@@ -195,13 +204,46 @@ POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT", "30"))
 
 TITLE, EDITING, RENAME = range(3)
 
+# The most characters Telegram takes in a pack's title; a longer one is cut.
+PACK_TITLE_MAX = 64
+
 
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help
-    template (shared_features, "/help in two lengths")."""
+    template (shared_features, "/help in two lengths"). Both end with the
+    sibling-bots pointer; the per-command pages (HELP_PAGES below) are the
+    buttons under the help, not a line in it."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text") + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text").rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+
+# ---------- /help <name> and the buttons under /help: a page for each command ----------
+# The mechanism is in shared_features ("A page for each command"). Every
+# number on a page is read from the module that owns it when the page is shown
+# -- by attribute, never copied -- so a page says what the code does now.
+
+def _help_page_newpack(lang: str) -> str:
+    return i18n.t(lang, "helppage_newpack",
+                  title_max=PACK_TITLE_MAX, emoji=emoji_utils.DEFAULT_EMOJI,
+                  emoji_max=emoji_utils.MAX_EMOJI_PER_STICKER, side=video_sticker.STICKER_SIDE,
+                  seconds=video_sticker.MAX_DURATION_S, fps=video_sticker.MAX_FPS,
+                  kb=video_sticker.MAX_BYTES // 1024)
+
+
+def _help_page_addsticker(lang: str) -> str:
+    return i18n.t(lang, "helppage_addsticker", emoji=emoji_utils.DEFAULT_EMOJI)
+
+
+def _help_page_import(lang: str) -> str:
+    return i18n.t(lang, "helppage_import", max=import_utils.MAX_IMPORT_PER_RUN)
+
+
+HELP_PAGES = {"newpack": _help_page_newpack, "addsticker": _help_page_addsticker, "import": _help_page_import}
+HELP_ALIASES = {}
 
 
 def build_start_text(lang: str) -> str:
@@ -301,7 +343,7 @@ def help_rows(lang: str) -> list:
 
 
 def start_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)])
+    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES)
 
 
 def packs_keyboard(packs: list[tuple[str, str]], lang: str) -> InlineKeyboardMarkup:
@@ -793,15 +835,20 @@ async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.callback_query.answer()
     await edit_in_place(update.callback_query.message, context.bot, build_help_text(lang, full=True),
-                        reply_markup=help_keyboard(lang, True, help_rows(lang)))
+                        reply_markup=help_keyboard(lang, True, help_rows(lang), HELP_PAGES))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES))
 
 
 async def menu_mypacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -934,7 +981,7 @@ async def receive_new_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     pack_name = context.user_data.get("rename_pack")
     prompt = LiveMessage.restore(context.user_data.get("rename_prompt"))
-    new_title = update.message.text.strip()[:64]  # Telegram title limit
+    new_title = update.message.text.strip()[:PACK_TITLE_MAX]  # Telegram title limit
     if not pack_name or prompt is None:
         await update.message.reply_text(i18n.t(lang, "rename_broken_state"))
         return ConversationHandler.END
@@ -1061,8 +1108,8 @@ async def receive_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not title:
         await update.message.reply_text(i18n.t(lang, "title_empty"))
         return TITLE
-    if len(title) > 64:  # Telegram's hard limit on set titles
-        title = title[:64]
+    if len(title) > PACK_TITLE_MAX:  # Telegram's hard limit on set titles
+        title = title[:PACK_TITLE_MAX]
         await update.message.reply_text(i18n.t(lang, "title_truncated", title=title))
 
     intro = i18n.t(lang, "editing_intro_new")
@@ -1902,8 +1949,13 @@ def main():
     app.add_handler(CommandHandler("mypacks", mypacks_command))
     app.add_handler(CommandHandler("addsticker", addsticker_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+    # Outside the conversation, like /help, so they work in the middle of a pack.
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES),
                                          pattern=HELP_TOGGLE_PATTERN))
+    # A page tap sends a new message and edits nothing, so it is fine here, outside
+    # the conversation: it answers in the middle of a pack and does not end it.
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("whomade", whomade_command))
     app.add_handler(CommandHandler("whois", whois_command))  # owner-only

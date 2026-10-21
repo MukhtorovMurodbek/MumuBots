@@ -545,6 +545,20 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_activity_events_occurred_at ON activity_events (occurred_at)"
         )
+        # Which one-time announcements this person has been shown (2.2.0: the
+        # 220 gift's ad, see bot.py's promo_ad_note). A row is written before
+        # the announcement is sent, so a person gets one chance at it and never
+        # a second. /deletemydata removes the rows.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS promo_seen (
+                user_id BIGINT NOT NULL,
+                promo TEXT NOT NULL,
+                seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (user_id, promo)
+            )
+            """
+        )
         conn.commit()
 
 
@@ -637,6 +651,20 @@ def claim_reactions_note(user_id: int) -> bool:
             "UPDATE user_settings SET knows_reactions = TRUE "
             "WHERE user_id = %s AND knows_reactions IS NOT TRUE RETURNING user_id",
             (user_id,),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+
+def claim_promo_seen(user_id: int, promo: str) -> bool:
+    """True exactly once per (person, announcement): this call recorded that
+    they are being shown it, and two updates arriving together cannot both win.
+    False if they were shown it before. Blocking; raises on a database error."""
+    with pooled() as conn:
+        row = conn.execute(
+            "INSERT INTO promo_seen (user_id, promo) VALUES (%s, %s) "
+            "ON CONFLICT DO NOTHING RETURNING user_id",
+            (user_id, promo),
         ).fetchone()
         conn.commit()
     return row is not None
@@ -1689,7 +1717,7 @@ def erase_user(user_id: int) -> int:
         ):
             cur = conn.execute(statement, params)
             removed += cur.rowcount or 0
-        for table in ("user_settings", "donation_prompts", "activity_events"):
+        for table in ("user_settings", "donation_prompts", "activity_events", "promo_seen"):
             cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             removed += cur.rowcount or 0
         conn.execute(

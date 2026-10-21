@@ -41,6 +41,7 @@ import convert_utils                                    # noqa: E402
 import doc_convert                                      # noqa: E402
 import data_convert                                     # noqa: E402
 import archive_convert                                  # noqa: E402
+import ocr_convert                                      # noqa: E402
 
 failures = []
 
@@ -63,19 +64,22 @@ FFMPEG_WRITES = frozenset(convert_utils._FFMPEG_ARGS)
 DOC_WRITES = doc_convert.WRITES
 DATA_WRITES = data_convert.WRITES
 ARCHIVE_WRITES = archive_convert.WRITES
+OCR_WRITES = ocr_convert.WRITES
 
 
 def backends_for(category, source):
     """Which backends could be asked to write a target for this source."""
     if category == formats.IMAGE:
-        return PILLOW_WRITES | (DOC_WRITES if source == "svg" else frozenset())
+        # ocr_convert reads the words in a still picture: TXT, and the searchable PDF.
+        return PILLOW_WRITES | OCR_WRITES | (DOC_WRITES if source == "svg" else frozenset())
     if category in (formats.VIDEO, formats.AUDIO):
         return FFMPEG_WRITES
     if category == formats.SUBTITLE:
         # ffmpeg writes the subtitle formats; data_convert writes the transcript.
         return FFMPEG_WRITES | {"txt"}
     if category == formats.DOCUMENT:
-        return DOC_WRITES
+        # ... and reads the scanned pages of a PDF, which doc_convert cannot.
+        return DOC_WRITES | (OCR_WRITES if source == "pdf" else frozenset())
     if category == formats.DATA:
         return DATA_WRITES
     if category == formats.ARCHIVE:
@@ -139,7 +143,7 @@ def main() -> int:
     # 5. Every requirement named against a format is one probe() can meet, and
     #    every ffmpeg target names an encoder.
     known_requirements = {"heif", "avif", "jp2", "mupdf", "mammoth", "markdown",
-                          "openpyxl", "yaml", "xml", "ffmpeg", "bsdtar", "rawpy"}
+                          "openpyxl", "yaml", "xml", "ffmpeg", "bsdtar", "rawpy", "ocr"}
     for fmt, needs in formats.FORMAT_NEEDS.items():
         check(f".{fmt}'s requirements are ones probe() reports on",
               set(needs) <= known_requirements, str(needs))
@@ -215,6 +219,8 @@ def main() -> int:
         "converted_file_caption_zip", "converted_file_caption_pdf",
         "converted_file_caption_pages", "converted_layout_note",
         "batch_mixed_formats",
+        "ocr_lang_toggle", "ocr_lang_set", "ocr_lang_eng", "ocr_lang_rus", "ocr_lang_uzb",
+        "ocr_too_many_pages_note", "target_ocrpdf",
     ]
     for lang in i18n.SUPPORTED_LANGUAGES:
         absent = [key for key in needed if key not in i18n.STRINGS[lang]]

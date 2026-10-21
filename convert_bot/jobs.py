@@ -94,6 +94,27 @@ def time_limit_for(billable_bytes: int, work: float = 1.0, paid: bool = True) ->
     return int(min(TIME_LIMIT_S, max(TIME_BASE_S, wanted)))
 
 
+def ocr_time_limit(ocr_pages: int, paid: bool, billable: int = 0, work: float = 1.0) -> int:
+    """How long a job that recognises text may run: what any conversion of that
+    file is given (time_limit_for: TIME_BASE_S, and a second more for every
+    megabyte of work in the file and its result), and OCR_PAGE_S more for every
+    page it reads, up to TIME_LIMIT_S. The file's part is not left out: a 90 MB
+    PDF of 200 pages with one scanned page took longer than the two minutes
+    the scan alone is given just to be opened and its text read (reviewed
+    2026-10-10). Free, it is the free limit, as time_limit_for gives it.
+
+    `billable` and `work` are time_limit_for's: convert_utils.billable_bytes of
+    the file and its estimated result, and convert_utils.work_factor of the pair.
+
+    The ONE place this is worked out: the price is made from it
+    (convert_utils.ocr_limit, for price_for_job) and the job is given it
+    (bot._enqueue, through the same ocr_limit), so the two cannot differ."""
+    if not paid:
+        return FREE_TIME_LIMIT_S
+    import ocr_convert      # here, not above: ocr_convert imports convert_utils, which imports this
+    return int(min(TIME_LIMIT_S, time_limit_for(billable, work, True) + max(0, ocr_pages) * ocr_convert.OCR_PAGE_S))
+
+
 def job_limit(job: "Job") -> int:
     """The limit this job runs under: its own, or for a job made before it
     had one, the flat limit of its kind."""
@@ -304,6 +325,12 @@ class Job:
     send_limit: int = SEND_LIMIT_BYTES
     # How long it may run -- time_limit_for(). 0: the flat limit of its kind.
     time_limit: int = 0
+    # Text recognition (ocr_convert.py), both fixed when the job is queued. The
+    # language is the person's choice then ("eng", "rus", "uzb"; "" for a job
+    # that reads no text); ocr_pages is the number of pages the menu counted
+    # and the price was made for, which the worker will not read past.
+    ocr_lang: str = ""
+    ocr_pages: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     state: str = "queued"          # queued | running | done
     charged: bool = False
@@ -511,7 +538,7 @@ def _parse(returncode, out: bytes, err: bytes) -> Outcome:
 async def _start_worker(payload: dict):
     """The one place a child process is started: convert_worker.py, handed its
     job as a single JSON argument. A conversion and a look at a raw photo's size
-    both start here, so the C edition (where the worker is a section of
+    or a PDF's pages both start here, so the C edition (where the worker is a section of
     convert.py that main.py runs) rewrites exactly one line."""
     return await asyncio.create_subprocess_exec(
         sys.executable, "-u", str(WORKER), json.dumps(payload),
@@ -533,6 +560,8 @@ async def run_worker(job: Job, work_dir, stem: str, time_limit: int) -> Outcome:
         "stem": stem,
         "max_pixels": MAX_MEGAPIXELS * 1_000_000,
         "max_memory_mb": WORKER_MAX_MEMORY_MB,
+        "ocr_lang": job.ocr_lang,
+        "ocr_pages": job.ocr_pages,
     }
     proc = await _start_worker(payload)
     job.proc = proc
@@ -729,6 +758,111 @@ async def describe_image(path, timeout: float = DESCRIBE_TIMEOUT_S) -> "float | 
     answered = await _ask_child({"kind": "describe_image", "path": str(path),
                                  "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a picture's size")
     return None if answered is None else _image_size(answered[0])
+
+
+def _count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _pdf_info(answer: bytes) -> "dict | None":
+    """{"pages": n, "scanned": m} from a describe_pdf child's answer, or None
+    for anything that is not exactly that. Checked like the other describe
+    answers: whatever is on the child's stdout is data. `scanned` is None when
+    the child did not get as far as counting them.
+
+    The child says the page count on a line of its own the moment it has it
+    ({"pages": n}) and everything on the last ({"ok": true, "pages": n,
+    "scanned": m}). A last line that is the whole answer is checked as one. When
+    there is none -- the child ran out of time and was killed, or failed after
+    the pages were known -- the page count alone is the answer, with no scanned
+    pages: the menu knows what a PDF weighs in pages and not how many of them
+    are pictures. A child that never said how many pages is None."""
+    lines = [line for line in (answer or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    try:
+        last = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        last = None
+    if isinstance(last, dict) and last.get("ok"):
+        pages, scanned = last.get("pages"), last.get("scanned", False)
+        if not _count(pages) or not (scanned is None or (_count(scanned) and scanned <= pages)):
+            return None
+        return {"pages": pages, "scanned": scanned}
+    for line in lines:
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and "ok" not in data and _count(data.get("pages")):
+            return {"pages": data["pages"], "scanned": None}
+    return None
+
+
+async def _ask_child_partial(payload: dict, timeout: float, what: str):
+    """_ask_child, for a child whose first lines are worth having even when the
+    rest is not: (what it wrote, its exit code) -- the exit code None when it
+    overran `timeout` and was killed, with what it had written by then --
+    or None when it could not be run at all."""
+    async with _describe_slots:
+        proc = None
+        written: list[bytes] = []
+        try:
+            proc = await _start_worker(payload)
+
+            async def read_out():
+                while chunk := await proc.stdout.read(65536):
+                    written.append(chunk)
+                await proc.wait()
+
+            async def drain_err():
+                while await proc.stderr.read(65536):
+                    pass
+            await asyncio.wait_for(asyncio.gather(read_out(), drain_err()), timeout=timeout)
+        except asyncio.TimeoutError:
+            await _kill(proc)
+            logger.warning("Reading %s took over %.0f s and was stopped", what, timeout)
+            return b"".join(written), None
+        except asyncio.CancelledError:
+            await asyncio.shield(_kill(proc))
+            raise
+        except Exception as exc:
+            await _kill(proc)
+            logger.warning("Reading %s failed to run (%s)", what, type(exc).__name__)
+            return None
+        return b"".join(written), proc.returncode
+
+
+async def describe_pdf(path, timeout: "float | None" = None) -> "dict | None":
+    """How many pages a PDF has and how many of them are pictures without text
+    ({"pages": n, "scanned": m}, ocr_convert.count_scanned), read in a child
+    process, or None for a PDF that cannot be read -- which includes a child
+    that crashed or answered nonsense before it knew the page count.
+
+    It is awaited inside the handler of the upload, and the bot handles one
+    update at a time, so it waits ocr_convert.OCR_DESCRIBE_SECONDS in total
+    (`timeout` overrides it) and not the half minute the other describe jobs
+    may take: a 1.8 KB PDF whose one page holds a million glyphs took 17 s to
+    look at and four million over two minutes, with every other person's
+    buttons waiting. The child reports the page count the moment it has it, so
+    past the deadline it is killed and the answer is {"pages": n, "scanned":
+    None}: the page count prices the file, and no scanned page is counted, so
+    no text is read and the PDF's TXT is today's. The same answer when the
+    child fails after the pages are known.
+
+    Not in this process: MuPDF parses a stranger's file in C, and this is the
+    bot's own, which in the C edition is five bots'. None is the menu without
+    the numbers -- the PDF converts as it did before text recognition existed."""
+    if timeout is None:
+        import ocr_convert      # here, not above: ocr_convert imports convert_utils, which imports this
+        timeout = ocr_convert.OCR_DESCRIBE_SECONDS
+    answered = await _ask_child_partial({"kind": "describe_pdf", "path": str(path),
+                                         "max_memory_mb": WORKER_MAX_MEMORY_MB}, timeout, "a PDF's pages")
+    if answered is None:
+        return None
+    out, returncode = answered
+    info = _pdf_info(out)
+    if info is None and returncode not in (0, 2, None):     # 2 is an ordinary "not a readable PDF"
+        logger.warning("Reading a PDF's pages failed (exit %s)", returncode)
+    return info
 
 
 # ---------------------------------------------------------------------------

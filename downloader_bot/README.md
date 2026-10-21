@@ -71,7 +71,11 @@ happened, which answers "is it broken, or was that one post private".
 
 | command | what it does |
 |---|---|
-| *(paste a link)* | Downloads it and sends it back |
+| *(paste a link)* | Downloads it and sends it back. The link is first cut down to the address of the post: share-tracking parts such as `?igsh=`, `?utm_source=` or `?si=` are removed before anything else sees it, so one post pasted in two shapes is one link. |
+| *(paste the same link again while the first is still queued or downloading)* | No second job: the repeat gets a 👌 reaction and nothing else, and it is not counted as a download. Same person, same chat, same post only. |
+| *(paste a link for a post the bot has already sent to anybody)* | Sent again by the Telegram file IDs the bot kept, without downloading the post. The references are filed under a scrambled name of the post, not under who asked (no user id, chat, username, link or caption). One confirmed less than 12 hours ago (`DBOT_FILEID_CONFIRM_HOURS`) is used as it is; an older one only after a lookup shows the post still public. If the post is gone or the lookup is inconclusive, nothing old is sent and the bot goes to the platform as usual; after a send by stored file ID fails with any BadRequest the stored reference is dropped; the post is fetched in the same job only when Telegram says the ID itself is invalid, otherwise the person is told the send failed. References unused for 90 days are deleted (`DBOT_FILEID_KEEP_DAYS`). It counts as one download. `DBOT_SENT_FILES` (`0` switches it off). Large files, PDF/ZIP merges, Reddit pictures, rendered text cards and deliveries of more than 10 files are not stored. |
+| *(tap "get it as a file" / "get it compressed" under a download, or paste the same link again)* | Answered from the files the bot kept after the last download, without fetching the post again (the same link pasted again is usually answered from the stored file IDs first, then from the kept copy): a kept copy lives five minutes from its last use and never past 12 hours after the download, a different link deletes it at once, and `/deletemydata` deletes it too. It still counts as one download. One delivery over 100 MB is not kept, nor are Reddit pictures and rendered text cards. `DBOT_CACHE_SECONDS` (`0` switches it off), `DBOT_CACHE_ENTRY_MAX_MB`, `DBOT_CACHE_MAX_MB`. |
+| *(tap 📄 PDF or 🗜 ZIP under an album)* | One PDF of the album's photos, a page each, or one ZIP of its files: fetched again when tapped (the kept download above does not serve it), sent, and nothing kept. At most 20 files and 48 MB in all (`DBOT_MERGE_MAX_ITEMS`, `DBOT_MERGE_MAX_MB`), a result under 50 MB, and for the PDF still JPEG, PNG, WEBP or GIF photos of up to 20 megapixels, one PDF built at a time. A tap counts as one download. |
 | `/settings` | The caption, the file quality and large files on one screen, each a button. |
 | `/lossless on\|off` | Send downloads as files rather than as photos and videos. Telegram re-encodes anything sent as media — that compression is what makes it play inline, and there is no way to have both — so with this on the bytes arrive exactly as the source had them, at the cost of a tap to open. Off by default, remembered per user. A button under every finished download gets that one file the other way round without changing the setting. |
 | `/caption on\|off` | Toggle the credit caption. |
@@ -81,7 +85,8 @@ happened, which answers "is it broken, or was that one post private".
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/start` | Instructions. The first `/start` from a new user asks which language to use, once. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions in short, with a button for the full guide; `/help full` goes straight to it. |
+| `/help` | A short guide; the buttons under it open each command's page (also `/help <command>`), and "📖 Full guide" shows everything (also `/fullhelp`, `/help full`). |
+| `/fullhelp` | The full guide in one message, the same as `/help full`. |
 | `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
@@ -148,6 +153,15 @@ without them there is no switch, and 48 MB is the limit.
 `DBOT_LARGE_MAX_MB` lowers the ceiling. The price is the family's pricing
 rule (`shared/pricing.py`) over what sending the file costs, and
 `tests/test_pricing.py` checks it still covers the machine.
+
+### The 220 ⚡ gift
+
+While the family's 220 ⚡ gift is open (the owner starts it once, and it can be
+claimed for 14 days), the first message a person sends this bot or ConvertBot
+gives them 220 ⚡ of bonus credit, once across the two, and a notice in their
+language. Bonus credit is spent before ordinary credit and runs out 28 days
+after the day it was claimed. The claim runs beside the bot's own answer and
+never holds it up (`attach_promo_claim`, in `shared/shared_features.py`).
 
 ---
 

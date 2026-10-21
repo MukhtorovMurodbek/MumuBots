@@ -31,7 +31,11 @@ psycopg[binary,pool]>=3.2
 # that needs it.
 
 # PDF, EPUB, MOBI, FB2, CBZ, XPS and SVG: reading them, rendering their pages
-# to pictures, extracting their text, and laying HTML out onto a page.
+# to pictures, extracting their text, and laying HTML out onto a page. Also
+# reading the text in a picture or a scanned PDF (ocr_convert.py): MuPDF links
+# the Tesseract engine, and the three calls that needs -- Pixmap.pdfocr_tobytes
+# (1.19.0), Page.delete_image (1.21.0) and TOOLS.store_shrink (the docs give it
+# no version) -- sit under the 1.24 floor. Built and measured on 1.28.2.
 PyMuPDF>=1.24
 
 # HEIC and HEIF -- what an iPhone camera writes, and the format most likely to

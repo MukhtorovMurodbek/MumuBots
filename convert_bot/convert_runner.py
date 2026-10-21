@@ -47,6 +47,19 @@ def _upper(ext: str) -> str:
     return (ext or "?").upper()
 
 
+def _target(job: jobs.Job, lang: str | None = None) -> str:
+    """The job's target as the person is told it: PNG, or "Searchable PDF" for
+    the pseudo-target ocrpdf, never the pseudo-extension itself."""
+    return i18n.target_label(lang or job.lang, job.target_ext)
+
+
+def _pair(job: jobs.Job) -> str:
+    """"png->pdf", for the credit ledger and the in-flight record, which the
+    person can read in /balance: the pseudo-target ocrpdf is written out."""
+    target = "searchable-pdf" if job.target_ext == "ocrpdf" else job.target_ext
+    return f"{job.src_ext}->{target}"
+
+
 # ---------------------------------------------------------------------------
 # The status card: one message, redrawn while the person waits
 # ---------------------------------------------------------------------------
@@ -83,7 +96,7 @@ def time_left(done: float, total: float, elapsed: float) -> float | None:
 def status_card(lang: str, job: jobs.Job, now: float | None = None) -> str:
     now = time.monotonic() if now is None else now
     stage = job.extra.get("stage") or "converting"
-    lines = [f"🔄 {_upper(job.src_ext)} → {_upper(job.target_ext)}",
+    lines = [f"🔄 {_upper(job.src_ext)} → {_target(job, lang)}",
              i18n.t(lang, "card_sending" if stage == "sending" else "card_converting")]
     progress = job.extra.get("progress")
     stage_started = job.extra.get("stage_started") or job.started_at or now
@@ -197,17 +210,17 @@ class ConvertRunner(jobs.Runner):
             return await asyncio.to_thread(family_link.star_balance, job.user_id)
         return await asyncio.to_thread(
             family_link.spend_stars, job.user_id, job.price, "spend",
-            f"{job.src_ext}->{job.target_ext} conversion, {job.size / 1024:.0f} KB")
+            f"{_pair(job)} conversion, {job.size / 1024:.0f} KB")
 
     async def started(self, job: jobs.Job, balance: int) -> None:
         await self.card(job)
 
     async def queued(self, job: jobs.Job, ahead: int) -> None:
         if ahead:
-            text = i18n.t(job.lang, "job_queued", src=_upper(job.src_ext), target=_upper(job.target_ext),
+            text = i18n.t(job.lang, "job_queued", src=_upper(job.src_ext), target=_target(job),
                           ahead=ahead, price=job.price)
         else:
-            text = i18n.t(job.lang, "job_starting", src=_upper(job.src_ext), target=_upper(job.target_ext))
+            text = i18n.t(job.lang, "job_starting", src=_upper(job.src_ext), target=_target(job))
         await self._status(job, text, self.stop_keyboard(job))
 
     async def card(self, job: jobs.Job) -> None:
@@ -266,16 +279,16 @@ class ConvertRunner(jobs.Runner):
     async def succeeded(self, job: jobs.Job, outcome: jobs.Outcome) -> None:
         note_job(True)
         await self._status(job, i18n.t(job.lang, "job_done", src=_upper(job.src_ext),
-                                       target=_upper(job.target_ext)))
+                                       target=_target(job)))
 
     async def refund(self, job: jobs.Job, kind: str) -> int:
         return await asyncio.to_thread(
             family_link.move_stars, job.user_id, job.price, "refund",
-            f"{job.src_ext}->{job.target_ext} conversion ended: {kind}")
+            f"{_pair(job)} conversion ended: {kind}")
 
     async def hold(self, job: jobs.Job) -> None:
         await asyncio.to_thread(db.hold_conversion, job.id, job.user_id, job.chat_id, job.price,
-                                job.lang, f"{job.src_ext}->{job.target_ext}", PROCESS_ID)
+                                job.lang, _pair(job), PROCESS_ID)
 
     async def release(self, job: jobs.Job) -> str:
         return await asyncio.to_thread(db.release_conversion, job.id)
@@ -343,7 +356,7 @@ class ConvertRunner(jobs.Runner):
                                                     "limit": max(1, round(limit / 60))}),
             jobs.CRASH: ("job_reason_crash", {}),
             jobs.NO_MEMORY: ("job_reason_no_memory", {}),
-            jobs.TOO_LARGE: ("job_reason_too_large", {"target": _upper(job.target_ext),
+            jobs.TOO_LARGE: ("job_reason_too_large", {"target": _target(job),
                                                       "mb": detail.split()[0] if detail else "?",
                                                       "limit": job.send_limit // (1024 * 1024)}),
             jobs.SEND_FAILED: ("job_reason_send_failed", {}),
@@ -379,7 +392,7 @@ class ConvertRunner(jobs.Runner):
         credit = (f"{job.price} ⚡ back to the balance" if refunded_to is not None
                   else ("free conversion, nothing to refund" if not job.price else "not refunded"))
         text = (f"⚠️ {BOT_LABEL}: a conversion failed ({kind})\n"
-                f"File: {job.size / 1024 / 1024:.1f} MB {_upper(job.src_ext)} → {_upper(job.target_ext)}\n"
+                f"File: {job.size / 1024 / 1024:.1f} MB {_upper(job.src_ext)} → {_target(job, 'en')}\n"
                 f"Ran: {elapsed:.0f}s of a {limit}s limit\n"
                 f"Detail: {detail or '-'}\n"
                 f"Code: {problems.JOB_ENDINGS.get(kind, 'CV-CRASH')} · incident {job.extra.get('incident', '-')}\n"

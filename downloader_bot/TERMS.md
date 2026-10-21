@@ -31,8 +31,12 @@ work — is between the person who downloaded it, the person who made it, and
 the law. The operator neither reviews nor licenses any of it.
 
 Rights holders who want a specific post to stop being retrievable should
-approach the platform hosting it; this bot stores nothing and has nothing to
-take down.
+approach the platform hosting it. Remove the post at the platform: once neither
+the platform nor the download services the bot asks still serve it, the bot stops
+sending it within 12 hours. This bot keeps no copy of any post. It holds only the
+last download, for five minutes, and references to files it has already sent (see
+below); before it re-uses one of those it checks, at least every 12 hours, that
+the post is still public. It has nothing else to take down.
 
 ## Fair share
 
@@ -65,6 +69,11 @@ Conversions use bonus credit first, the soonest to expire first, so what
 expires is only bonus that went unused. `/balance` shows how much of your
 balance is bonus and when the next of it runs out.
 
+**Credit given free in a promotion (a gift) is bonus credit: it has no cash
+value, cannot be transferred to another account, is not refundable, and expires
+at the end of the last day stated when it is given (UTC).** Like other bonus
+credit it is spent first; ordinary credit does not expire.
+
 **Payments are final. Stars are not refunded, and credit is not money and it
 is not Stars: it cannot be withdrawn, turned back into Stars, or
 transferred.** Every bot says so in `/help`, and ConvertBot again before a paid
@@ -83,6 +92,22 @@ The bot is run by one person and comes with no promise of availability,
 correctness or continuity. It can be slow, wrong, or switched off entirely,
 with or without notice. Nothing here should be relied on for anything that
 cannot be lost, and anyone who needs a copy of something should keep their own.
+
+**The last download.** What the bot has just sent you is held on its server for five
+minutes, so that the button under it, or the same link sent again, is answered
+without fetching the post a second time. It is a convenience, not storage: it is
+deleted when you send a different link, after five minutes, on a restart, or with
+`/deletemydata`, and it may be deleted sooner when the server is short of space.
+PRIVACY.md has the details.
+
+**References to files already sent.** So that the same post can be sent again
+without being fetched again, the bot keeps Telegram's file IDs for what it has
+sent, under a scrambled name of the post and not under who asked for it; they hold
+nothing about you. Before re-using one, the bot checks, at least every 12 hours,
+that the post is still public; if the post has been removed, or the bot cannot
+tell, it does not send the old file and goes to the platform as usual instead.
+References nobody uses are deleted after 90 days. They are a convenience, not storage.
+PRIVACY.md has the details.
 
 Nothing in these terms limits any right that cannot be limited under the law
 that applies to the person using the bot.

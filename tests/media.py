@@ -151,7 +151,8 @@ assert code == 1 and out.get("kind") == "crash", (code, out)
 print("  a malformed or missing job: exit 1, reported as a crash")
 
 import jobs
-slow = SimpleNamespace(paths=[clip], src_ext="mp4", target_ext="gif", proc=None)
+slow = SimpleNamespace(paths=[clip], src_ext="mp4", target_ext="gif", proc=None,
+                       ocr_lang="", ocr_pages=0)   # what jobs.Job defaults to for a conversion that reads no text
 t0 = time.perf_counter()
 outcome = asyncio.run(jobs.run_worker(slow, outdir, "worker_slow", 1))
 took = time.perf_counter() - t0

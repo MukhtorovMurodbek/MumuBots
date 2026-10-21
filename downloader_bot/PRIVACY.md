@@ -19,19 +19,43 @@ _Last reviewed: 3 October 2026._
   the only thing a bot can address a person by.
 - **A chosen language, and the caption, quality and large-file settings** that
   go with it.
-- **The link sent in**, for as long as it takes to fetch what is behind it.
+- **The last download, for five minutes.** What the bot has just sent you stays on
+  its server for five minutes, so that the button under it, or the same link sent
+  again, is answered without fetching the post a second time. Each of those starts
+  the five minutes again, but it never lasts past 12 hours after the download. It
+  is deleted sooner when you send a different link, when the bot restarts, when the
+  server is short of space, or when you use `/deletemydata`. Only you can get it back, and a download over 100 MB is never
+  kept.
+- **References to files the bot has already sent** (Telegram's file IDs), filed
+  under a scrambled name of the post and not under who asked for it. They let the
+  bot send the same post again without downloading it. Before re-using one, the
+  bot checks at least every 12 hours that the post is still public. References
+  nobody uses are deleted after 90 days. A reference is not about anyone: it holds
+  no user id, chat, username, link, platform name or caption, and the scrambled
+  name cannot be turned back into the link.
+- **The links of your last five downloads**, so the buttons under them work, until
+  you have not used the bot for 12 hours. Every link is cut down to the address of
+  the post before the bot does anything else with it: the share-tracking parts that
+  apps add when you copy a link (such as `igsh`, `utm_source` or `si`) are removed,
+  and what is held is the plain link.
 - **One row per download** — which platform, and when. This is what the daily
   allowance is counted from. The link itself is not part of the row.
 - **A timestamp per use** — one row saying this id used the bot at this
   minute, so the operator can tell whether anybody is using it.
+- **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
+  tapped it.
 - **Donations**, if any: the amount, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger**, once you have paid or been given
   credit. It is shared by the family's four bots: the balance, and one row for
   every top-up, bonus, charge, credit returned and correction, with the amount, which
   bot, and why. `/balance` shows it.
 - **Bonus credit, and when it expires** — for each payment that earned a
-  bonus: how much, how much of it is left, and the date it runs out. Bonus
-  that runs out unused is taken off the balance, and the ledger says so.
+  bonus and each gift: how much, how much of it is left, and the date it runs
+  out. Bonus that runs out unused is taken off the balance, and the ledger
+  says so.
+- **Gifts given** — that a gift, by its name, was given to your id and
+  when, so that it is given only once across the family. Kept like the ledger;
+  `/deletemydata` does not remove it.
 - **Problems, whenever one is shown to anybody** — the error code, an
   incident number, when it happened and the bot's version. This is written
   down automatically, because a fault nobody reports is still a fault, and
@@ -68,8 +92,10 @@ _Last reviewed: 3 October 2026._
 
 ## What is not held
 
-- The media itself. It is fetched, sent, and deleted.
-- The link, once the download is done.
+- The media itself, beyond those five minutes. It is fetched, sent, and deleted.
+- Who asked for which post, in the references to files already sent. They are
+  kept under a scrambled name of the post alone; nothing in them says who the post
+  was sent to.
 - Anything about the author of the post that was downloaded, beyond what is
   inside the media file they published.
 
@@ -110,12 +136,16 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 | what | how long |
 |---|---|
 | user id, language, settings | until erased, or indefinitely while the bot is in use |
-| the link | until the download finishes |
+| the links of your last five downloads | 12 hours after you last used the bot (`USER_DATA_TTL_HOURS`) |
+| the last download's files | 5 minutes after you last asked for it, or until you send a different link (`DBOT_CACHE_SECONDS`); never past 12 hours after the download |
+| references to files already sent | 90 days after they were last used (`DBOT_FILEID_KEEP_DAYS`); the bot re-checks that the post is still public at least every 12 hours (`DBOT_FILEID_CONFIRM_HOURS`) before re-using one |
 | one row per download | 7 days (`DBOT_DOWNLOAD_RETENTION_DAYS`) |
 | timestamp per use | about 90 days (`ACTIVITY_RETENTION_DAYS`) |
+| button tap counts | 45 days (`FAMILY_USAGE_RETENTION_DAYS`) |
 | work in progress | 12 hours (`DEPLOY_STATE_TTL_HOURS`) |
 | donation records | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the donation records |
+| gifts given (which gift was given to your id, and when) | kept, like the ledger |
 | feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it
@@ -123,8 +153,13 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 `/deletemydata`, inside the bot. It asks once, then erases in that moment. No
 account, no form, and no waiting period.
 
-Erasing the download rows resets the daily allowance along with them. Nothing
-already downloaded is affected — it was never kept here.
+Erasing the download rows resets the daily allowance along with them. It also
+deletes the last download if it is still being held; nothing older was ever kept
+here.
+
+`/deletemydata` has nothing of yours to delete among the references to files
+already sent, because they hold nothing about you: no id, no chat, no username,
+no link. They go on their own, 90 days after they were last used.
 
 What survives is the payment ledger, without the username on it. A payment
 record has to outlive the payer asking to be forgotten: it is what a payment

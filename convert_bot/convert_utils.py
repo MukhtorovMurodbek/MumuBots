@@ -481,14 +481,97 @@ def billable_bytes(in_bytes: int, out_bytes: int) -> int:
     return max(in_bytes, out_bytes) if BILLABLE == "max" else in_bytes + out_bytes
 
 
+def ocr_job_pages(src_ext: str, target_ext: str, ocr_pages: int = 0, files: int = 1) -> int:
+    """How many pages a conversion reads as text (ocr_convert.py): 0 when it
+    reads none, so it is not a text-recognition job at all.
+
+    A picture to TXT or a searchable PDF is one page. A PDF to either is the
+    pages the menu counted as scanned -- and a PDF with none, whose count could
+    not be had, or with more than ocr_convert.OCR_MAX_PAGES (one conversion
+    reads no more; its TXT is the text the other pages already have), is
+    today's PDF to TXT (doc_convert), priced and run as it always was. More
+    than one file (`files`) is an album, which is never read: each would be
+    converted for the price of one. ONE function, asked by the quote
+    (price_for_job), by the queue (bot._enqueue, which gives the job its time
+    limit) and by the dispatcher below, so the three cannot disagree on what
+    is being sold."""
+    import ocr_convert      # here, not above: ocr_convert imports this module
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if target_ext not in ocr_convert.WRITES or files > 1:
+        return 0
+    if src_ext == "pdf":
+        counted = max(0, int(ocr_pages or 0))
+        return counted if counted <= ocr_convert.OCR_MAX_PAGES else 0
+    if src_ext in formats.RAW_FORMATS or src_ext == "svg":
+        return 0
+    return 1 if formats.category_of(src_ext, False) == formats.IMAGE else 0
+
+
+# What recognised text weighs a page, and what the invisible text layer adds to a
+# searchable PDF's page (measured: about 5 KB, so twice that is allowed for).
+_OCR_TEXT_BYTES_PER_PAGE = 4096
+_OCR_LAYER_BYTES_PER_PAGE = 10 * 1024
+
+
+def ocr_limit(src_ext: str, target_ext: str, in_bytes: int, out_bytes: int, read_pages: int,
+              paid: bool, pages: "int | None" = None) -> int:
+    """The time limit of a job that reads `read_pages` pages as text, from what
+    the quote knows: the file, its estimated result, the pair and the PDF's
+    page count. The one way the number is asked for -- by the price
+    (_ocr_price) and by the queue (bot._enqueue) -- so the two cannot differ.
+    It is jobs.ocr_time_limit, which holds the formula.
+
+    The TXT of a PDF also has the text of the pages that have their own, which
+    the ordinary conversion of that PDF is given time for by its estimate (a
+    share of the file's size); the estimate of the pages read is by their
+    number alone, and so for a big PDF with one scanned page it would be the
+    smaller of the two. The time is made from the larger, so that reading a
+    page never gives a file less time than converting it without did."""
+    import jobs
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    if src_ext == "pdf" and target_ext == "txt":
+        out_bytes = max(out_bytes, estimate_output_bytes(src_ext, target_ext, in_bytes, pages))
+    return jobs.ocr_time_limit(read_pages, paid, billable_bytes(in_bytes, out_bytes),
+                               work_factor(src_ext, target_ext))
+
+
+def _ocr_price(src_ext: str, target_ext: str, in_bytes: int, pages: "int | None",
+               read_pages: int) -> tuple:
+    """(credits, estimated output bytes) for a conversion that reads text.
+
+    Free only where an ordinary conversion is -- the file and its result under
+    FREE_UNDER_MB -- and it reads at most OCR_FREE_PAGES pages. Otherwise the
+    price of its worst case, as _price makes it, with the time limit a job
+    that reads this many pages is given (ocr_limit)."""
+    import jobs
+    import ocr_convert
+    import pricing
+    if target_ext == "txt":
+        out_bytes = _OCR_TEXT_BYTES_PER_PAGE * max(pages or 0, read_pages)
+    elif src_ext == "pdf":
+        out_bytes = in_bytes + _OCR_LAYER_BYTES_PER_PAGE * read_pages
+    else:
+        out_bytes = int(in_bytes * 1.2) + _OCR_LAYER_BYTES_PER_PAGE
+    if billable_bytes(in_bytes, out_bytes) < FREE_UNDER_MB * _MB and read_pages <= ocr_convert.OCR_FREE_PAGES:
+        return 0, out_bytes
+    return pricing.price(pricing.cost(ocr_limit(src_ext, target_ext, in_bytes, out_bytes, read_pages, True, pages),
+                                      jobs.big_send_limit(out_bytes or in_bytes))), out_bytes
+
+
 def price_for_job(src_ext: str, target_ext: str, in_bytes: int,
-                  pages: "int | None" = None) -> tuple:
+                  pages: "int | None" = None, ocr_pages: int = 0, files: int = 1) -> tuple:
     """(credits, estimated output bytes) for one conversion.
 
     Free under FREE_UNDER_MB, however hard the pair is; above it, the price
     of the most the job may cost -- its time limit, which grows with the size
     and how hard the pair is to run, and its send limit, which grows with the
-    estimated result."""
+    estimated result. A conversion that reads text is priced by the pages it
+    reads (ocr_job_pages, _ocr_price); `files` is how many files it takes, and
+    an album is never one of those."""
+    src_ext, target_ext = formats.normalise(src_ext), formats.normalise(target_ext)
+    reading = ocr_job_pages(src_ext, target_ext, ocr_pages, files)
+    if reading:
+        return _ocr_price(src_ext, target_ext, in_bytes, pages, reading)
     out_bytes = estimate_output_bytes(src_ext, target_ext, in_bytes, pages)
     return _price(in_bytes, out_bytes, work_factor(src_ext, target_ext)), out_bytes
 
@@ -540,13 +623,13 @@ def price_tiers_text(lang: str = "en") -> str:
     example, _ = price_for_job("mp4", "mp4", example_mb * _MB)
     most = pricing.price(pricing.cost(jobs.TIME_LIMIT_S, jobs.big_send_limit(MAX_FILE_MB * _MB)))
     lines = [
-        f"  0–{FREE_UNDER_MB} MB: " + i18n.t(lang, "price_free"),
+        "  " + i18n.t(lang, "price_free_upto", mb=FREE_UNDER_MB) + i18n.t(lang, "price_free"),
         "  " + i18n.t(lang, "price_from", price=least_paid_price()),
         "  " + i18n.t(lang, "price_example", mb=example_mb, price=example),
         "  " + i18n.t(lang, "price_at_most", mb=MAX_FILE_MB, price=most),
     ]
     note = "" if BIG_FILES else " " + i18n.t(lang, "price_cloud_api_note")
-    lines.append(f"  over {MAX_FILE_MB} MB: " + i18n.t(lang, "price_not_supported") + note)
+    lines.append("  " + i18n.t(lang, "price_over", mb=MAX_FILE_MB) + i18n.t(lang, "price_not_supported") + note)
     lines.append("  " + i18n.t(lang, "price_quoted_first"))
     return "\n".join(lines)
 
@@ -1184,8 +1267,13 @@ def _out(work_dir, stem: str, ext: str) -> Path:
     return Path(work_dir) / f"{stem}.{ext}"
 
 
-def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "converted") -> Result:
+def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "converted",
+            ocr_lang: str = "", ocr_pages: int = 0) -> Result:
     """Everything the bot converts, dispatched by what the source is.
+
+    `ocr_lang` and `ocr_pages` are for the conversions that read text
+    (ocr_convert.py) and nothing else: the person's choice of language, and
+    the number of pages the job was priced for.
 
     `in_paths` is a list because one conversion -- pictures into a PDF -- takes
     a set of files, and because "convert all of these to WEBP" is the same
@@ -1205,7 +1293,12 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     category = formats.category_of(src_ext)
     work_dir = Path(work_dir)
 
+    import ocr_convert
     if len(in_paths) > 1:
+        if target_ext in ocr_convert.WRITES and (target_ext == "ocrpdf" or category == formats.IMAGE):
+            # An album is converted one picture at a time, and each would be read
+            # for the price of one: the menu does not offer it, and this does not take it.
+            raise ConversionError("Text is read from one picture or PDF at a time, not from an album.")
         return _convert_batch(in_paths, src_ext, target_ext, work_dir, stem)
 
     in_path = in_paths[0]
@@ -1217,6 +1310,20 @@ def convert(in_paths, src_ext: str, target_ext: str, work_dir, stem: str = "conv
     # one the conversion is actually run under.
     if src_ext in formats.ANIMATED_CAPABLE:
         category = formats.category_of(src_ext, gif_is_animated(in_path))
+
+    if target_ext in ocr_convert.WRITES:
+        # Reading text. A picture is read whatever it is turned into; a PDF only
+        # when the job was priced for pages to read (ocr_job_pages, the function
+        # the quote asked) -- otherwise its TXT is today's, doc_convert's, with
+        # its own refusal for a PDF that has no text. Never more pages than the
+        # price counted: ocr_convert refuses a file that now has more.
+        reading = ocr_job_pages(src_ext, target_ext, ocr_pages, len(in_paths))
+        picture = category == formats.IMAGE and src_ext not in formats.RAW_FORMATS and src_ext != "svg"
+        if picture or (src_ext == "pdf" and (reading or target_ext == "ocrpdf")):
+            return ocr_convert.convert(in_path, src_ext, target_ext, work_dir, stem,
+                                       lang=ocr_lang, max_scanned=reading)
+        if target_ext == "ocrpdf":
+            raise ConversionError(f"A .{src_ext} file can't be turned into a searchable PDF.")
 
     if category == formats.IMAGE and src_ext in formats.RAW_FORMATS:
         import raw_convert

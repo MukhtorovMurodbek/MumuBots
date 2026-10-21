@@ -1,0 +1,1468 @@
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/downloader_bot/bot.py	2026-10-12 05:02:11.000000000 +0900
++++ MumuBots2.2.0/downloader_bot/bot.py	2026-10-17 14:37:22.808023900 +0900
+@@ -42,7 +42,7 @@
+ import shutil
+ import uuid
+ import time
+-from contextlib import asynccontextmanager
++from contextlib import asynccontextmanager, contextmanager
+ from datetime import datetime, timedelta, timezone
+ from io import BytesIO
+ 
+@@ -89,6 +89,7 @@
+ import platforms
+ import resolvers
+ import routewatch
++import sent_files
+ import big_files
+ import large_files
+ import merge
+@@ -110,6 +111,11 @@
+     save_provider_health,
+     download_allowance,
+     record_download,
++    sent_files_get,
++    sent_files_put,
++    sent_files_confirmed,
++    sent_files_used,
++    sent_files_drop,
+ )
+ from shared_features import (
+     note_job,
+@@ -176,6 +182,9 @@
+ 
+ BOT_NAME = "downloaderbot"  # this bot's id within SIBLING_BOTS
+ 
++# The key the stored file ids are filed under comes from the token (sent_files.py).
++sent_files.configure(BOT_TOKEN)
++
+ # Owner-only admin tools (/messageas, /dbdump, /status) -- comma-separated
+ # Telegram user ids. Empty/unset means disabled for everyone.
+ ADMIN_IDS = {int(x) for x in os.environ.get("DBOT_ADMIN_ID", "").split(",") if x.strip()}
+@@ -290,6 +299,36 @@
+ _user_slots: "dict[int, asyncio.Semaphore]" = {}
+ _user_pending: "dict[int, int]" = {}
+ 
++# The same link again while the first is still going (handle_link): the links
++# a person has queued or running, as (chat id, person id, platform, canonical
++# link) -> when it was marked (time.monotonic). The copy gets a 👌 and no job:
++# no allowance check, no record, no status message. A mark is made when the
++# link is accepted and cleared when its job ends (_spawn_download's finally) or
++# when the link is refused before a job starts, so the dict never holds more
++# than the jobs in flight. IN_FLIGHT_MAX_SECONDS is the belt and braces: a mark
++# older than that is ignored and overwritten, in case one was somehow never
++# cleared, so that a link can never be stuck for good.
++_in_flight: "dict[tuple[int, int, str, str], float]" = {}
++IN_FLIGHT_MAX_SECONDS = 3600
++
++
++def _already_in_flight(key) -> bool:
++    marked = _in_flight.get(key)
++    return marked is not None and time.monotonic() - marked < IN_FLIGHT_MAX_SECONDS
++
++
++async def _answer_duplicate(update: Update) -> None:
++    """The one answer to a link that is already being fetched: a 👌 on the copy.
++    A reaction rather than a line of text because it cannot spam back during a
++    paste storm and needs no translation (the first link's own status message is
++    already on screen). Switching to text later is a change to this function
++    only. Never raises: a reaction that cannot be set (an old message, a chat
++    that does not allow it) is nothing the person needs to hear about."""
++    try:
++        await update.effective_message.set_reaction("👌")
++    except Exception as exc:
++        logger.debug("Couldn't react to a repeated link (%s)", type(exc).__name__)
++
+ 
+ @asynccontextmanager
+ async def _user_slot(user_id: int):
+@@ -318,13 +357,18 @@
+         return None
+ 
+ 
+-def _spawn_download(context, update, work) -> None:
++def _spawn_download(context, update, work, in_flight=None) -> None:
+     """Run one link's whole download in a task of its own.
+ 
+     `work` is a coroutine function. The update travels with the task so that
+     anything escaping it reaches the error handler attributed to the person
+     it happened to -- which, since the handler stopped filing network errors
+-    with an update as blips, means it is reported rather than swallowed."""
++    with an update as blips, means it is reported rather than swallowed.
++
++    `in_flight` is the mark handle_link made for this link (see _in_flight),
++    cleared in the same finally that lowers the pending count: whatever the
++    job did, the next copy of the link is a job of its own. The redo and merge
++    buttons pass none."""
+     user_id = update.effective_user.id
+     _user_pending[user_id] = _user_pending.get(user_id, 0) + 1
+ 
+@@ -337,6 +381,8 @@
+                 _user_pending[user_id] = left
+             else:
+                 _user_pending.pop(user_id, None)
++            if in_flight is not None:
++                _in_flight.pop(in_flight, None)
+ 
+     context.application.create_task(run(), update=update)
+ 
+@@ -763,7 +809,8 @@
+     users_hour = await asyncio.to_thread(count_active_users_since, now - timedelta(hours=1))
+     users_since_start = await asyncio.to_thread(count_active_users_since, START_TIME)
+     await update.message.reply_text(
+-        build_status_text(START_TIME, users_hour, users_since_start) + "\n" + _cache_status_line())
++        build_status_text(START_TIME, users_hour, users_since_start) + "\n" + _cache_status_line()
++        + "\n" + _sent_files_status_line())
+ 
+ 
+ def _cache_status_line() -> str:
+@@ -775,6 +822,17 @@
+             f"{stats['hits']} hits / {stats['misses']} misses since start")
+ 
+ 
++def _sent_files_status_line() -> str:
++    """The file-id store (sent_files.py), for the owner: counts since the bot started,
++    never whose or what."""
++    stats = sent_files.stats()
++    if not stats["enabled"]:
++        return "Sent-file store: off"
++    return (f"Sent-file store: rows read {stats['hit']} fresh / {stats['stale']} stale / {stats['miss']} none; "
++            f"lookups {stats['present']} present / {stats['missing']} missing / {stats['unknown']} unknown; "
++            f"{stats['invalid']} invalid ids, {stats['stored']} stored since start")
++
++
+ # How often the in-memory provider scores are written to Postgres. A minute
+ # is short enough that a crash loses nothing that matters and long enough that
+ # a busy hour is sixty writes rather than a write per download. See
+@@ -1381,9 +1439,39 @@
+         BytesIO(data), reply_markup=reply_markup)
+ 
+ 
++@contextmanager
++def _media_source(item, path):
++    """What goes to Telegram for one file: its stored file id (sent_files.StoredFile),
++    or the file on disk, opened to be streamed."""
++    stored = getattr(item, "file_id", None)
++    if stored:
++        yield stored
++    else:
++        with open(path, "rb") as handle:
++            yield handle
++
++
++def _file_id_of(sent, kind: str, lossless: bool) -> "str | None":
++    """The file id Telegram gave the message `sent`, or None when it does not carry
++    the kind of file the form expects: a clip with no sound that Telegram turned
++    into an animation, say. Then nothing is stored for the delivery."""
++    try:
++        if lossless:
++            attached = sent.document
++        elif kind == "video":
++            attached = sent.video
++        else:
++            photos = sent.photo
++            attached = photos[-1] if photos else None
++        file_id = attached.file_id if attached is not None else None
++    except (AttributeError, IndexError, TypeError):
++        return None
++    return file_id if isinstance(file_id, str) and file_id else None
++
++
+ async def _send_media(update, context, items_with_paths, lang,
+                       lossless: bool | None = None, redeliver_token: str | None = None,
+-                      probing: "video.ProbeRun | None" = None) -> None:
++                      probing: "video.ProbeRun | None" = None) -> "list[tuple[str, str]] | None":
+     """Put what was resolved into the chat.
+ 
+     One file goes as a photo or a video so it plays inline; several go as an
+@@ -1399,6 +1487,15 @@
+     Documents and photos are not measured. `probing` is the delivery's probe
+     budget (video.ProbeRun); a delivery sent in several calls (_send_large)
+     passes the same one to each, so the budget is one per delivery.
++
++    An item may carry a stored `file_id` instead of a file on disk
++    (sent_files.StoredFile; its path is None): it is sent by that id, with the
++    same captions, keyboard and album chunks, and is not measured -- Telegram
++    already has its shape.
++
++    Returns the file id Telegram gave each file, as (kind, file id) in the order
++    the items were given, so that the delivery can be stored (sent_files.py); None
++    if any of them is missing or is not the kind of file the form expects.
+     """
+     caption = None
+     if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
+@@ -1435,37 +1532,41 @@
+ 
+     if len(items_with_paths) == 1:
+         item, path = items_with_paths[0]
+-        shape = await shape_of(path) if item.kind == "video" and not lossless else {}
++        shape = (await shape_of(path) if item.kind == "video" and not lossless
++                 and not getattr(item, "file_id", None) else {})
+         # Streamed from disk by python-telegram-bot rather than read into
+         # memory here first.
+-        with open(path, "rb") as f:
++        with _media_source(item, path) as f:
+             if lossless:
+-                await message.reply_document(
++                sent = await message.reply_document(
+                     f, filename=os.path.basename(item.filename or path),
+                     caption=caption, reply_markup=keyboard,
+                     read_timeout=120, write_timeout=120,
+                     disable_content_type_detection=True,
+                 )
+             elif item.kind == "video":
+-                await message.reply_video(
++                sent = await message.reply_video(
+                     f, caption=caption, reply_markup=keyboard,
+                     read_timeout=120, write_timeout=120,
+                     **shape,
+                 )
+             else:
+-                await message.reply_photo(
++                sent = await message.reply_photo(
+                     f, caption=caption, reply_markup=keyboard,
+                     read_timeout=120, write_timeout=120,
+                 )
+-        return
++        file_id = _file_id_of(sent, item.kind, lossless)
++        return [(item.kind, file_id)] if file_id else None
+ 
+     # An album. The caption rides on the first item of the first group, which
+     # is where Telegram shows an album's caption.
++    sent_ids: "list[tuple[str, str]] | None" = []
+     for chunk_start in range(0, len(items_with_paths), 10):
+         chunk = items_with_paths[chunk_start:chunk_start + 10]
+-        shapes = [await shape_of(path) if item.kind == "video" and not lossless else {}
++        shapes = [await shape_of(path) if item.kind == "video" and not lossless
++                  and not getattr(item, "file_id", None) else {}
+                   for item, path in chunk]
+-        handles = [open(path, "rb") for _, path in chunk]
++        handles = [getattr(item, "file_id", None) or open(path, "rb") for item, path in chunk]
+         try:
+             group = []
+             for n, ((item, path), handle) in enumerate(zip(chunk, handles)):
+@@ -1478,17 +1579,137 @@
+                     group.append(InputMediaVideo(handle, caption=cap, **shapes[n]))
+                 else:
+                     group.append(InputMediaPhoto(handle, caption=cap))
+-            await message.reply_media_group(
++            sent_group = await message.reply_media_group(
+                 group, read_timeout=120, write_timeout=120)
+         finally:
+             for handle in handles:
+-                handle.close()
++                if not isinstance(handle, str):         # a stored file id has nothing to close
++                    handle.close()
++        try:
++            sent_group = list(sent_group)
++        except TypeError:
++            sent_group = []
++        file_ids = [_file_id_of(sent, item.kind, lossless) for (item, _), sent in zip(chunk, sent_group)]
++        if sent_ids is not None and len(sent_group) == len(chunk) and all(file_ids):
++            sent_ids += [(item.kind, file_id) for (item, _), file_id in zip(chunk, file_ids)]
++        else:
++            sent_ids = None
+     # Telegram allows no inline keyboard on a media group, so the button that
+     # would have been under the album goes on one line after it.
+     if keyboard is not None:
+         await message.reply_text(
+             i18n.t(lang, "album_delivered", count=len(items_with_paths)),
+             reply_markup=keyboard)
++    return sent_ids
++
++
++async def _store_sent_files(user_id: int, platform: str, url: str, lossless: bool, sent) -> None:
++    """After a delivery from bytes: keep the file ids Telegram gave (sent_files.py),
++    so the next person who sends this post gets it without a download. Only when the
++    store is on, the sender is one person's, and the delivery is 1 to 10 files with an
++    id each (`sent`, from _send_media: None if any is missing). Never raises: a
++    failed write is a line in the log and nothing else, and never touches the delivery."""
++    if not sent_files.usable(user_id) or not sent:
++        return
++    try:
++        text = sent_files.encode_items(sent)
++        if text is None:
++            return
++        await asyncio.to_thread(sent_files_put, sent_files.post_key(platform, url, lossless), text)
++        sent_files.note("stored")
++    except Exception as exc:
++        logger.warning("The sent-file store could not be written (%s)", type(exc).__name__)
++
++
++async def _forget_sent_files(key: str) -> None:
++    try:
++        await asyncio.to_thread(sent_files_drop, key)
++    except Exception as exc:
++        logger.warning("The sent-file store could not drop a row (%s)", type(exc).__name__)
++
++
++async def _resend_by_file_id(update, context, lang, status, platform: str, url: str,
++                             lossless_override: "bool | None") -> "bool | None":
++    """Send this post again from the file ids stored when it was last delivered
++    (sent_files.py), if there are any and the post is known to be public still.
++
++    None: nothing was sent, carry on with the normal path (no row, a row that cannot
++    be read, a post that is gone or cannot be confirmed, an id Telegram refused).
++    True: it was delivered. False: the send failed and the person has been told.
++
++    A row confirmed within the last DBOT_FILEID_CONFIRM_HOURS is sent as it is. An
++    older one is first checked with resolvers.lookup: present, and it is sent and the
++    confirmation renewed; missing, and the row is deleted; unknown, and the row is
++    kept but an unconfirmed post is never sent. The send mirrors the delivery-cache
++    hit in _resolve_and_send, step for step."""
++    user_id = update.effective_user.id
++    if not sent_files.usable(user_id):
++        return None
++    try:
++        if lossless_override is None:
++            lossless = await asyncio.to_thread(get_lossless_enabled, user_id)
++        else:
++            lossless = lossless_override
++        key = sent_files.post_key(platform, url, lossless)
++        row = await asyncio.to_thread(sent_files_get, key)
++    except Exception as exc:
++        # A database that hiccups costs a normal fetch, never a failed delivery.
++        logger.warning("The sent-file store could not be read (%s)", type(exc).__name__)
++        sent_files.note("miss")
++        return None
++    pairs = sent_files.decode_items(row[0]) if row else None
++    if pairs is None:
++        sent_files.note("miss")
++        return None
++    fresh = sent_files.is_fresh(row[1])
++    sent_files.note("hit" if fresh else "stale")
++
++    async with lifecycle.busy(update.effective_chat.id, i18n.t(lang, "restarting_send_again")):
++        if not fresh:
++            try:
++                verdict = await resolvers.lookup(platform, url)
++            except Exception as exc:
++                logger.warning("The post could not be looked up (%s)", type(exc).__name__)
++                verdict = "unknown"
++            sent_files.note(verdict if verdict in ("present", "missing") else "unknown")
++            if verdict == "missing":
++                await _forget_sent_files(key)
++                return None
++            if verdict != "present":
++                return None
++        token = _remember_delivery(context, platform, url, lossless)
++        try:
++            await _send_media(update, context, [(file, None) for file in sent_files.stored_files(pairs)], lang,
++                              lossless=lossless, redeliver_token=token)
++            await status.delete(context.bot)
++            note_job(True)
++        except Exception as exc:
++            if sent_files.is_invalid_file_id(exc):
++                # Telegram no longer knows these ids. Nothing was delivered (one file, or
++                # one chunk of at most ten), so: forget them, and fetch the post as usual
++                # in this same job -- the status message is still up.
++                sent_files.note("invalid")
++                logger.info("A stored file id was refused (%s)", type(exc).__name__)
++                context.user_data.get("redeliver", {}).pop(token, None)
++                await _forget_sent_files(key)
++                return None
++            note_job(False)
++            # The kind of failure only, in the log and to the person: the text of an
++            # error from these ids could carry one. The row stays: a blocked bot or a
++            # flood wait says nothing about the ids.
++            logger.warning("Delivering %s from the stored file ids failed (%s)", platform,
++                           type(exc).__name__)
++            await status.set(context.bot,
++                             i18n.t(lang, "download_failed", error=type(exc).__name__),
++                             **NO_PREVIEW)
++            return False
++    try:
++        # Used today. Seen public just now only if a lookup said so: a fresh row is
++        # trusted, not renewed, which is what makes "gone within 12 hours" true.
++        await asyncio.to_thread(sent_files_used if fresh else sent_files_confirmed, key)
++    except Exception as exc:
++        logger.warning("The sent-file store could not be updated (%s)", type(exc).__name__)
++    return True
+ 
+ 
+ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
+@@ -1528,6 +1749,16 @@
+     else:
+         await status.set(context.bot, i18n.t(lang, "fetching"))
+ 
++    # Sent before, to anybody? Then it goes again by the file ids Telegram gave
++    # (sent_files.py): no slot, no disk, no route asked for media. Before the slots
++    # on purpose -- it uploads nothing, and the flood gate, the waiting limit and
++    # the allowance already bound how many can ask. None: carry on as usual.
++    resent = await _resend_by_file_id(update, context, lang, status, platform, url, lossless_override)
++    if resent is not None:
++        if resent:
++            await _after_send(update, context, lang)
++        return resent
++
+     # Say so rather than leaving them watching a "Fetching..." that has not
+     # actually started yet.
+     if _slots().locked() or _user_slots_full(update.effective_user.id):
+@@ -1554,10 +1785,11 @@
+                 else:
+                     delivered_lossless = lossless_override
+                 token = _remember_delivery(context, platform, url, delivered_lossless)
+-                await _send_media(update, context, list(cached.items), lang,
+-                                  lossless=delivered_lossless, redeliver_token=token)
++                sent = await _send_media(update, context, list(cached.items), lang,
++                                         lossless=delivered_lossless, redeliver_token=token)
+                 await status.delete(context.bot)
+                 note_job(True)
++                await _store_sent_files(update.effective_user.id, platform, url, delivered_lossless, sent)
+             except Exception as exc:
+                 note_job(False)
+                 # The kind of failure only, in the log and to the person: the text
+@@ -1613,8 +1845,8 @@
+                 else:
+                     delivered_lossless = lossless_override
+                 token = _remember_delivery(context, platform, url, delivered_lossless)
+-                await _send_media(update, context, list(zip(items, paths)), lang,
+-                                  lossless=delivered_lossless, redeliver_token=token)
++                sent = await _send_media(update, context, list(zip(items, paths)), lang,
++                                         lossless=delivered_lossless, redeliver_token=token)
+                 await status.delete(context.bot)
+                 note_job(True)
+                 # Delivered, so the cache may take the files (only if this is still
+@@ -1626,6 +1858,7 @@
+                     note_tap("cache.kept" if kept else "cache.not_kept")      # counts only
+                 if kept:
+                     paths.clear()
++                await _store_sent_files(update.effective_user.id, platform, url, delivered_lossless, sent)
+             except net.TooLarge as exc:
+                 if not large_files.CONFIGURED:
+                     await status.set(context.bot, str(exc), **NO_PREVIEW)
+@@ -1863,51 +2096,73 @@
+     elif found == delivery_cache.NOTED_AGAIN_NOT_CACHED:
+         note_tap("link.again.not_cached")
+ 
+-    # Asked once, here, for every platform. The gate used to live inside the
+-    # video path only -- which covers Instagram, TikTok and YouTube, and
+-    # misses the paths that fetch an image and send it without ever reaching
+-    # that function: a Pinterest pin, a Reddit image post and a Twitter photo
+-    # set all sailed straight through an announced update. They are quicker
+-    # than a video download, but "quick" is not the test: a redeploy lands
+-    # whenever it lands, and a fetch that started ten seconds before it ends
+-    # in silence exactly the same way.
+-    lang = await i18n.get_lang(update.effective_user.id, context)
+-    refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
+-    if refusal:
+-        await update.message.reply_text(refusal)
+-        return
+-
+-    # A share of the day, per person. MAX_CONCURRENT_DOWNLOADS above stops
+-    # the box falling over; this is the different problem of one person
+-    # holding both of its slots all afternoon while everybody else queues
+-    # behind them. Checked here rather than inside the download so a refused
+-    # link costs one query instead of a fetch -- and here rather than in each
+-    # of the three branches below, because the Reddit and Twitter paths cost
+-    # the same fetches and used to be the way past a limit that only the
+-    # video path enforced.
+-    # Checked before the allowance, so a link refused for being one too many
+-    # does not also count against the day's share.
+-    if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
+-        await update.message.reply_text(
+-            i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
+-        return
+-    allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
+-    if not allowance["allowed"]:
+-        await update.message.reply_text(_allowance_message(lang, allowance))
++    # The same person, in the same chat, sending the same link while a job they
++    # started from a link message for it is still queued or running: no new
++    # job, no allowance check, no record, no status message and no "busy" -- one
++    # 👌 on the copy (_answer_duplicate). The check and the mark are one
++    # synchronous stretch, nothing awaited between them, so that two copies
++    # handled at the same moment cannot both get through. Before everything
++    # below, which would each answer or charge for it.
++    key = (update.effective_chat.id, update.effective_user.id, platform, url)
++    if _already_in_flight(key):
++        await _answer_duplicate(update)
+         return
+-    await asyncio.to_thread(record_download, update.effective_user.id, platform)
+-
+-    async def work():
+-        if platform == "reddit":
+-            await _handle_reddit(update, context, url)
+-        elif platform == "twitter":
+-            await _handle_twitter(update, context, url)
+-        else:
+-            await _resolve_and_send(update, context, platform, url)
++    _in_flight[key] = time.monotonic()
++    spawned = False
++    try:
++        # Asked once, here, for every platform. The gate used to live inside the
++        # video path only -- which covers Instagram, TikTok and YouTube, and
++        # misses the paths that fetch an image and send it without ever reaching
++        # that function: a Pinterest pin, a Reddit image post and a Twitter photo
++        # set all sailed straight through an announced update. They are quicker
++        # than a video download, but "quick" is not the test: a redeploy lands
++        # whenever it lands, and a fetch that started ten seconds before it ends
++        # in silence exactly the same way.
++        lang = await i18n.get_lang(update.effective_user.id, context)
++        refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
++        if refusal:
++            await update.message.reply_text(refusal)
++            return
++
++        # A share of the day, per person. MAX_CONCURRENT_DOWNLOADS above stops
++        # the box falling over; this is the different problem of one person
++        # holding both of its slots all afternoon while everybody else queues
++        # behind them. Checked here rather than inside the download so a refused
++        # link costs one query instead of a fetch -- and here rather than in each
++        # of the three branches below, because the Reddit and Twitter paths cost
++        # the same fetches and used to be the way past a limit that only the
++        # video path enforced.
++        # Checked before the allowance, so a link refused for being one too many
++        # does not also count against the day's share.
++        if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
++            await update.message.reply_text(
++                i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
++            return
++        allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
++        if not allowance["allowed"]:
++            await update.message.reply_text(_allowance_message(lang, allowance))
++            return
++        await asyncio.to_thread(record_download, update.effective_user.id, platform)
++
++        async def work():
++            if platform == "reddit":
++                await _handle_reddit(update, context, url)
++            elif platform == "twitter":
++                await _handle_twitter(update, context, url)
++            else:
++                await _resolve_and_send(update, context, platform, url)
+ 
+-    # Returns straight away: the next link, and everybody else's, is read now
+-    # rather than after this one has finished uploading.
+-    _spawn_download(context, update, work)
++        # Returns straight away: the next link, and everybody else's, is read now
++        # rather than after this one has finished uploading.
++        _spawn_download(context, update, work, in_flight=key)
++        spawned = True
++    finally:
++        # Every way out that did not start the job -- the maintenance refusal,
++        # the full queue, the allowance, an exception, a create_task that
++        # raised -- takes the mark back. A job that started clears its own
++        # (_spawn_download's finally).
++        if not spawned:
++            _in_flight.pop(key, None)
+ 
+ 
+ async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/downloader_bot/db.py	2026-10-09 19:42:05.000000000 +0900
++++ MumuBots2.2.0/downloader_bot/db.py	2026-10-17 14:35:01.671953800 +0900
+@@ -429,6 +429,20 @@
+             )
+             """
+         )
++        # Telegram's file ids for what this bot has sent, so the same post can be
++        # sent again without being downloaded again (sent_files.py has the whole
++        # argument). The row holds nothing about people: the key is a keyed hash of
++        # the post, not the post and not the person; the day is a day, not a moment.
++        conn.execute(
++            """
++            CREATE TABLE IF NOT EXISTS sent_files (
++                post_key     TEXT PRIMARY KEY,
++                items        TEXT NOT NULL,
++                confirmed_at TIMESTAMPTZ NOT NULL,
++                last_used    DATE NOT NULL DEFAULT CURRENT_DATE
++            )
++            """
++        )
+         conn.commit()
+ 
+ 
+@@ -847,6 +861,77 @@
+         conn.commit()
+ 
+ 
++# ---------- Telegram file ids of what was sent (sent_files.py) ----------
++
++def _days_from_env(name: str, default: int) -> int:
++    """A whole number of days, `default` when it is unset, unreadable or under 1:
++    a typo here must not stop the bot starting, and 0 must not delete every row."""
++    try:
++        days = int(os.environ.get(name) or default)
++    except ValueError:
++        return default
++    return days if days >= 1 else default
++
++
++# Rows nobody has used for this long are deleted by prune_old_data.
++SENT_FILES_KEEP_DAYS = _days_from_env("DBOT_FILEID_KEEP_DAYS", 90)
++
++
++def sent_files_get(post_key: str):
++    """(items text, confirmed_at) of this post's row, or None. A read: any error
++    is the caller's to treat as "no row"."""
++    with pooled_read() as conn:
++        row = conn.execute(
++            "SELECT items, confirmed_at FROM sent_files WHERE post_key = %s",
++            (post_key,),
++        ).fetchone()
++    return (row[0], row[1]) if row else None
++
++
++def sent_files_put(post_key: str, items_text: str) -> None:
++    """Store a delivery: the ids, seen public now, used today. Replaces what was there."""
++    with pooled() as conn:
++        conn.execute(
++            """
++            INSERT INTO sent_files (post_key, items, confirmed_at, last_used)
++            VALUES (%s, %s, now(), CURRENT_DATE)
++            ON CONFLICT (post_key) DO UPDATE SET
++                items = EXCLUDED.items,
++                confirmed_at = now(),
++                last_used = CURRENT_DATE
++            """,
++            (post_key, items_text),
++        )
++        conn.commit()
++
++
++def sent_files_confirmed(post_key: str) -> None:
++    """The post was seen public just now (a lookup found it), and the row was used."""
++    with pooled() as conn:
++        conn.execute(
++            "UPDATE sent_files SET confirmed_at = now(), last_used = CURRENT_DATE WHERE post_key = %s",
++            (post_key,),
++        )
++        conn.commit()
++
++
++def sent_files_used(post_key: str) -> None:
++    """The row was used today. confirmed_at stays: only a fetch or a lookup proves
++    that the post is still public."""
++    with pooled() as conn:
++        conn.execute(
++            "UPDATE sent_files SET last_used = CURRENT_DATE WHERE post_key = %s",
++            (post_key,),
++        )
++        conn.commit()
++
++
++def sent_files_drop(post_key: str) -> None:
++    with pooled() as conn:
++        conn.execute("DELETE FROM sent_files WHERE post_key = %s", (post_key,))
++        conn.commit()
++
++
+ def prune_old_data() -> int:
+     """Returns how many rows were removed. Safe to run at any time."""
+     with pooled() as conn:
+@@ -863,6 +948,14 @@
+             (DOWNLOAD_RETENTION_DAYS,),
+         )
+         removed += cur.rowcount
++        # File ids nobody has used for DBOT_FILEID_KEEP_DAYS. A row that is used is
++        # touched at most once a day (a date, not a moment), so "unused for N days"
++        # is exact to the day.
++        cur = conn.execute(
++            "DELETE FROM sent_files WHERE last_used < CURRENT_DATE - make_interval(days => %s)",
++            (SENT_FILES_KEEP_DAYS,),
++        )
++        removed += cur.rowcount
+         conn.commit()
+     return removed
+ 
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/downloader_bot/platforms.py	2026-10-08 10:34:42.000000000 +0900
++++ MumuBots2.2.0/downloader_bot/platforms.py	2026-10-17 14:23:41.114263100 +0900
+@@ -13,6 +13,7 @@
+ """
+ import math
+ import re
++from urllib.parse import parse_qsl, urlsplit
+ 
+ import httpx
+ 
+@@ -21,7 +22,7 @@
+ 
+ __all__ = [
+     "FetchError", "client", "close_client", "fetch_bytes",
+-    "detect_platform", "ANY_LINK_RE",
++    "detect_platform", "canonical_link", "ANY_LINK_RE",
+     "fetch_reddit_post", "reddit_is_media", "reddit_direct_image_url",
+     "fetch_tweet_syndication",
+ ]
+@@ -85,13 +86,144 @@
+ )
+ 
+ 
++# ---------- The same post, written one way ----------
++#
++# Every share sheet appends its own trackers to a link -- Instagram's `?igsh=`
++# and `?igshid=`, YouTube's `?si=`, TikTok's `?is_from_webapp=1&sender_device=pc`,
++# `utm_*` everywhere -- and a different one for every person who shares it. So
++# the same post arrived as a different string each time, and everything keyed on
++# the string (the five-minute delivery cache, the redo memory, the "same link
++# again" check, the file-ID store) treated one post as many. detect_platform is
++# the single place a link enters the bot, so it is the place to write it one way.
++#
++# An allow-list, not a block-list: each rule below keeps what identifies the post
++# and drops everything else. A parameter nobody has seen yet is dropped, which is
++# the safe direction (a post is never identified by a query string we did not
++# list). Where a rule cannot find what it needs the link is returned unchanged:
++# a link this function does not understand must still go through as it was sent.
++
++# What the `\S+` of the patterns above swallows from prose: "look at this
++# https://...ABC/." or "(https://...)". A post code never ends with one.
++_TRAILING_PUNCT = ".,;:!?)]}>»\"'"
++
++_IG_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
++_IG_POST = re.compile(r"/(p|reel|reels|tv)/([A-Za-z0-9_-]+)(?:/|$)")
++# `/<username>/reel/<CODE>/`. `share` is Instagram's own prefix for a redirecting
++# share link, whose id is not the post's code, so it is not a username.
++_IG_USER_POST = re.compile(r"/([^/]+)" + _IG_POST.pattern)
++_IG_NOT_USERS = {"share", "stories"}
++
++_TT_HOSTS = {"tiktok.com", "www.tiktok.com", "m.tiktok.com"}
++_TT_SHORT_HOSTS = {"vm.tiktok.com", "vt.tiktok.com"}
++
++_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
++_YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
++
++_TW_HOSTS = {"twitter.com", "www.twitter.com", "mobile.twitter.com",
++             "x.com", "www.x.com", "mobile.x.com"}
++_TW_STATUS = re.compile(r"/(\w+)/status(?:es)?/(\d+)(?:/|$)")
++
++_RD_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "m.reddit.com"}
++
++# The same shape PINTEREST_RE accepts as a host: an optional country prefix, then
++# pinterest + a top-level domain, or pin.it.
++_PIN_HOST = re.compile(
++    r"(?:[a-z0-9-]{1,8}\.)?"
++    r"(?:pinterest\.(?:com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})|pin\.it)"
++)
++_PIN_POST = re.compile(r"/pin/(\d+)(?:/|$)")
++
++
++def _trim(text: str) -> str:
++    return text.rstrip(_TRAILING_PUNCT)
++
++
++def _keep_path(host: str, path: str) -> str:
++    return f"https://{host}{_trim(path)}"
++
++
++def _canonical(platform: str, url: str) -> str:
++    parts = urlsplit(_trim(url.strip()))
++    host = (parts.hostname or "").lower()
++    path = parts.path
++
++    if platform == "instagram" and host in _IG_HOSTS:
++        m = _IG_USER_POST.match(path)
++        if m and m.group(1).lower() in _IG_NOT_USERS:
++            m = None
++        if m:
++            kind, code = m.group(2), m.group(3)
++        else:
++            m = _IG_POST.match(path)
++            kind, code = (m.group(1), m.group(2)) if m else ("", "")
++        if kind:
++            return f"https://www.instagram.com/{'reel' if kind == 'reels' else kind}/{code}/"
++        return _keep_path("www.instagram.com", path)
++
++    if platform == "tiktok":
++        if host in _TT_HOSTS:
++            return _keep_path("www.tiktok.com", path)
++        if host in _TT_SHORT_HOSTS:
++            return _keep_path(host, path)
++
++    if platform == "youtube":
++        video = ""
++        if host in _YT_HOSTS:
++            segments = [s for s in path.split("/") if s]
++            if path.rstrip("/") == "/watch":
++                values = [v for k, v in parse_qsl(parts.query, keep_blank_values=True) if k == "v"]
++                video = values[0] if values else ""
++            elif len(segments) >= 2 and segments[0] in ("shorts", "live"):
++                video = segments[1]
++        elif host == "youtu.be":
++            segments = [s for s in path.split("/") if s]
++            video = segments[0] if segments else ""
++        if _YT_ID.fullmatch(video):
++            return f"https://www.youtube.com/watch?v={video}"
++        return url
++
++    if platform == "twitter" and host in _TW_HOSTS:
++        m = _TW_STATUS.match(path)
++        if m:
++            return f"https://x.com/{m.group(1)}/status/{m.group(2)}"
++        return url
++
++    if platform == "reddit":
++        if host in _RD_HOSTS:
++            return _keep_path("www.reddit.com", path)
++        if host == "redd.it":
++            return _keep_path("redd.it", path)
++
++    if platform == "pinterest" and _PIN_HOST.fullmatch(host):
++        m = _PIN_POST.match(path)
++        if m and host != "pin.it":
++            return f"https://www.pinterest.com/pin/{m.group(1)}/"
++        return _keep_path(host, path)
++
++    return url
++
++
++def canonical_link(platform: str, url: str) -> str:
++    """The link written the one way that identifies the post: share trackers,
++    query strings and fragments gone, the host and path normalised, the
++    punctuation a sentence leaves on the end of a link taken off. Pure, no
++    network, and it never raises -- anything it cannot read comes back as it
++    was given. Writing the result through it again changes nothing."""
++    try:
++        return _canonical(platform, url)
++    except Exception:  # noqa: BLE001 - a link we cannot read goes through as sent
++        return url
++
++
+ def detect_platform(text: str) -> tuple[str, str] | None:
+-    """Returns (platform, matched_url) for the first recognized link in text,
+-    or None if nothing matches."""
++    """Returns (platform, canonical_link) for the first recognized link in
++    text, or None if nothing matches. The link comes back with its share
++    trackers removed (canonical_link), so one post is one string wherever it
++    was shared from."""
+     for name, pattern in _PLATFORM_PATTERNS:
+         m = pattern.search(text)
+         if m:
+-            return name, m.group(0)
++            return name, canonical_link(name, m.group(0))
+     return None
+ 
+ 
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/downloader_bot/resolvers.py	2026-10-09 14:19:57.000000000 +0900
++++ MumuBots2.2.0/downloader_bot/resolvers.py	2026-10-17 14:35:10.770135800 +0900
+@@ -1122,6 +1122,44 @@
+     raise NothingWorked(platform, failures)
+ 
+ 
++async def lookup(platform: str, url: str) -> str:
++    """Is the post still public? "present", "missing" or "unknown" -- asked of the
++    routes without taking any media (sent_files.py: a stored file id is trusted
++    only while the post was seen public in the last few hours).
++
++    The platform's routes in their usual order, each under its usual limit, but
++    yt-dlp is never asked: it downloads inside resolve (video.py), and the whole
++    point here is to not download. And nothing is recorded -- no health score, no
++    cooldown -- because a deleted post is the post's failure, not the route's, and
++    a question is not traffic (the same rule as probe_all).
++
++    "present" as soon as one route returns an item. "missing" only if every route
++    asked said the post is missing: one route's word is not enough (tikwm reports
++    a rate limit as missing). Anything else -- a timeout, a network error, a mix of
++    answers, or no route left once yt-dlp is left out (Reddit has only yt-dlp) --
++    is "unknown", and the caller then does not trust the stored file ids."""
++    asked = said_missing = 0
++    skipped: set[str] = set()
++    for name, fn in _ordered(platform):
++        if name.startswith("ytdlp:") or name in skipped:
++            continue
++        asked += 1
++        try:
++            found = await asyncio.wait_for(fn(url), timeout=_timeout_for(name))
++        except ProviderFailed as exc:
++            skipped.update(exc.skip)
++            if exc.kind == "missing":
++                said_missing += 1
++            continue
++        except Exception as exc:        # a timeout, a network error, a route's own bug: no answer
++            logger.info("lookup: route %s gave no answer for %s (%s)", name, platform, type(exc).__name__)
++            continue
++        if found.items:
++            return "present"
++        said_missing += 1               # a route that returns nothing says what _resolve counts it as
++    return "missing" if asked and said_missing == asked else "unknown"
++
++
+ # ---------------------------------------------------------------------------
+ # Asking every route, on purpose
+ # ---------------------------------------------------------------------------
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/downloader_bot/sent_files.py	1970-01-01 09:00:00.000000000 +0900
++++ MumuBots2.2.0/downloader_bot/sent_files.py	1970-01-01 09:00:00.000000000 +0900
+@@ -0,0 +1,209 @@
++"""Telegram's file IDs for what this bot has already sent, kept so the same post can be sent
++again without being downloaded again.
++
++Telegram gives every file the bot sends a `file_id`, and the same bot can send that id to any
++chat without uploading anything. So a post this bot has delivered once, to anybody, is
++delivered again from its ids: no route is asked for the media, nothing is downloaded, nothing
++is uploaded. The five-minute delivery cache (delivery_cache.py) does the same for one person
++and a few minutes; this one is for everybody and days.
++
++What it holds, and what it does not (PRIVACY.md says so too). One row per post and per form of
++delivery, and the row holds nothing about people:
++
++  * the key is a keyed hash of "version | platform | link | form" -- not the link, and not the
++    person. The hash key comes from the bot's token, so nobody who can read the table can
++    compute the key of a post they are curious about, and a rotated token makes every old
++    row unreachable (the sweep deletes them). No new secret to deploy.
++  * the value is the list of (kind, file id) in delivery order, the last time the post was
++    seen public, and the day it was last used. No user id, chat id, name, link, platform or
++    caption anywhere. /deletemydata has nothing of a person's to delete here.
++  * `form` is "file" when the delivery is lossless (everything went as documents) and "media"
++    otherwise: Telegram cannot send a video's id as a document, so they are two rows.
++
++Telegram does not say how long an id lasts, so the stored ids are always tried and an id that
++Telegram refuses as invalid deletes the row and the post is fetched as usual. What the store
++must never do is send a post that was removed: a row is trusted for CONFIRM_HOURS after the
++post was last seen public (by a fetch, or by resolvers.lookup), and only then asked again.
++
++This module has no database and no Telegram in it (is_invalid_file_id imports the error class
++only when it is called): bot.py makes the database calls and the sends, and hands the results
++here. The clock can be replaced (`_clock`) so that tests need not wait.
++"""
++import hashlib
++import hmac
++import json
++import logging
++import os
++from dataclasses import dataclass
++from datetime import datetime, timedelta, timezone
++
++import delivery_cache
++
++logger = logging.getLogger(__name__)
++
++# Bumping this makes every existing row unreachable at once (a change in how files are made,
++# say); the sweep deletes them later.
++STORE_VERSION = 1
++
++# One chunk of an album. A post with more items than this is not stored: it would be sent in
++# several chunks, and an id that is invalid in the second would re-send the first.
++MAX_ITEMS = 10
++
++KINDS = ("video", "photo")
++
++
++def _whole_number(name: str, default: int):
++    """The number in the environment, `default` when it is not set, None when it is not a
++    whole number."""
++    raw = os.environ.get(name)
++    if raw is None or not raw.strip():
++        return default
++    try:
++        return int(raw)
++    except ValueError:
++        return None
++
++
++def read_settings() -> "tuple[bool, int]":
++    """(on, confirm hours) from the environment.
++
++    DBOT_SENT_FILES: 1 (the default) is on, 0 is off, and so is anything that is not a whole
++    number -- whoever typed "off" meant no, like DBOT_CACHE_SECONDS. DBOT_FILEID_CONFIRM_HOURS:
++    12, and 12 again for a value that is unreadable or under 1: a typo here must not stop the
++    bot starting, and must not make the check never happen. (How long unused rows are kept,
++    DBOT_FILEID_KEEP_DAYS, is read where they are deleted: db.py.)"""
++    flag = _whole_number("DBOT_SENT_FILES", 1)
++    hours = _whole_number("DBOT_FILEID_CONFIRM_HOURS", 12)
++    return (flag is not None and flag > 0), (hours if hours is not None and hours >= 1 else 12)
++
++
++ENABLED, CONFIRM_HOURS = read_settings()
++
++_clock = lambda: datetime.now(timezone.utc)      # noqa: E731 - replaced by tests
++
++_key: "bytes | None" = None
++
++
++def configure(token) -> None:
++    """The hash key, from the bot's token. Without a token there is no key, and the store is
++    off: a key anybody can guess would make the rows readable to anybody who sees them."""
++    global _key
++    _key = hashlib.sha256(b"dbot-sent-files|" + token.encode()).digest() if token else None
++
++
++def enabled() -> bool:
++    return ENABLED and _key is not None
++
++
++def usable(user_id) -> bool:
++    """Whether the store may be read or written for this sender: it is on, and the id is one
++    person's. A sender id that stands for many people (an anonymous group admin, a channel,
++    Telegram's own service account) never reads or writes it, as with the delivery cache."""
++    return enabled() and user_id not in delivery_cache.SHARED_SENDER_IDS
++
++
++def post_key(platform: str, url: str, lossless: bool) -> str:
++    """The row of this post in this form: a hex HMAC-SHA256. See the module docstring."""
++    form = "file" if lossless else "media"
++    message = f"{STORE_VERSION}|{platform}|{url}|{form}".encode("utf-8")
++    return hmac.new(_key, message, hashlib.sha256).hexdigest()
++
++
++# ---------------------------------------------------------------------------
++# What a row holds
++# ---------------------------------------------------------------------------
++
++@dataclass(frozen=True)
++class StoredFile:
++    """One stored file as bot._send_media takes it in place of a MediaItem: what it was (the
++    kind of the item sent, whatever the form) and the id to send it by."""
++    kind: str
++    file_id: str
++    filename: str = "download"
++
++
++def _valid_pairs(pairs) -> bool:
++    if not isinstance(pairs, (list, tuple)) or not 1 <= len(pairs) <= MAX_ITEMS:
++        return False
++    for pair in pairs:
++        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
++            return False
++        kind, file_id = pair
++        if kind not in KINDS or not isinstance(file_id, str) or not file_id:
++            return False
++    return True
++
++
++def encode_items(pairs) -> "str | None":
++    """[(kind, file id), ...] as the JSON text of a row, or None if it is not something a row
++    may hold (1 to 10 items, kind video or photo, an id that is a non-empty string)."""
++    if not _valid_pairs(pairs):
++        return None
++    return json.dumps([[kind, file_id] for kind, file_id in pairs], separators=(",", ":"))
++
++
++def decode_items(text) -> "list[tuple[str, str]] | None":
++    """The pairs in a row, or None for anything that is not a list of 1 to 10 [kind, id]: such
++    a row is treated as if it were absent."""
++    try:
++        pairs = json.loads(text)
++    except (TypeError, ValueError):
++        return None
++    if not _valid_pairs(pairs):
++        return None
++    return [(kind, file_id) for kind, file_id in pairs]
++
++
++def stored_files(pairs) -> list:
++    return [StoredFile(kind, file_id) for kind, file_id in pairs]
++
++
++def is_fresh(confirmed_at, now=None) -> bool:
++    """Whether the post was seen public less than CONFIRM_HOURS ago. A time in the future
++    (the two clocks disagree) is fresh within five minutes of it and no more, so that a
++    wrong clock cannot keep a post trusted for ever; anything that is not a time is not fresh."""
++    if not isinstance(confirmed_at, datetime):
++        return False
++    now = now if now is not None else _clock()
++    if confirmed_at.tzinfo is None:
++        confirmed_at = confirmed_at.replace(tzinfo=timezone.utc)
++    age = now - confirmed_at
++    return -timedelta(minutes=5) <= age < timedelta(hours=CONFIRM_HOURS)
++
++
++# What Telegram's refusal of an id says (lowercased). Anything else -- Forbidden (the person
++# blocked the bot), RetryAfter (flood), TimedOut, NetworkError, any other BadRequest -- is an
++# ordinary send failure that says nothing about the id.
++_INVALID_ID_MARKERS = (
++    "wrong file identifier", "wrong remote file identifier", "file_id",
++    "type of file mismatch", "file reference", "media_empty",
++)
++
++
++def is_invalid_file_id(exc: BaseException) -> bool:
++    from telegram.error import BadRequest
++    if not isinstance(exc, BadRequest):
++        return False
++    message = str(exc).lower()
++    return any(marker in message for marker in _INVALID_ID_MARKERS)
++
++
++# ---------------------------------------------------------------------------
++# Counts for /status (since the bot started; nothing about who or what)
++# ---------------------------------------------------------------------------
++
++_counts = {"hit": 0, "stale": 0, "miss": 0, "present": 0, "missing": 0, "unknown": 0,
++           "invalid": 0, "stored": 0}
++
++
++def note(name: str) -> None:
++    _counts[name] += 1
++
++
++def stats() -> dict:
++    return dict(_counts, enabled=enabled())
++
++
++def reset_stats() -> None:
++    for name in _counts:
++        _counts[name] = 0
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/manager_bot/bot.py	2026-10-12 05:02:40.000000000 +0900
++++ MumuBots2.2.0/manager_bot/bot.py	2026-10-17 15:00:53.923982500 +0900
+@@ -724,6 +724,7 @@
+     "providers": "1.2.3",
+     "stars": "1.2.3",
+     "crashtest": "1.2.3",
++    "gift": "2.2.0",
+ }
+ 
+ 
+@@ -2838,6 +2839,8 @@
+ <b>Money</b>
+ /balance [id] [±n|=n] — see or change a credit balance
+ /addcredit &lt;id&gt; &lt;amount&gt; — put ⚡ into an account
++/gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day&gt; — bonus ⚡ for everyone,
++    once each: each bot counts first, and nothing is given until you say so
+ /donations — paid donations per bot
+ /stars — ConvertBot's Stars: paid, refunded, recent
+ 
+@@ -3083,6 +3086,86 @@
+     )
+ 
+ 
++# ---- /gift, which counts before it gives ----------------------------------
++# Bonus credit for everyone a bot knows, once per person across the family
++# (family_link.grant_bonus_once). Like /broadcast it reaches everyone and cannot
++# be taken back, and it is money: so the first step only asks each bot to count,
++# and the giving waits for a button.
++
++GIFT_PENDING = "gift_pending"
++
++
++async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
++    """/gift <bot|all> <key> <credits> <last day YYYY-MM-DD>"""
++    if not await guard(update, context):
++        return
++    if len(context.args) != 4:
++        await update.message.reply_text(
++            "Usage: /gift &lt;bot|all&gt; &lt;key&gt; &lt;credits&gt; &lt;last day YYYY-MM-DD&gt;\n"
++            "e.g. <code>/gift all gift-100-users 100 2027-01-15</code>\n"
++            f"Known: {bot_list_hint()}",
++            parse_mode=ParseMode.HTML,
++        )
++        return
++    targets = _targets(context.args[0])
++    if targets is None:
++        await update.message.reply_text(
++            f"No such bot: {context.args[0]}. Known: {bot_list_hint()}"
++        )
++        return
++    parsed = family_link._gift_args(context.args[1:])
++    if isinstance(parsed, str):
++        await update.message.reply_text(parsed)
++        return
++    key, amount, _expires, raw_day = parsed
++    args = f"{key} {amount} {raw_day}"
++    for bot in targets:
++        await asyncio.to_thread(
++            db.queue_command, bot["id"], "gift", args,
++            update.effective_user.id, update.effective_chat.id,
++        )
++    context.user_data[GIFT_PENDING] = {"bots": [b["id"] for b in targets], "args": args}
++    names = ", ".join(b["name"] for b in targets)
++    kb = InlineKeyboardMarkup([[
++        InlineKeyboardButton("Give it", callback_data="gift:go"),
++        InlineKeyboardButton("Cancel", callback_data="gift:cancel"),
++    ]])
++    await update.message.reply_text(
++        f"🎁 <b>{amount} ⚡ of bonus credit, good until {html.escape(raw_day)}</b>, "
++        f"to everyone {html.escape(names)} know(s), once per person "
++        f"(key <code>{html.escape(key)}</code>).\n\n"
++        f"Each bot is counting now and will report how many people it would give "
++        f"it to, with the notice they would read. Nothing is given until you press "
++        f"<b>Give it</b>, and that cannot be taken back.",
++        parse_mode=ParseMode.HTML, reply_markup=kb,
++    )
++
++
++async def gift_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
++    query = update.callback_query
++    if not await guard(update, context):
++        return
++    pending = context.user_data.pop(GIFT_PENDING, None)
++    await query.answer()
++    if query.data != "gift:go" or not pending:
++        await edit_in_place(
++            query.message, context.bot,
++            "Cancelled — nothing was given." if pending else
++            "That gift is no longer waiting. Send /gift again.",
++        )
++        return
++    for bot_id in pending["bots"]:
++        await asyncio.to_thread(
++            db.queue_command, bot_id, "gift", pending["args"] + " --go",
++            update.effective_user.id, update.effective_chat.id,
++        )
++    await edit_in_place(
++        query.message, context.bot,
++        f"🎁 Giving, through {', '.join(pending['bots'])}. Each bot reports back "
++        f"how many people it gave it to when it has been through its list.",
++    )
++
++
+ # The menu the owner sees, in the order HELP lists them: watching, reaching
+ # into a bot, shipping an update, then the family-wide reads. It is a private
+ # bot with one user, so a command left out of the menu is a command that has to
+@@ -3146,6 +3229,7 @@
+     BotCommand("users", "Active users per bot"),
+     BotCommand("balance", "See or change a credit balance"),
+     BotCommand("addcredit", "Add ⚡ credit to an account by Telegram id"),
++    BotCommand("gift", "Bonus ⚡ for everyone; counts, then asks"),
+     BotCommand("donations", "Paid donations per bot"),
+     BotCommand("stars", "ConvertBot's Stars: paid, refunded, recent"),
+     BotCommand("backup", "Whole database, restorable, pinned here"),
+@@ -3323,6 +3407,7 @@
+     app.add_handler(CommandHandler("stars", _shortcut("stars", 0, "", default_bot="convertbot")))
+ 
+     app.add_handler(CommandHandler("broadcast", broadcast_command))
++    app.add_handler(CommandHandler("gift", gift_command))
+     app.add_handler(CommandHandler("pause", pause_command))
+     app.add_handler(CommandHandler("warn", warn_command))
+     # /pause stops the bots for an update, so its opposite should be called
+@@ -3333,6 +3418,7 @@
+     app.add_handler(CallbackQueryHandler(board_button, pattern=r"^board:"))
+     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
+     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
++    app.add_handler(CallbackQueryHandler(gift_button, pattern=r"^gift:"))
+     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))
+     app.add_handler(CallbackQueryHandler(feedback_mode_button, pattern=r"^fbmode:"))
+     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+--- /c/Users/bitur/AppData/Local/Temp/claude/C--Bitura--Projects-MumuBots/10575aff-3ae0-44b4-89f9-5bfb835406f6/scratchpad/pre/MumuBots2.2.0/shared/family_link.py	2026-10-12 05:01:09.000000000 +0900
++++ MumuBots2.2.0/shared/family_link.py	2026-10-17 15:00:53.923982500 +0900
+@@ -60,6 +60,7 @@
+ import json
+ import logging
+ import os
++import re
+ import socket
+ import time
+ from collections import deque
+@@ -968,6 +969,55 @@
+         raise
+ 
+ 
++# The most one gift may give one person. A gift goes to everybody at once, so a
++# slipped digit (1000 for 100) would be multiplied by every account there is;
++# past this the owner has to change the code, not just the command.
++GIFT_MAX_CREDIT = 1000
++
++
++def grant_bonus_once(user_id: int, amount: int, key: str, expires_at: datetime,
++                     detail: str | None = None) -> "int | None":
++    """A gift: `amount` credits of bonus that runs out at `expires_at`, given
++    the first time this (key, user) is ever asked for and never again. Returns
++    the new balance, or None if it had already been given.
++
++    The same claim as grant_stars_once (`stars:granted:<key>:<user>`), so one
++    key can never pay twice through the two of them. Unlike it, the claim and
++    the credit are one transaction, staked the way topup() stakes a charge id:
++    they stand or fall together, and two bots granting the same person at once
++    take turns on the wallet's lock, the second finding the claim taken.
++
++    It is bonus, not ordinary credit: a lot of its own in star_bonus_lots, spent
++    before ordinary credit and taken back by _expire_in when it runs out."""
++    if not 0 < amount <= GIFT_MAX_CREDIT:
++        raise ValueError(f"a gift is 1..{GIFT_MAX_CREDIT} credits, not {amount}")
++    if expires_at.tzinfo is None:
++        raise ValueError("a gift's expiry must carry its time zone")
++    if expires_at <= datetime.now(timezone.utc):
++        raise ValueError("a gift that has already expired gives nothing")
++    claim = f"stars:granted:{key}:{user_id}"
++    with _connect() as conn:
++        _lock_wallet_in(conn, user_id)
++        won = conn.execute(
++            f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
++            f"ON CONFLICT (key) DO NOTHING RETURNING key",
++            (claim, datetime.now(timezone.utc).isoformat()),
++        ).fetchone()
++        if not won:
++            conn.rollback()
++            return None
++        _expire_in(conn, user_id)
++        balance = _move_in(conn, user_id, amount, "grant",
++                           detail or f"gift {key}, bonus until {expires_at:%Y-%m-%d}")
++        conn.execute(
++            f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
++            f"VALUES (%s, %s, %s, %s)",
++            (user_id, amount, amount, expires_at),
++        )
++        conn.commit()
++    return balance
++
++
+ def expire_bonus_credit() -> int:
+     """Housekeeping: expire every person's run-out bonus. Returns how much
+     credit it took in total. Safe from five bots at once -- each wallet is
+@@ -1957,11 +2007,14 @@
+     "update_soon_try_later_soon": "\U0001f527 I'm about to be updated, so I can't start anything new right now. Please try again shortly.",
+     "update_will_reset": "\U0001f527 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a moment.",
+     "update_done_try_now": "✅ The update is done. You can go ahead and try again now.",
++    "gift_granted": "\U0001f381 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, "
++                    "good until {date}. It pays for about {conversions} paid conversions in {convert} "
++                    "or big-file downloads in {download}. Your balance: /balance",
+ }
+ 
+ 
+ def phrase(key: str, lang: str | None = None, **kwargs) -> str:
+-    """One of the four sentences above, translated if this bot can."""
++    """One of the sentences above, translated if this bot can."""
+     i18n = _i18n()
+     if i18n is not None:
+         try:
+@@ -2101,6 +2154,147 @@
+     )
+ 
+ 
++# ---- the gift: bonus credit for everyone, once -----------------------------
++# One promotion at a time: `amount` of bonus credit for everyone this bot knows,
++# once per person across the family (grant_bonus_once's claim), and a notice in
++# their own language from the bot that won the claim -- so somebody who uses two
++# bots is given it once and told once. Without --go it only counts.
++#
++# Run --go once per bot, at the moment the promotion is announced: a later run
++# also reaches whoever arrived in between, and a fixed moment is what stops the
++# gift being farmed with fresh accounts.
++
++GIFT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,39}$")
++GIFT_MAX_DAYS = 400
++# Never real people: anonymous group admins, channels posting as themselves, and
++# Telegram (the ids delivery_cache.SHARED_SENDER_IDS also refuses).
++_GIFT_NOT_PEOPLE = {1087968824, 136817688, 777000}
++# What a paid conversion costs, roughly, for the notice's "about N conversions":
++# 6-7 ⚡ for a small one, 13-33 for a big video. Ten is the honest middle.
++GIFT_CREDITS_PER_CONVERSION = 10
++
++
++def _gift_last_day(text: str) -> "datetime | None":
++    """`YYYY-MM-DD` -> the moment the gift runs out: the end of that day, UTC."""
++    try:
++        day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
++    except ValueError:
++        return None
++    return day + timedelta(days=1)
++
++
++def _gift_args(args: list[str]) -> "tuple[str, int, datetime, str] | str":
++    """(key, amount, expires_at, last day as written), or the sentence saying
++    what is wrong. ManagerBot checks the same rules before it queues."""
++    if len(args) != 3:
++        return "Usage: gift <key> <credits> <last day YYYY-MM-DD> [--go]"
++    key, raw_amount, raw_day = args
++    if not GIFT_KEY_RE.fullmatch(key):
++        return "The key is 3-40 lowercase letters, digits or dashes, starting with a letter or digit."
++    amount = int(raw_amount) if re.fullmatch(r"[0-9]{1,6}", raw_amount) else 0
++    if not 0 < amount <= GIFT_MAX_CREDIT:
++        return f"The amount is a whole number of credits, 1 to {GIFT_MAX_CREDIT}."
++    expires = _gift_last_day(raw_day)
++    now = datetime.now(timezone.utc)
++    if expires is None or not now + timedelta(days=1) <= expires <= now + timedelta(days=GIFT_MAX_DAYS + 1):
++        return f"The last day is a date, YYYY-MM-DD, from tomorrow (UTC) to {GIFT_MAX_DAYS} days ahead."
++    return key, amount, expires, raw_day
++
++
++def _gift_already_given(key: str) -> set:
++    prefix = f"stars:granted:{key}:"
++    with _connect() as conn:
++        rows = conn.execute(
++            f"SELECT key FROM {FAMILY_SCHEMA}.settings WHERE key LIKE %s", (prefix + "%",)
++        ).fetchall()
++    given = set()
++    for (claim,) in rows:
++        tail = claim[len(prefix):]
++        if tail.lstrip("-").isdigit():
++            given.add(int(tail))
++    return given
++
++
++def _bot_handle(bot_id: str, fallback: str) -> str:
++    """A sibling as somebody can tap it, from SIBLING_BOTS (the format
++    shared_features documents), or its plain name."""
++    for entry in os.environ.get("SIBLING_BOTS", "").split(","):
++        parts = entry.strip().split(":")
++        if len(parts) == 3 and parts[0] == bot_id and parts[2].strip().lstrip("@"):
++            return "@" + parts[2].strip().lstrip("@")
++    return fallback
++
++
++def gift_notice(lang: "str | None", amount: int, expires_at: datetime) -> str:
++    last_day = expires_at - timedelta(days=1)
++    return phrase(
++        "gift_granted", lang, amount=amount, date=last_day.strftime("%d.%m.%Y"),
++        conversions=max(1, amount // GIFT_CREDITS_PER_CONVERSION),
++        convert=_bot_handle("convertbot", "ConvertBot"),
++        download=_bot_handle("downloaderbot", "DownloaderBot"),
++    )
++
++
++async def _cmd_gift(context, args):
++    go = "--go" in args
++    parsed = _gift_args([a for a in args if a != "--go"])
++    if isinstance(parsed, str):
++        return parsed, None, None
++    key, amount, expires, raw_day = parsed
++    fn = getattr(db, "list_all_users", None)
++    if fn is None:
++        return "This bot keeps no list of its users, so it has nobody to give to.", None, None
++    try:
++        users = [uid for uid in await asyncio.to_thread(fn)
++                 if isinstance(uid, int) and uid > 0 and uid not in _GIFT_NOT_PEOPLE]
++    except Exception as exc:
++        return f"Could not read this bot's users ({type(exc).__name__}); nothing was given.", None, None
++    users = list(dict.fromkeys(users))
++    given = await asyncio.to_thread(_gift_already_given, key)
++    due = [uid for uid in users if uid not in given]
++    head = (f"Gift '{key}': {amount} ⚡ of bonus credit each, good until {raw_day} "
++            f"(the end of that day, UTC).")
++
++    if not go:
++        return (
++            f"{head}\nThis bot knows {len(users)} people; {len(due)} would get it now "
++            f"({len(users) - len(due)} already have it, from this bot or another), "
++            f"{len(due) * amount} ⚡ in all.\nNothing was given: this was only the count.\n\n"
++            f"What each of them is told (in their own language; English here):\n"
++            f"{gift_notice('en', amount, expires)}",
++            None, None,
++        )
++
++    granted = already = failed = told = unreachable = 0
++    delay = 1.0 / BROADCAST_PER_SECOND if BROADCAST_PER_SECOND > 0 else 0
++    for uid in due:
++        try:
++            balance = await asyncio.to_thread(grant_bonus_once, uid, amount, key, expires)
++        except Exception as exc:
++            failed += 1
++            logger.warning("Gift %s: could not give it to one person (%s)", key, type(exc).__name__)
++            continue
++        if balance is None:
++            already += 1
++            continue
++        granted += 1
++        try:
++            lang = await asyncio.to_thread(_language_of, uid)
++            await context.bot.send_message(chat_id=uid, text=gift_notice(lang, amount, expires))
++            told += 1
++        except Exception as exc:
++            unreachable += 1
++            logger.debug("Gift notice skipped %s: %s", uid, type(exc).__name__)
++        if delay:
++            await asyncio.sleep(delay)
++    out = (f"{head}\nGave it to {granted} people ({granted * amount} ⚡) and told {told} of them"
++           + (f"; {unreachable} could not be reached but have the credit" if unreachable else "")
++           + f". {len(users) - len(due) + already} already had it.")
++    if failed:
++        out += f"\n{failed} failed (database errors, see the log); run the same command again to finish them."
++    return out, None, None
++
++
+ async def _cmd_pause(context, args):
+     """Stop starting work a redeploy would throw away, and say so.
+ 
+@@ -2178,6 +2372,7 @@
+     "pause": _cmd_pause,
+     "warnbusy": _cmd_warnbusy,
+     "resume": _cmd_resume,
++    "gift": _cmd_gift,
+ }
+ 
+ COMMAND_HELP = {
+@@ -2196,6 +2391,7 @@
+     "pause": "pause [minutes] -- decline new long work and say why",
+     "warnbusy": "tell whoever is mid-something that it is about to be reset",
+     "resume": "reopen, and tell everyone who was turned away",
++    "gift": "gift <key> <credits> <last day YYYY-MM-DD> [--go] -- bonus credit for everyone, once each; counts unless --go",
+ }
+ 
+ 

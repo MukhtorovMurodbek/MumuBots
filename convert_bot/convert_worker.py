@@ -30,7 +30,13 @@ A second kind of job shares the process and the protocol: {"kind":
 "describe_raw", "path": ..., "src_ext": ...} asks for the size of a camera raw
 photo, which is LibRaw parsing a stranger's file and so is not done in the
 bot's own process. Its answer is {"ok": true, "info": {<RawInfo's fields>}} or
-one of the failures above.
+one of the failures above. So does {"kind": "describe_pdf", "path": ...}, which
+asks how many pages a PDF has and how many of them are pictures without text
+(ocr_convert.count_scanned), for the same reason. Its answer comes in two
+steps, because the second can be slow and the asker is on a deadline
+(jobs.describe_pdf): the line {"pages": n} the moment the PDF is open, and
+last {"ok": true, "pages": n, "scanned": m} -- m None when the host cannot read
+text and nothing was looked at.
 
 "refused" means the file could not be converted and saying so is the bot
 working; "crash" means the bot failed. jobs.py refunds both and tells the
@@ -122,6 +128,51 @@ def _describe_image(job: dict) -> int:
     return 0
 
 
+def _describe_pdf(job: dict) -> int:
+    """A PDF's page count and how many pages are pictures without text
+    (ocr_convert.count_scanned), as JSON (jobs.describe_pdf). MuPDF reading a
+    stranger's file happens here, in a process of its own. Anything that goes
+    wrong is one of the protocol's failures and the parent reads every one of
+    them as "the menu without the numbers".
+
+    The page count is written and flushed the moment it is known, on a line of
+    its own, and the pages are looked at after: the parent waits only a few
+    seconds, and a page of a million glyphs takes longer than that to look at.
+    Pages are looked at only where text can be read at all, and not past the
+    most one conversion reads."""
+    try:
+        import convert_utils
+        import ocr_convert
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"could not load the converters: {exc}")
+        return 1
+
+    def say_pages(pages: int) -> None:
+        sys.stdout.write(json.dumps({"pages": int(pages)}) + "\n")
+        sys.stdout.flush()
+
+    try:
+        counted = ocr_convert.count_scanned(job["path"], on_pages=say_pages, scan=ocr_convert.available(),
+                                            stop_after=ocr_convert.OCR_MAX_PAGES)
+    except MemoryError:
+        _emit(False, kind="no_memory", message="reading the PDF ran out of memory")
+        return 2
+    except convert_utils.OutOfMemory as exc:
+        _emit(False, kind="no_memory", message=str(exc))
+        return 2
+    except convert_utils.ConversionError as exc:      # the ordinary "that is not a readable PDF"
+        _emit(False, kind="refused", message=str(exc))
+        return 2
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        _emit(False, kind="crash", message=f"{type(exc).__name__}: {exc}")
+        return 1
+    scanned = counted["scanned"]
+    _emit(True, pages=int(counted["pages"]), scanned=None if scanned is None else int(scanned))
+    return 0
+
+
 def main(argv) -> int:
     if len(argv) < 2:
         _emit(False, kind="crash", message="no job was given to the worker")
@@ -141,6 +192,8 @@ def main(argv) -> int:
         return _describe_raw(job)
     if job.get("kind") == "describe_image":
         return _describe_image(job)
+    if job.get("kind") == "describe_pdf":
+        return _describe_pdf(job)
 
     try:
         import convert_utils
@@ -175,6 +228,7 @@ def main(argv) -> int:
         result = convert_utils.convert(
             job["in_paths"], job["src_ext"], job["target_ext"],
             job["work_dir"], job.get("stem") or "converted",
+            ocr_lang=job.get("ocr_lang") or "", ocr_pages=int(job.get("ocr_pages") or 0),
         )
     except convert_utils.OutOfMemory as exc:
         _emit(False, kind="no_memory", message=str(exc))

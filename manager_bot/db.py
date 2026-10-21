@@ -605,7 +605,75 @@ def donations_by_schema(schemas: list[str]) -> dict[str, list[tuple[str, int, in
         return out
 
 
-def run_readonly_query(sql: str, limit: int = 50):
+# Where each bot keeps a row per person, besides activity_events: AnonBot, ConvertBot
+# and StickerBot call it user_settings, DownloaderBot's per-person table is settings.
+PEOPLE_TABLES = ("activity_events", "user_settings", "settings")
+
+
+def unique_people(schemas: list[str]) -> int:
+    """How many different people have used any of these bots, each counted once
+    however many bots they used: the distinct user_id over every schema's
+    activity_events and whichever of user_settings and settings it has, leaving
+    out ids that are not people (zero and below, and family_link's
+    _GIFT_NOT_PEOPLE: Telegram, anonymous admins, channels). One connection, one
+    counting query. The 220 gift's count (family_link.PROMO_USERS).
+
+    It is built from tables that exist and not from a list of its own, so it can
+    only under-count: an activity_events row older than ACTIVITY_RETENTION_DAYS is
+    pruned, and somebody with no settings row then drops out. It can never
+    over-count, which is what "the bots have passed 220 users" needs to stay
+    true. Schema and table names come from the registry and the catalog, never
+    from a person."""
+    if not schemas:
+        return 0
+    # Inside the function: family_link imports `db` (this module) at its top, so
+    # importing it at the top here would be circular.
+    import family_link
+    with pooled_read() as conn:
+        found = []
+        for table in PEOPLE_TABLES:
+            found += [(schema, table) for schema in sorted(_existing_tables(conn, schemas, table))]
+        if not found:
+            return 0
+        # A table that goes by one of these names is only a list of people if it
+        # has a user_id column (a bot's settings could be a key/value table).
+        with_user_id = {tuple(row) for row in conn.execute(
+            "SELECT table_schema, table_name FROM information_schema.columns "
+            "WHERE table_schema = ANY(%s) AND table_name = ANY(%s) AND column_name = 'user_id'",
+            (schemas, list(PEOPLE_TABLES)),
+        ).fetchall()}
+        parts = [f'SELECT user_id FROM "{schema}".{table}'
+                 for schema, table in found if (schema, table) in with_user_id]
+        if not parts:
+            return 0
+        # UNION, not UNION ALL: that is what counts a person in two bots once.
+        row = conn.execute(
+            "SELECT COUNT(*) FROM (" + " UNION ".join(parts) + ") AS everyone "
+            "WHERE user_id > 0 AND user_id <> ALL(%s)",
+            (sorted(family_link._GIFT_NOT_PEOPLE),),
+        ).fetchone()
+        return row[0]
+
+
+def promo_seen_count(schema: str, promo: str) -> "int | None":
+    """How many people that bot's schema says were shown this announcement, or
+    None when the schema has no promo_seen table (a bot that never had one, or
+    not created yet)."""
+    with pooled_read() as conn:
+        if schema not in _existing_tables(conn, [schema], "promo_seen"):
+            return None
+        return conn.execute(
+            f'SELECT COUNT(*) FROM "{schema}".promo_seen WHERE promo = %s', (promo,)
+        ).fetchone()[0]
+
+
+# What /sql allows itself, named so ManagerBot's sql help page reads the same numbers:
+# a statement is stopped after this many seconds, and at most this many rows come back.
+SQL_TIMEOUT_SECONDS = 10
+SQL_MAX_ROWS = 50
+
+
+def run_readonly_query(sql: str, limit: int = SQL_MAX_ROWS):
     """Backs ManagerBot's /sql. The safety here is the connection being
     genuinely read-only at the transaction level -- Postgres itself rejects
     any write, so this does not depend on parsing the statement correctly.
@@ -626,7 +694,7 @@ def run_readonly_query(sql: str, limit: int = 50):
     guarantee is Postgres's, not a parser's."""
     with pooled() as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        conn.execute("SET LOCAL statement_timeout = '10s'")
+        conn.execute(f"SET LOCAL statement_timeout = '{SQL_TIMEOUT_SECONDS}s'")
         cur = conn.execute(sql, prepare=True)
         cols = [d.name for d in cur.description] if cur.description else []
         rows = cur.fetchmany(limit) if cur.description else []

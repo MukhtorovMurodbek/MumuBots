@@ -155,8 +155,10 @@ def main() -> int:
     print("\n== /sql keeps its own, shorter, statement timeout ==")
     source = (REPO / "manager_bot" / "db.py").read_text(encoding="utf-8")
     runner = source.split("def run_readonly_query", 1)[1].split("\ndef ", 1)[0]
+    # The ten seconds is SQL_TIMEOUT_SECONDS (db.py), which the sql help page prints.
     check("/sql sets statement_timeout to ten seconds for its own transaction",
-          "SET LOCAL statement_timeout = '10s'" in runner)
+          "SET LOCAL statement_timeout = '{SQL_TIMEOUT_SECONDS}s'" in runner
+          and "\nSQL_TIMEOUT_SECONDS = 10\n" in source)
 
     print("")
     print("FAILURES: " + str(len(failures)))

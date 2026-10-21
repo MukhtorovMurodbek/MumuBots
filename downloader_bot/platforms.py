@@ -13,6 +13,7 @@ platforms here too.
 """
 import math
 import re
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
@@ -21,7 +22,7 @@ from net import FetchError, client, close_client, fetch_bytes  # re-exported
 
 __all__ = [
     "FetchError", "client", "close_client", "fetch_bytes",
-    "detect_platform", "ANY_LINK_RE",
+    "detect_platform", "canonical_link", "ANY_LINK_RE",
     "fetch_reddit_post", "reddit_is_media", "reddit_direct_image_url",
     "fetch_tweet_syndication",
 ]
@@ -85,13 +86,144 @@ ANY_LINK_RE = re.compile(
 )
 
 
+# ---------- The same post, written one way ----------
+#
+# Every share sheet appends its own trackers to a link -- Instagram's `?igsh=`
+# and `?igshid=`, YouTube's `?si=`, TikTok's `?is_from_webapp=1&sender_device=pc`,
+# `utm_*` everywhere -- and a different one for every person who shares it. So
+# the same post arrived as a different string each time, and everything keyed on
+# the string (the five-minute delivery cache, the redo memory, the "same link
+# again" check, the file-ID store) treated one post as many. detect_platform is
+# the single place a link enters the bot, so it is the place to write it one way.
+#
+# An allow-list, not a block-list: each rule below keeps what identifies the post
+# and drops everything else. A parameter nobody has seen yet is dropped, which is
+# the safe direction (a post is never identified by a query string we did not
+# list). Where a rule cannot find what it needs the link is returned unchanged:
+# a link this function does not understand must still go through as it was sent.
+
+# What the `\S+` of the patterns above swallows from prose: "look at this
+# https://...ABC/." or "(https://...)". A post code never ends with one.
+_TRAILING_PUNCT = ".,;:!?)]}>»\"'"
+
+_IG_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
+_IG_POST = re.compile(r"/(p|reel|reels|tv)/([A-Za-z0-9_-]+)(?:/|$)")
+# `/<username>/reel/<CODE>/`. `share` is Instagram's own prefix for a redirecting
+# share link, whose id is not the post's code, so it is not a username.
+_IG_USER_POST = re.compile(r"/([^/]+)" + _IG_POST.pattern)
+_IG_NOT_USERS = {"share", "stories"}
+
+_TT_HOSTS = {"tiktok.com", "www.tiktok.com", "m.tiktok.com"}
+_TT_SHORT_HOSTS = {"vm.tiktok.com", "vt.tiktok.com"}
+
+_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
+_YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+
+_TW_HOSTS = {"twitter.com", "www.twitter.com", "mobile.twitter.com",
+             "x.com", "www.x.com", "mobile.x.com"}
+_TW_STATUS = re.compile(r"/(\w+)/status(?:es)?/(\d+)(?:/|$)")
+
+_RD_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "m.reddit.com"}
+
+# The same shape PINTEREST_RE accepts as a host: an optional country prefix, then
+# pinterest + a top-level domain, or pin.it.
+_PIN_HOST = re.compile(
+    r"(?:[a-z0-9-]{1,8}\.)?"
+    r"(?:pinterest\.(?:com|co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2})|pin\.it)"
+)
+_PIN_POST = re.compile(r"/pin/(\d+)(?:/|$)")
+
+
+def _trim(text: str) -> str:
+    return text.rstrip(_TRAILING_PUNCT)
+
+
+def _keep_path(host: str, path: str) -> str:
+    return f"https://{host}{_trim(path)}"
+
+
+def _canonical(platform: str, url: str) -> str:
+    parts = urlsplit(_trim(url.strip()))
+    host = (parts.hostname or "").lower()
+    path = parts.path
+
+    if platform == "instagram" and host in _IG_HOSTS:
+        m = _IG_USER_POST.match(path)
+        if m and m.group(1).lower() in _IG_NOT_USERS:
+            m = None
+        if m:
+            kind, code = m.group(2), m.group(3)
+        else:
+            m = _IG_POST.match(path)
+            kind, code = (m.group(1), m.group(2)) if m else ("", "")
+        if kind:
+            return f"https://www.instagram.com/{'reel' if kind == 'reels' else kind}/{code}/"
+        return _keep_path("www.instagram.com", path)
+
+    if platform == "tiktok":
+        if host in _TT_HOSTS:
+            return _keep_path("www.tiktok.com", path)
+        if host in _TT_SHORT_HOSTS:
+            return _keep_path(host, path)
+
+    if platform == "youtube":
+        video = ""
+        if host in _YT_HOSTS:
+            segments = [s for s in path.split("/") if s]
+            if path.rstrip("/") == "/watch":
+                values = [v for k, v in parse_qsl(parts.query, keep_blank_values=True) if k == "v"]
+                video = values[0] if values else ""
+            elif len(segments) >= 2 and segments[0] in ("shorts", "live"):
+                video = segments[1]
+        elif host == "youtu.be":
+            segments = [s for s in path.split("/") if s]
+            video = segments[0] if segments else ""
+        if _YT_ID.fullmatch(video):
+            return f"https://www.youtube.com/watch?v={video}"
+        return url
+
+    if platform == "twitter" and host in _TW_HOSTS:
+        m = _TW_STATUS.match(path)
+        if m:
+            return f"https://x.com/{m.group(1)}/status/{m.group(2)}"
+        return url
+
+    if platform == "reddit":
+        if host in _RD_HOSTS:
+            return _keep_path("www.reddit.com", path)
+        if host == "redd.it":
+            return _keep_path("redd.it", path)
+
+    if platform == "pinterest" and _PIN_HOST.fullmatch(host):
+        m = _PIN_POST.match(path)
+        if m and host != "pin.it":
+            return f"https://www.pinterest.com/pin/{m.group(1)}/"
+        return _keep_path(host, path)
+
+    return url
+
+
+def canonical_link(platform: str, url: str) -> str:
+    """The link written the one way that identifies the post: share trackers,
+    query strings and fragments gone, the host and path normalised, the
+    punctuation a sentence leaves on the end of a link taken off. Pure, no
+    network, and it never raises -- anything it cannot read comes back as it
+    was given. Writing the result through it again changes nothing."""
+    try:
+        return _canonical(platform, url)
+    except Exception:  # noqa: BLE001 - a link we cannot read goes through as sent
+        return url
+
+
 def detect_platform(text: str) -> tuple[str, str] | None:
-    """Returns (platform, matched_url) for the first recognized link in text,
-    or None if nothing matches."""
+    """Returns (platform, canonical_link) for the first recognized link in
+    text, or None if nothing matches. The link comes back with its share
+    trackers removed (canonical_link), so one post is one string wherever it
+    was shared from."""
     for name, pattern in _PLATFORM_PATTERNS:
         m = pattern.search(text)
         if m:
-            return name, m.group(0)
+            return name, canonical_link(name, m.group(0))
     return None
 
 

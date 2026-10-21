@@ -36,7 +36,11 @@ jobs:
       - name: ffmpeg and bsdtar
         # libarchive-tools is what puts `bsdtar` on the PATH; without it the 7z and
         # RAR checks in tests/test_archives.py skip, and a skip is a green nobody read.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libarchive-tools
+        # The tesseract-ocr-* language data is convert_bot/Dockerfile's too: with it
+        # tests/test_ocr.py reads real text instead of skipping.
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libarchive-tools
+          tesseract-ocr-eng tesseract-ocr-rus tesseract-ocr-uzb tesseract-ocr-uzb-cyrl
       - name: Install every bot's requirements
         run: |
           python -m pip install --upgrade pip
@@ -51,4 +55,5 @@ jobs:
           GIT_COMMITTER_NAME: ci
           GIT_COMMITTER_EMAIL: ci@example.invalid
           PYTHONIOENCODING: utf-8
+          TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
         run: python tests/run.py

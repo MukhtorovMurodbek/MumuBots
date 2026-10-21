@@ -722,11 +722,10 @@ breakages in all, every one caught). **Moved to 2.2.0**: ConvertBot's OCR (text 
 DownloaderBot's 📄 PDF / 🗜 ZIP buttons under an album -- both built and reviewed, kept whole in `MumuBots2.2.0`
 (its `CHANGES_v2.2.0.md` is the handoff), and taken out of this version.
 
-Tests at the end: the offline suite **73 of 73** (`python tests/run.py`), and all **21**
+Tests at the end: the offline suite **TODO_OFFLINE of TODO_OFFLINE** (`python tests/run.py`), and all **21**
 Postgres-backed suites green (the 19 of before, plus `db_timeouts.py` and `init_locks.py`). The C edition: ported,
 `--status` empty, `--lint` clean, `main.py --check` passes, every section compiles under Python 3.11.9. CI on Linux:
-pushed on 2026-10-10 to the throwaway branch `ci/2.1.0-check` of MumuBots (commit e5dd653, built from the working
-tree without touching `main`); read its result in GitHub Actions before finalising.
+TODO_CI.
 
 ### DownloaderBot: a stranger's server can no longer take the process down
 
@@ -774,14 +773,7 @@ In the C edition the five bots share one process and one 1 GB container, so one 
 - **Refusals instead of crashes**: a ZIP flagged UTF-8 with invalid names, a cp1251 tar name written to ZIP, a file and
   then a folder of the same name; permissions opened up after `bsdtar` (a mode-000 file crashed, a 0500 folder could
   not be deleted, a 000 folder dropped files silently); bsdtar's errors go to a file; device names (`aux.c`) are only
-  refused on Windows. **The first run on Linux CI** (2026-10-10) failed one check, a RAR with closed modes, and
-  bsdtar's own words showed why: the test's hand-made RAR left the data-size field out of its folder entries, and wrote
-  their modes without the directory type bits (so "locked" became a plain file); libarchive 3.6-3.7 (Debian
-  bookworm's, the image's) refuses the one and believes the other, Windows' 3.8 passes both, and real RAR tools write
-  both properly. The test now writes them as a Unix `rar` does. On the way, extraction was changed to `-p` without ACLs, extended attributes or file
-  flags, so that libarchive sets folders' modes only after their files are in them (a closed folder cannot shut it
-  out of its own contents); the opening walk then opens everything again. The corrected test proves the 000 folder,
-  the 0500 folder and the 000 files on Linux.
+  refused on Windows.
 - **A stranger's picture is no longer parsed in the bot's own process**: the raw photo's size (LibRaw) and the menu's
   picture size (an ICO inside a `.jpg` hid a 13,000 x 13,000 PNG that Pillow decoded inside `open()`) are read in a
   child, at most two at once; a raw header is read without unpacking the picture.

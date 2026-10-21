@@ -27,14 +27,20 @@ _Last reviewed: 3 October 2026._
 - **A timestamp per use.** One row saying that this id used the bot at this
   minute, so the operator can tell whether anybody is using it at all. It
   carries no content and says nothing about what was done.
+- **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
+  tapped it.
 - **Donations**, if any: the amount, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger**, once you have paid or been given
   credit. It is shared by the family's four bots: the balance, and one row for
   every top-up, bonus, charge, credit returned and correction, with the amount, which
   bot, and why. `/balance` shows it.
 - **Bonus credit, and when it expires** — for each payment that earned a
-  bonus: how much, how much of it is left, and the date it runs out. Bonus
-  that runs out unused is taken off the balance, and the ledger says so.
+  bonus and each gift: how much, how much of it is left, and the date it runs
+  out. Bonus that runs out unused is taken off the balance, and the ledger
+  says so.
+- **Gifts given** — that a gift, by its name, was given to your id and
+  when, so that it is given only once across the family. Kept like the ledger;
+  `/deletemydata` does not remove it.
 - **Problems, whenever one is shown to anybody** — the error code, an
   incident number, when it happened and the bot's version. This is written
   down automatically, because a fault nobody reports is still a fault, and
@@ -106,9 +112,11 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 |---|---|
 | user id, language, packs, co-editing records | until erased, or indefinitely while the bot is in use |
 | timestamp per use | about 90 days (`ACTIVITY_RETENTION_DAYS`) |
+| button tap counts | 45 days (`FAMILY_USAGE_RETENTION_DAYS`) |
 | work in progress | 12 hours (`DEPLOY_STATE_TTL_HOURS`) |
 | donation records | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the donation records |
+| gifts given (which gift was given to your id, and when) | kept, like the ledger |
 | feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it

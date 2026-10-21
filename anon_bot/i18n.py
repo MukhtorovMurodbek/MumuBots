@@ -113,6 +113,7 @@ STRINGS = {
             "• who you have blocked\n"
             "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
             "using it\n"
+            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "\n"
             "What is not kept is what anybody writes. Messages pass straight through and are "
@@ -247,15 +248,53 @@ STRINGS = {
             "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
             "\n"
             "Main commands: /link · /conversations · /cancel\n"
-            "Every command and every reaction: the full guide, below or /help full.\n"
+            "Every command and every reaction: the full guide, below or /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
+        "help_page_everything": "The full guide: /fullhelp",
+        "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
+        "helppage_link": (
+            "🔗 /link — your anonymous inbox link\n"
+            "\n"
+            "/link shows your link and whether it is taking messages. Post it anywhere: whoever opens it can write to you here, and you never see who they are. Each time someone opens it, a new conversation starts.\n"
+            "Under it:\n"
+            "• ⏸️ Pause: no new conversations until you resume; the ones already going still work. Also /pause and /resume.\n"
+            "• 🔄 New link: the old link stops starting conversations; the ones already going still work, and a paused inbox stays paused. Also /newlink.\n"
+            "• Two counts: how many different guests have written to you, across how many conversations. Also /stats.\n"
+            "The link stays the same until you make a new one.\n"
+            "\n"
+            "Example: send /link, copy the link, and put it in your Instagram bio."
+        ),
+        "helppage_export": (
+            "📄 /export — a conversation, outside the chat\n"
+            "\n"
+            "Both sides can use it: you for any of your conversations, a guest for their own.\n"
+            "1. /export, then pick a conversation (or \"📚 All of them\").\n"
+            "2. Pick how:\n"
+            "• 📋 Copy them back here: Telegram copies the messages into this chat again, exactly as they were — stickers, voice messages, files. I never read them.\n"
+            "• 📝 Write a document: I read each message once and build an HTML file; photos and other media appear as [Photo] and so on, never downloaded. Nothing is kept afterwards. Times are in UTC.\n"
+            "• Nobody's name, username or id is in it: the sides are \"Owner\" and \"Anon\". The other side isn't told.\n"
+            "• Up to {max} messages each time. Only what is still on record: a conversation's messages are forgotten {days} days after it last moved, and a message deleted from the chat can't be copied.\n"
+            "\n"
+            "Example: /export, tap \"#3\", then \"📝 Write a document\" — the file arrives here."
+        ),
+        "helppage_which": (
+            "❓ /which — which conversation is this message from?\n"
+            "\n"
+            "Reply to any message in this chat with /which: swipe the message, or press and hold it and choose Reply.\n"
+            "• You, the inbox's owner: I say its conversation's number. It works for your own replies too, for the later photos of an album, and for each part of a long message.\n"
+            "• A guest: I point to where that conversation starts.\n"
+            "Handy when several conversations are mixed together in the chat.\n"
+            "\n"
+            "Example: reply to a message with /which, and I answer: \"{example}\""
+        ),
         "reactions_update_note": "🆕 You can now react to messages here — the other person sees your reaction, shown as mine. Send /help to see more.",
+        "gift_ad": "🎉 Mumu bots have passed {users} unique users, so we decided to give out {amount} ⚡ of free credit! You can claim it and use it in {download} and {convert}.\n\n<i>To claim it, send any message to either bot: the gift is added automatically. Claim it by {claim_by}; once claimed, it lasts {days} days.</i>",
         "reaction_not_passed": "⚠️ The other person won't see that reaction — only standard emoji are passed on.",
         "reaction_one_only": "⚠️ The other person sees only your newest reaction — one per message is passed on.",
-        "help_text": "Two ways to use this bot:\n\nGet your own inbox — /link gives you a permanent link. Post it anywhere public (bio, channel, story, wherever). Anyone who taps it can send you an anonymous message right here in this chat — you won't see who they are.\nAnswer by replying to the message — swipe it, or press and hold it and choose Reply. That is how I know which conversation your answer belongs to, so it is required rather than optional: one public link means several people can be mid-conversation with you at once, and a message that doesn't say which thread it answers could reach the wrong one. Your answer shows up on their end as a real reply too.\n\nGot sent someone else's link? Tap it and write — your first message goes straight through, with your identity hidden. After that, reply to the message you're answering, exactly as the other side does. Tapping the same link again later starts a brand-new conversation, it won't continue the old one.\n\nReactions: react to a message in a conversation and the other person sees the same reaction on their copy. It shows beside my picture, not yours, so it gives nothing away. Change it or take it off and that carries over too. One reaction per message gets through, and only these:\n{reactions}\n⚠️ NOTE: Telegram Premium reactions (custom emoji) can NOT be passed on — the other person won't see them.\n\nCommands:\n/link - get your inbox link\n/conversations - your conversations, open and archived\n/which - send it as a reply to any message: which conversation is that?\n/newlink, /pause, /resume - also buttons on the /link screen\n/blocked - review who you've blocked\n/stats - the counts, which are on the /link screen too\n/export - get a conversation back, copied here or as a document\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/archive - send it as a reply to a message to archive that conversation (every row in /conversations has the button too)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_text": "Two ways to use this bot:\n\nGet your own inbox — /link gives you a permanent link. Post it anywhere public (bio, channel, story, wherever). Anyone who taps it can send you an anonymous message right here in this chat — you won't see who they are.\nAnswer by replying to the message — swipe it, or press and hold it and choose Reply. That is how I know which conversation your answer belongs to, so it is required rather than optional: one public link means several people can be mid-conversation with you at once, and a message that doesn't say which thread it answers could reach the wrong one. Your answer shows up on their end as a real reply too.\n\nGot sent someone else's link? Tap it and write — your first message goes straight through, with your identity hidden. After that, reply to the message you're answering, exactly as the other side does. Tapping the same link again later starts a brand-new conversation, it won't continue the old one.\n\nReactions: react to a message in a conversation and the other person sees the same reaction on their copy. It shows beside my picture, not yours, so it gives nothing away. Change it or take it off and that carries over too. One reaction per message gets through, and only these:\n{reactions}\n⚠️ NOTE: Telegram Premium reactions (custom emoji) can NOT be passed on — the other person won't see them.\n\nCommands:\n/link - get your inbox link\n/conversations - your conversations, open and archived\n/which - send it as a reply to any message: which conversation is that?\n/newlink, /pause, /resume - also buttons on the /link screen\n/blocked - review who you've blocked\n/stats - the counts, which are on the /link screen too\n/export - get a conversation back, copied here or as a document\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/archive - send it as a reply to a message to archive that conversation (every row in /conversations has the button too)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
         "follow_link_invalid": "That link isn't valid — it may have been reset by whoever shared it. Ask them for a fresh one.",
         "follow_link_own": "That's your own inbox link — messaging yourself would just be a note to self! Share it with other people instead: /link",
         "follow_link_blocked": "You're not able to message this person.",
@@ -401,6 +440,7 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 I'm being updated right now, so I can't start anything new — please try again shortly. I'll message you when I'm back.",
         "update_will_reset": "🔧 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a few minutes.",
         "update_done_try_now": '✅ The update is done — go ahead and try again now.',
+        "gift_granted": "🎁 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, good until {date}. It pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}. Your balance: /balance",
         "reply_forbidden": "Couldn't deliver your reply — they may have blocked or left the bot.",
         "reply_failed": "Couldn't deliver your reply: {error}",
         "delivered_confirmation": "Delivered ↩️",
@@ -546,7 +586,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. /export bilan tayyorlangan hujjat faqat xotirada yig'iladi, sizga yuboriladi va keyin yo'q qilinadi; o'qilgan narsalarning hech biri yozib olinmaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. /export bilan tayyorlangan hujjat faqat xotirada yig'iladi, sizga yuboriladi va keyin yo'q qilinadi; o'qilgan narsalarning hech biri yozib olinmaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -621,15 +661,53 @@ STRINGS = {
             "\n"
             "Asosiy buyruqlar: /link · /conversations · /cancel\n"
             "Barcha buyruqlar va reaksiyalar: to'liq qo'llanmada — pastdagi tugma yoki "
-            "/help full.\n"
+            "/fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
+        "help_page_everything": "To'liq qo'llanma: /fullhelp",
+        "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
+        "helppage_link": (
+            "🔗 /link — anonim qutingiz havolasi\n"
+            "\n"
+            "/link havolangizni va u xabar qabul qilayotganini ko'rsatadi. Uni istalgan joyga joylang: uni ochgan har kim sizga shu yerda yoza oladi, siz esa kimligini hech qachon ko'rmaysiz. Har safar kimdir uni ochganda yangi suhbat boshlanadi.\n"
+            "Ostida:\n"
+            "• ⏸️ To'xtatish: davom ettirmaguningizcha yangi suhbatlar boshlanmaydi; boshlangan suhbatlar ishlayveradi. Yana: /pause va /resume.\n"
+            "• 🔄 Yangi havola: eski havola endi suhbat boshlamaydi; boshlanganlari ishlayveradi, pauzadagi quti pauzada qoladi. Yana: /newlink.\n"
+            "• Ikki son: sizga nechta turli mehmon yozgani va jami nechta suhbatda. Yana: /stats.\n"
+            "Yangisini yaratmaguningizcha havola o'zgarmaydi.\n"
+            "\n"
+            "Misol: /link yuboring, havolani nusxalang va Instagram bio'ingizga qo'ying."
+        ),
+        "helppage_export": (
+            "📄 /export — suhbatni chatdan tashqarida saqlash\n"
+            "\n"
+            "Ikkala tomon ham foydalana oladi: siz istalgan suhbatingiz uchun, mehmon esa o'z suhbati uchun.\n"
+            "1. /export, keyin suhbatni tanlang (yoki \"📚 Hammasi\").\n"
+            "2. Qanday qilishni tanlang:\n"
+            "• 📋 Shu yerga nusxalab bering: Telegram xabarlarni shu chatga aynan avvalgidek qayta nusxalaydi — stikerlar, ovozli xabarlar, fayllar. Men ularni o'qimayman.\n"
+            "• 📝 Hujjat qilib yozing: har bir xabarni bir marta o'qib, HTML fayl yasayman; rasm va boshqa media [Rasm] kabi ko'rsatiladi, yuklab olinmaydi. Keyin hech narsa saqlanmaydi. Vaqtlar UTC bo'yicha.\n"
+            "• Unda hech kimning ismi, username'i yoki id'si yo'q: tomonlar \"Owner\" va \"Anon\". Boshqa tomonga xabar berilmaydi.\n"
+            "• Har safar {max} tagacha xabar. Faqat hali saqlanayotgani: suhbat oxirgi marta harakatlanganidan {days} kun o'tib uning xabarlari unutiladi, chatdan o'chirilgan xabarni esa nusxalab bo'lmaydi.\n"
+            "\n"
+            "Misol: /export, \"#3\" ni bosing, keyin \"📝 Hujjat qilib yozing\" — fayl shu yerga keladi."
+        ),
+        "helppage_which": (
+            "❓ /which — bu xabar qaysi suhbatdan?\n"
+            "\n"
+            "Chatdagi istalgan xabarga /which bilan javob bering: xabarni suring yoki bosib turing va \"Javob berish\" ni tanlang.\n"
+            "• Siz, quti egasi: suhbatning raqamini aytaman. Bu o'z javoblaringiz, albomning keyingi rasmlari va uzun xabarning har bir qismi uchun ham ishlaydi.\n"
+            "• Mehmon: o'sha suhbat qayerdan boshlanganini ko'rsataman.\n"
+            "Chatda bir nechta suhbat aralashib ketganda qulay.\n"
+            "\n"
+            "Misol: xabarga /which bilan javob bering, men shunday javob beraman: \"{example}\""
+        ),
         "reactions_update_note": "🆕 Endi bu yerda xabarlarga reaksiya qo'yishingiz mumkin — suhbatdoshingiz uni mening nomimdan ko'radi. Batafsil: /help",
+        "gift_ad": "🎉 Mumu botlarida {users} dan ortiq foydalanuvchi bo'ldi, shuning uchun hammaga {amount} ⚡ bepul kredit berishga qaror qildik! Uni {download} va {convert} botlarida olib, ishlatishingiz mumkin.\n\n<i>Olish uchun ikki botdan biriga istalgan xabar yuboring: sovg'a avtomatik qo'shiladi. Uni {claim_by} gacha oling; olingandan keyin {days} kun amal qiladi.</i>",
         "reaction_not_passed": "⚠️ Suhbatdoshingiz bu reaksiyani ko'rmaydi — faqat oddiy emojilar yetkaziladi.",
         "reaction_one_only": "⚠️ Suhbatdoshingiz faqat oxirgi reaksiyangizni ko'radi — har bir xabarga bittasi yetkaziladi.",
-        "help_text": "Bu botdan ikki xil foydalanish mumkin:\n\nO'z qutingizni oching — /link sizga doimiy havola beradi. Uni istalgan ochiq joyga joylang (bio, kanal, story — qayerda bo'lsa ham). Havolani ochgan har kim sizga shu chatning o'zida anonim xabar yubora oladi — kimligi sizga ko'rinmaydi.\nJavob berish uchun xabarni o'ngga suring yoki uni bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman, shuning uchun bu shart: havola ochiq joyda turgani uchun bir vaqtda bir nechta odam sizga yozayotgan bo'lishi mumkin, qaysi suhbatga javob ekani ko'rsatilmagan xabar esa boshqa odamga borib qolishi mumkin. Javobingiz ularga ham haqiqiy javob sifatida ko'rinadi.\n\nSizga boshqa birovning havolasini yuborishdimi? Uni bosing va yozing — birinchi xabaringiz kimligingiz yashirilgan holda darhol yetib boradi. Undan keyin xuddi qarshi tomon kabi, javob berayotgan xabaringizga javob tarzida yozing. Keyinroq havolani yana bossangiz, eski suhbat davom etmaydi — yangisi boshlanadi.\n\nReaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz o'zidagi nusxada xuddi shu reaksiyani ko'radi. U sizning emas, mening rasmim yonida chiqadi, shuning uchun hech narsani oshkor qilmaydi. Reaksiyani almashtirsangiz yoki olib tashlasangiz, u tomonda ham shunday bo'ladi. Har bir xabarga bitta reaksiya o'tadi va faqat quyidagilar:\n{reactions}\n⚠️ DIQQAT: Telegram Premium reaksiyalari (maxsus emojilar) suhbatdoshingizga O'TMAYDI — u ularni ko'rmaydi.\n\nBuyruqlar:\n/link - qutingiz havolasini olish\n/conversations - suhbatlaringiz: ochiqlari va arxivdagilari\n/which - istalgan xabarga javob qilib yuboring: u qaysi suhbatdan ekanini aytaman\n/newlink, /pause, /resume - bular /link ekranida tugma sifatida ham bor\n/blocked - bloklanganlar ro'yxati\n/stats - qisqa statistika; u /link ekranida ham bor\n/export - suhbatni qaytarib olish: shu yerga nusxalab yoki hujjat qilib\n/donate - server xarajatlariga hissa qo'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivga o'tadi (/conversations ichidagi har bir suhbatda ham shu tugma bor)\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "help_text": "Bu botdan ikki xil foydalanish mumkin:\n\nO'z qutingizni oching — /link sizga doimiy havola beradi. Uni istalgan ochiq joyga joylang (bio, kanal, story — qayerda bo'lsa ham). Havolani ochgan har kim sizga shu chatning o'zida anonim xabar yubora oladi — kimligi sizga ko'rinmaydi.\nJavob berish uchun xabarni o'ngga suring yoki uni bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman, shuning uchun bu shart: havola ochiq joyda turgani uchun bir vaqtda bir nechta odam sizga yozayotgan bo'lishi mumkin, qaysi suhbatga javob ekani ko'rsatilmagan xabar esa boshqa odamga borib qolishi mumkin. Javobingiz ularga ham haqiqiy javob sifatida ko'rinadi.\n\nSizga boshqa birovning havolasini yuborishdimi? Uni bosing va yozing — birinchi xabaringiz kimligingiz yashirilgan holda darhol yetib boradi. Undan keyin xuddi qarshi tomon kabi, javob berayotgan xabaringizga javob tarzida yozing. Keyinroq havolani yana bossangiz, eski suhbat davom etmaydi — yangisi boshlanadi.\n\nReaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz o'zidagi nusxada xuddi shu reaksiyani ko'radi. U sizning emas, mening rasmim yonida chiqadi, shuning uchun hech narsani oshkor qilmaydi. Reaksiyani almashtirsangiz yoki olib tashlasangiz, u tomonda ham shunday bo'ladi. Har bir xabarga bitta reaksiya o'tadi va faqat quyidagilar:\n{reactions}\n⚠️ DIQQAT: Telegram Premium reaksiyalari (maxsus emojilar) suhbatdoshingizga O'TMAYDI — u ularni ko'rmaydi.\n\nBuyruqlar:\n/link - qutingiz havolasini olish\n/conversations - suhbatlaringiz: ochiqlari va arxivdagilari\n/which - istalgan xabarga javob qilib yuboring: u qaysi suhbatdan ekanini aytaman\n/newlink, /pause, /resume - bular /link ekranida tugma sifatida ham bor\n/blocked - bloklanganlar ro'yxati\n/stats - qisqa statistika; u /link ekranida ham bor\n/export - suhbatni qaytarib olish: shu yerga nusxalab yoki hujjat qilib\n/donate - server xarajatlariga hissa qo'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivga o'tadi (/conversations ichidagi har bir suhbatda ham shu tugma bor)\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
         "follow_link_invalid": "Bu havola yaroqsiz — uni ulashgan kishi qayta tiklagan bo'lishi mumkin. Ulardan yangisini so'rang.",
         "follow_link_own": "Bu o'zingizning havolangiz — o'zingizga yozsangiz, shunchaki eslatma bo'lib qoladi! Havolani boshqalarga ulashing: /link",
         "follow_link_blocked": 'Bu odamga xabar yubora olmaysiz.',
@@ -726,6 +804,7 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 Bot hozir yangilanmoqda, shuning uchun yangi ishni boshlab bo'lmaydi — birozdan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
         "update_will_reset": "🔧 Diqqat: bot yangilanadi va hozir bajarilayotgan ishingiz to'xtab qoladi. Bir necha daqiqadan keyin qaytadan boshlashingiz mumkin.",
         "update_done_try_now": "✅ Yangilanish tugadi — endi qaytadan urinib ko'rishingiz mumkin.",
+        "gift_granted": "🎁 Bizda 100 dan ortiq foydalanuvchi bo'ldi, rahmat! Sizga {amount} ⚡ bepul kredit berildi, u {date} gacha amal qiladi. Bu {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi. Balansingiz: /balance",
         "reply_forbidden": "Javobingizni yetkazib bo'lmadi — ular sizni bloklagan yoki botni tark etgan bo'lishi mumkin.",
         "reply_failed": "Javobingizni yetkazib bo'lmadi: {error}",
         "delivered_confirmation": "Yetkazildi ↩️",
@@ -891,6 +970,7 @@ STRINGS = {
             "• кого вы заблокировали\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
+            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "\n"
             "Чего здесь нет — самих сообщений. Они проходят насквозь и тут не сохраняются: они "
@@ -1006,15 +1086,53 @@ STRINGS = {
             "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
             "\n"
             "Основные команды: /link · /conversations · /cancel\n"
-            "Все команды и все реакции — в полном руководстве: кнопка ниже или /help full.\n"
+            "Все команды и все реакции — в полном руководстве: кнопка ниже или /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
+        "help_page_everything": "Полное руководство: /fullhelp",
+        "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
+        "helppage_link": (
+            "🔗 /link — ссылка на ваш анонимный ящик\n"
+            "\n"
+            "/link показывает вашу ссылку и принимает ли она сообщения. Разместите её где угодно: любой, кто её откроет, сможет написать вам здесь, а вы никогда не увидите, кто это. Каждый раз, когда кто-то её открывает, начинается новая беседа.\n"
+            "Под ней:\n"
+            "• ⏸️ Пауза: новых бесед не будет, пока не возобновите; уже идущие продолжают работать. Ещё: /pause и /resume.\n"
+            "• 🔄 Новая ссылка: старая перестаёт начинать беседы; уже идущие работают, а ящик на паузе так и остаётся на паузе. Ещё: /newlink.\n"
+            "• Два числа: сколько разных гостей вам написали и в скольких беседах. Ещё: /stats.\n"
+            "Ссылка не меняется, пока вы не сделаете новую.\n"
+            "\n"
+            "Пример: отправьте /link, скопируйте ссылку и поставьте её в био Instagram."
+        ),
+        "helppage_export": (
+            "📄 /export — беседа вне чата\n"
+            "\n"
+            "Пользоваться могут обе стороны: вы — любой своей беседой, гость — своей.\n"
+            "1. /export, затем выберите беседу (или «📚 Все»).\n"
+            "2. Выберите как:\n"
+            "• 📋 Скопировать сюда: Telegram заново копирует сообщения в этот чат ровно такими, какими они были, — стикеры, голосовые, файлы. Я их не читаю.\n"
+            "• 📝 Собрать документ: я один раз читаю каждое сообщение и собираю HTML-файл; фото и другие медиа отмечены как [Фото] и т. п., ничего не скачивается. Потом ничего не хранится. Время — по UTC.\n"
+            "• Ни имён, ни юзернеймов, ни id в нём нет: стороны — «Owner» и «Anon». Другой стороне ничего не сообщается.\n"
+            "• До {max} сообщений за раз. Только то, что ещё хранится: сообщения беседы забываются через {days} дн. после её последнего движения, а удалённое из чата сообщение скопировать нельзя.\n"
+            "\n"
+            "Пример: /export, нажмите «#3», затем «📝 Собрать документ» — файл придёт сюда."
+        ),
+        "helppage_which": (
+            "❓ /which — из какой беседы это сообщение?\n"
+            "\n"
+            "Ответьте на любое сообщение в этом чате командой /which: смахните сообщение или зажмите его и выберите «Ответить».\n"
+            "• Вы, владелец ящика: я назову номер беседы. Это работает и для ваших собственных ответов, и для следующих фото альбома, и для каждой части длинного сообщения.\n"
+            "• Гость: я укажу, где эта беседа начинается.\n"
+            "Удобно, когда в чате перемешались несколько бесед.\n"
+            "\n"
+            "Пример: ответьте на сообщение командой /which, и я отвечу: «{example}»"
+        ),
         "reactions_update_note": "🆕 Теперь здесь можно ставить реакции на сообщения — собеседник увидит их от моего имени. Подробнее: /help",
+        "gift_ad": "🎉 У Mumu ботов уже больше {users} уникальных пользователей, поэтому мы решили раздать {amount} ⚡ бесплатного кредита! Получить и потратить его можно в {download} и {convert}.\n\n<i>Чтобы получить подарок, отправьте любое сообщение любому из этих двух ботов: он начислится автоматически. Получите его до {claim_by}; после получения он действует {days} дней.</i>",
         "reaction_not_passed": "⚠️ Собеседник не увидит эту реакцию — передаются только обычные эмодзи.",
         "reaction_one_only": "⚠️ Собеседник видит только вашу последнюю реакцию — на сообщение передаётся одна.",
-        "help_text": 'Есть два способа пользоваться этим ботом:\n\nЗаведите свой ящик — /link даёт вам постоянную ссылку. Разместите её где угодно на виду (в био, канале, истории — где хотите). Любой, кто по ней перейдёт, сможет отправить вам анонимное сообщение прямо в этот чат — вы не увидите, кто это.\nОтвечайте ответом на сообщение — смахните его вправо или нажмите и удерживайте и выберите «Ответить». Так я понимаю, к какой беседе относится ваш ответ, поэтому это обязательно, а не по желанию: ссылка открытая, с вами могут говорить сразу несколько человек, и сообщение, которое не говорит, на что отвечает, может уйти не туда. У собеседника ваш ответ тоже появится как настоящий ответ.\n\nВам прислали чужую ссылку? Перейдите по ней и напишите — первое сообщение уйдёт сразу, а ваша личность останется скрытой. Дальше отвечайте ответом на сообщение, точно так же, как другая сторона. Если позже перейти по той же ссылке снова, начнётся новая беседа, а не продолжение старой.\n\nРеакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же на своей копии. Она стоит рядом с моей картинкой, а не с вашей, так что ничего не выдаёт. Поменяете или уберёте её — у собеседника будет так же. На одно сообщение передаётся одна реакция, и только из этого списка:\n{reactions}\n⚠️ ВНИМАНИЕ: реакции Telegram Premium (особые эмодзи) НЕ передаются — собеседник их не увидит.\n\nКоманды:\n/link - получить ссылку на свой ящик\n/conversations - ваши разговоры: открытые и в архиве\n/which - отправьте ответом на любое сообщение: скажу, из какого оно разговора\n/newlink, /pause, /resume - они же кнопки на экране /link\n/blocked - посмотреть, кого вы заблокировали\n/stats - краткая статистика, она же на экране /link\n/export - получить разговор обратно: копией сюда или документом\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/archive - отправьте ответом на сообщение, и этот разговор уйдёт в архив (в /conversations такая кнопка есть у каждого разговора)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": 'Есть два способа пользоваться этим ботом:\n\nЗаведите свой ящик — /link даёт вам постоянную ссылку. Разместите её где угодно на виду (в био, канале, истории — где хотите). Любой, кто по ней перейдёт, сможет отправить вам анонимное сообщение прямо в этот чат — вы не увидите, кто это.\nОтвечайте ответом на сообщение — смахните его вправо или нажмите и удерживайте и выберите «Ответить». Так я понимаю, к какой беседе относится ваш ответ, поэтому это обязательно, а не по желанию: ссылка открытая, с вами могут говорить сразу несколько человек, и сообщение, которое не говорит, на что отвечает, может уйти не туда. У собеседника ваш ответ тоже появится как настоящий ответ.\n\nВам прислали чужую ссылку? Перейдите по ней и напишите — первое сообщение уйдёт сразу, а ваша личность останется скрытой. Дальше отвечайте ответом на сообщение, точно так же, как другая сторона. Если позже перейти по той же ссылке снова, начнётся новая беседа, а не продолжение старой.\n\nРеакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же на своей копии. Она стоит рядом с моей картинкой, а не с вашей, так что ничего не выдаёт. Поменяете или уберёте её — у собеседника будет так же. На одно сообщение передаётся одна реакция, и только из этого списка:\n{reactions}\n⚠️ ВНИМАНИЕ: реакции Telegram Premium (особые эмодзи) НЕ передаются — собеседник их не увидит.\n\nКоманды:\n/link - получить ссылку на свой ящик\n/conversations - ваши разговоры: открытые и в архиве\n/which - отправьте ответом на любое сообщение: скажу, из какого оно разговора\n/newlink, /pause, /resume - они же кнопки на экране /link\n/blocked - посмотреть, кого вы заблокировали\n/stats - краткая статистика, она же на экране /link\n/export - получить разговор обратно: копией сюда или документом\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/archive - отправьте ответом на сообщение, и этот разговор уйдёт в архив (в /conversations такая кнопка есть у каждого разговора)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "follow_link_invalid": "Эта ссылка недействительна — возможно, тот, кто ею поделился, сбросил её. Попросите у него новую.",
         "follow_link_own": "Это ссылка на ваш собственный ящик — писать самому себе было бы просто заметкой для себя! Поделитесь ею с другими: /link",
         "follow_link_blocked": "Вы не можете написать этому человеку.",
@@ -1161,6 +1279,7 @@ STRINGS = {
         "update_soon_try_later_soon": '🔧 Сейчас меня обновляют, поэтому я не могу начать ничего нового — попробуйте снова чуть позже. Я напишу, когда вернусь.',
         "update_will_reset": '🔧 Внимание: меня скоро обновят, и то, что вы сейчас начали, будет сброшено. Через несколько минут сможете начать заново.',
         "update_done_try_now": '✅ Обновление завершено — можете пробовать снова.',
+        "gift_granted": "🎁 Нас уже больше 100 — спасибо! Вам начислено {amount} ⚡ бесплатного кредита, он действует до {date}. Этого хватит примерно на {conversions} платных конвертаций в {convert} или на скачивание больших файлов в {download}. Ваш баланс: /balance",
         "reply_forbidden": "Не удалось доставить ваш ответ — возможно, вас заблокировали или человек покинул бота.",
         "reply_failed": "Не удалось доставить ваш ответ: {error}",
         "delivered_confirmation": "Доставлено ↩️",

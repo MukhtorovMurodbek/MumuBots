@@ -1984,8 +1984,9 @@ async def group_s():
           f"{len(brief)} vs {len(ab.build_help_text('en', full=True))}")
     check("which still says reactions travel, and that Premium ones do not",
           "react" in brief.lower() and "Premium" in brief)
-    check("with one button: to the full guide",
-          owner.buttons(help_id) == [i18n.t("en", "help_full_button")], owner.buttons(help_id))
+    pages = ["/" + name for name in ab.HELP_PAGES]
+    check("with a button per help page, then one to the full guide",
+          owner.buttons(help_id) == pages + [i18n.t("en", "help_full_button")], owner.buttons(help_id))
     await owner.tap("Full guide", help_id)
     full = (tele.find(OWNER, help_id) or {}).get("text") or ""
     check("the button turns it into the full guide, in place",
@@ -1995,8 +1996,8 @@ async def group_s():
           [e for e in anon_logic.RELAYABLE_REACTIONS if e not in full])
     check("with the Premium warning in capitals, where it stands out",
           "⚠️ NOTE: Telegram Premium reactions" in full and "can NOT be passed on" in full)
-    check("and a way back", owner.buttons(help_id) == [i18n.t("en", "help_brief_button")],
-          owner.buttons(help_id))
+    check("and a way back, under the same page buttons",
+          owner.buttons(help_id) == pages + [i18n.t("en", "help_brief_button")], owner.buttons(help_id))
     await owner.tap("Short version", help_id)
     check("which turns it back", (tele.find(OWNER, help_id) or {}).get("text") == brief)
     await owner.send("/help full")

@@ -35,7 +35,8 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/convert` | Points to ConvertBot, where file conversion lives, with a button to open it. |
 | `/start` | Instructions. The first `/start` from a new user asks which language to use, once. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions in short, with a button for the full guide; `/help full` goes straight to it. |
+| `/help` | A short guide; the buttons under it open each command's page (also `/help <command>`), and "📖 Full guide" shows everything (also `/fullhelp`, `/help full`). |
+| `/fullhelp` | The full guide in one message, the same as `/help full`. |
 | `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |

@@ -42,7 +42,7 @@ import os
 import shutil
 import uuid
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -61,6 +61,7 @@ from telegram import (
     BotCommand, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
     LinkPreviewOptions, Update, InlineKeyboardButton, InlineKeyboardMarkup,
 )
+from telegram.error import BadRequest
 
 # For any message whose text is an error. yt-dlp's failures quote their own
 # documentation URLs, and Telegram turns the first link in a message into a
@@ -80,6 +81,8 @@ from telegram.ext import (
 )
 
 import cards
+import db
+import delivery_cache
 import family_link
 import i18n
 import problems
@@ -88,8 +91,12 @@ import net
 import platforms
 import resolvers
 import routewatch
+import sent_files
+import shared_features
 import big_files
 import large_files
+import merge
+import video
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -107,9 +114,15 @@ from db import (
     save_provider_health,
     download_allowance,
     record_download,
+    sent_files_get,
+    sent_files_put,
+    sent_files_confirmed,
+    sent_files_used,
+    sent_files_drop,
 )
 from shared_features import (
     note_job,
+    note_tap,
     publish_profile,
     publish_commands,
     refresh_chat_menu,
@@ -123,6 +136,7 @@ from shared_features import (
     problem_report_callback,
     refuse_new_work,
     attach_flood_gate,
+    attach_promo_claim,
     attach_maintenance,
     CANCEL_PICK_ALL,
     CANCEL_PICK_NONE,
@@ -147,8 +161,13 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout_callback,
@@ -171,6 +190,9 @@ BOT_USERNAME = (os.environ.get("DBOT_USERNAME") or "").strip().lstrip("@") or No
 
 
 BOT_NAME = "downloaderbot"  # this bot's id within SIBLING_BOTS
+
+# The key the stored file ids are filed under comes from the token (sent_files.py).
+sent_files.configure(BOT_TOKEN)
 
 # Owner-only admin tools (/messageas, /dbdump, /status) -- comma-separated
 # Telegram user ids. Empty/unset means disabled for everyone.
@@ -225,6 +247,22 @@ def _slots() -> asyncio.Semaphore:
     return _download_slots
 
 
+# The "is it still public?" question for a stored file id (resolvers.lookup, in
+# _resend_by_file_id) downloads nothing and takes no download slot, but it asks
+# the same routes the downloads use: a few at a time, so that many old posts sent
+# at once cannot run those routes into their rate limits.
+MAX_CONCURRENT_LOOKUPS = 2
+
+_lookup_slots: asyncio.Semaphore | None = None
+
+
+def _lookups() -> asyncio.Semaphore:
+    global _lookup_slots
+    if _lookup_slots is None:
+        _lookup_slots = asyncio.Semaphore(MAX_CONCURRENT_LOOKUPS)
+    return _lookup_slots
+
+
 # ...and no more than MAX_PER_USER of them to any one person.
 #
 # This was one each, behind a Lock, and it was never the thing that made
@@ -254,8 +292,75 @@ MAX_PENDING_PER_USER = max(1, int(os.environ.get("DBOT_MAX_PENDING_PER_USER") or
 # download also refuses to start with less than MIN_FREE_MB free.
 MIN_FREE_MB = int(os.environ.get("DBOT_MIN_FREE_MB") or 300)
 
+# The last delivery is kept a few minutes (delivery_cache.py). It lives in the
+# work directory too, so it is kept only while the disk still has what the
+# downloads themselves need: the refusal level above plus a full-size download
+# for every slot. And it gives way: a download that needs more than that (a
+# large file, a merge) first deletes kept files, least recently used first
+# (_make_room), so a kept delivery does not make a download refuse for space.
+delivery_cache.configure(resolvers._WORK_DIR)  # noqa: SLF001
+
+
+def _cache_floor_mb() -> int:
+    return MIN_FREE_MB + MAX_CONCURRENT_DOWNLOADS * video.MAX_DOWNLOAD_MB
+
+
+def _make_room(mb: int) -> None:
+    """A download is about to take up to `mb` MB: kept files go first, until the
+    disk has that and MIN_FREE_MB more, or none are left."""
+    delivery_cache.make_room(mb, MIN_FREE_MB)
+
+# An album as one PDF or one ZIP (merge.py), on a button under the album. The
+# post is fetched again for it -- the delivery cache (delivery_cache.py) does not
+# serve this button yet, only the redo button and the same link sent again -- so
+# these are the most one tap may fetch:
+# how many files, and how many MB in all (the total of what has been downloaded,
+# counted as each file lands; the first one past it stops the fetching). Past
+# either the person is told, and nothing is built. DBOT_MAX_DOWNLOAD_MB still
+# caps each file on its own.
+MERGE_MAX_ITEMS = int(os.environ.get("DBOT_MERGE_MAX_ITEMS") or 20)
+MERGE_MAX_MB = int(os.environ.get("DBOT_MERGE_MAX_MB") or 48)
+
 _user_slots: "dict[int, asyncio.Semaphore]" = {}
 _user_pending: "dict[int, int]" = {}
+
+# The same link again while the first is still going (handle_link): the links
+# a person has queued or running, as (chat id, person id, platform, canonical
+# link) -> when it was marked (time.monotonic). The copy gets a 👌 and no job:
+# no allowance check, no record, no status message. A mark is made when the
+# link is accepted and cleared when its job ends (_spawn_download's finally) or
+# when the link is refused before a job starts, so the dict never holds more
+# than the jobs in flight. IN_FLIGHT_MAX_SECONDS is the belt and braces: a mark
+# older than that is ignored and overwritten, in case one was somehow never
+# cleared, so that a link can never be stuck for good.
+_in_flight: "dict[tuple[int, int, str, str], float]" = {}
+IN_FLIGHT_MAX_SECONDS = 3600
+
+
+def _already_in_flight(key) -> bool:
+    marked = _in_flight.get(key)
+    return marked is not None and time.monotonic() - marked < IN_FLIGHT_MAX_SECONDS
+
+
+def _clear_in_flight(key, stamp) -> None:
+    """Take a link's mark down, only if it is still the one this job made: a job
+    that ran past IN_FLIGHT_MAX_SECONDS may find its mark replaced by a newer copy
+    of the link, and that mark is the newer job's to clear."""
+    if _in_flight.get(key) == stamp:
+        _in_flight.pop(key, None)
+
+
+async def _answer_duplicate(update: Update) -> None:
+    """The one answer to a link that is already being fetched: a 👌 on the copy.
+    A reaction rather than a line of text because it cannot spam back during a
+    paste storm and needs no translation (the first link's own status message is
+    already on screen). Switching to text later is a change to this function
+    only. Never raises: a reaction that cannot be set (an old message, a chat
+    that does not allow it) is nothing the person needs to hear about."""
+    try:
+        await update.effective_message.set_reaction("👌")
+    except Exception as exc:
+        logger.debug("Couldn't react to a repeated link (%s)", type(exc).__name__)
 
 
 @asynccontextmanager
@@ -285,15 +390,21 @@ def _free_mb() -> "int | None":
         return None
 
 
-def _spawn_download(context, update, work) -> None:
+def _spawn_download(context, update, work, in_flight=None) -> None:
     """Run one link's whole download in a task of its own.
 
     `work` is a coroutine function. The update travels with the task so that
     anything escaping it reaches the error handler attributed to the person
     it happened to -- which, since the handler stopped filing network errors
-    with an update as blips, means it is reported rather than swallowed."""
+    with an update as blips, means it is reported rather than swallowed.
+
+    `in_flight` is the mark handle_link made for this link (see _in_flight),
+    cleared in the same finally that lowers the pending count: whatever the
+    job did, the next copy of the link is a job of its own. The redo and merge
+    buttons pass none."""
     user_id = update.effective_user.id
     _user_pending[user_id] = _user_pending.get(user_id, 0) + 1
+    stamp = _in_flight.get(in_flight) if in_flight is not None else None
 
     async def run():
         try:
@@ -304,16 +415,66 @@ def _spawn_download(context, update, work) -> None:
                 _user_pending[user_id] = left
             else:
                 _user_pending.pop(user_id, None)
+            if in_flight is not None:
+                _clear_in_flight(in_flight, stamp)
 
     context.application.create_task(run(), update=update)
 
 
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help
-    template (shared_features, "/help in two lengths")."""
+    template (shared_features, "/help in two lengths"). Both end with the
+    sibling-bots pointer; the per-command pages (HELP_PAGES below) are the
+    buttons under the help, not a line in it."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text", username=BOT_USERNAME or "this_bot") + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", username=BOT_USERNAME or "this_bot").rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+
+# ---------- /help <name> and the buttons under /help: a page for each part with options ----------
+# The mechanism is in shared_features ("A page for each command"). Every
+# number on a page is read from the module that owns it when the page is shown
+# -- by attribute, never copied -- so a page says what the code does now.
+# "download" is not a command: it is the page for sending a link.
+
+def _help_large_prices(lang: str, key: str) -> str:
+    return i18n.t(lang, key, free_mb=large_files.FREE_MAX_MB, max=large_files.LARGE_MAX_MB,
+                  first=large_files.first_price(), top=large_files.top_price())
+
+
+def _help_page_download(lang: str) -> str:
+    # Looked at when the page is shown: large_files.CONFIGURED can turn off at runtime.
+    if db.DOWNLOADS_PER_DAY > 0 and db.DOWNLOADS_PER_HOUR > 0:
+        # The same arithmetic as db.download_allowance.
+        quota = i18n.t(lang, "helppage_download_quota",
+                       per_day=db.DOWNLOADS_PER_DAY, per_hour=db.DOWNLOADS_PER_HOUR,
+                       donor_day=int(db.DOWNLOADS_PER_DAY * db.DONOR_MULTIPLIER),
+                       donor_hour=int(db.DOWNLOADS_PER_HOUR * db.DONOR_MULTIPLIER))
+    else:
+        quota = i18n.t(lang, "helppage_download_quota_off")
+    if large_files.CONFIGURED:
+        large = i18n.t(lang, "helppage_download_large", max=large_files.LARGE_MAX_MB,
+                       first=large_files.first_price(), top=large_files.top_price())
+    else:
+        large = i18n.t(lang, "helppage_download_large_off")
+    return i18n.t(lang, "helppage_download", quota=quota, at_once=MAX_PER_USER, waiting=MAX_PENDING_PER_USER,
+                  free_mb=large_files.FREE_MAX_MB, large=large,
+                  merge_items=MERGE_MAX_ITEMS, merge_mb=MERGE_MAX_MB)
+
+
+def _help_page_settings(lang: str) -> str:
+    large = _help_large_prices(lang, "helppage_settings_large") + "\n" if large_files.CONFIGURED else ""
+    return i18n.t(lang, "helppage_settings", username=BOT_USERNAME or "this_bot", large=large)
+
+
+HELP_PAGES = {"download": _help_page_download, "settings": _help_page_settings}
+HELP_ALIASES = {}
+# "download" is not a command, so its button says what the page is about
+# rather than "/download"; "settings" is one, and keeps its name.
+HELP_LABELS = {"download": "help_btn_download"}
 
 
 # Public command menu (the "/" button in Telegram's chat UI) -- set on
@@ -383,7 +544,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES, HELP_LABELS),
     )
 
 
@@ -432,9 +593,14 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=shared_features.NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full))
+                                    reply_markup=help_keyboard(lang, full, (), HELP_PAGES, HELP_LABELS))
 
 
 async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> list[CancelItem]:
@@ -729,7 +895,29 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(timezone.utc)
     users_hour = await asyncio.to_thread(count_active_users_since, now - timedelta(hours=1))
     users_since_start = await asyncio.to_thread(count_active_users_since, START_TIME)
-    await update.message.reply_text(build_status_text(START_TIME, users_hour, users_since_start))
+    await update.message.reply_text(
+        build_status_text(START_TIME, users_hour, users_since_start) + "\n" + _cache_status_line()
+        + "\n" + _sent_files_status_line())
+
+
+def _cache_status_line() -> str:
+    """One line for the owner: counts only, never whose or what."""
+    stats = delivery_cache.stats()
+    if not stats["enabled"]:
+        return "Delivery cache: off"
+    return (f"Delivery cache: {stats['entries']} kept ({stats['bytes'] / (1024 * 1024):.1f} MB), "
+            f"{stats['hits']} hits / {stats['misses']} misses since start")
+
+
+def _sent_files_status_line() -> str:
+    """The file-id store (sent_files.py), for the owner: counts since the bot started,
+    never whose or what."""
+    stats = sent_files.stats()
+    if not stats["enabled"]:
+        return "Sent-file store: off"
+    return (f"Sent-file store: rows read {stats['hit']} fresh / {stats['stale']} stale / {stats['miss']} none; "
+            f"lookups {stats['present']} present / {stats['missing']} missing / {stats['unknown']} unknown; "
+            f"{stats['invalid']} invalid ids, {stats['stored']} stored since start")
 
 
 # How often the in-memory provider scores are written to Postgres. A minute
@@ -903,6 +1091,8 @@ def _ago(seconds: float) -> str:
 # button and no worse than before it existed.
 REDELIVER_PREFIX = "redo:"
 REDELIVER_MEMORY = 5
+# "merge:pdf:<token>" and "merge:zip:<token>": 20 bytes (10 + a 10-character token), against Telegram's 64.
+MERGE_PREFIX = "merge:"
 
 
 def _remember_delivery(context, platform: str, url: str, lossless: bool) -> str:
@@ -910,30 +1100,72 @@ def _remember_delivery(context, platform: str, url: str, lossless: bool) -> str:
     while len(memory) >= REDELIVER_MEMORY:
         memory.pop(next(iter(memory)))
     token = uuid.uuid4().hex[:10]
-    memory[token] = {"platform": platform, "url": url, "lossless": lossless}
+    # "at" is when it was delivered, to count how long people take to tap the
+    # button (REDO_DELAY_BUCKETS); a number, so it survives being saved as JSON.
+    memory[token] = {"platform": platform, "url": url, "lossless": lossless, "at": time.time()}
     return token
 
 
-def _spend_redo(remembered: dict) -> bool:
-    """True the first time the button is taken from this delivery, False every
-    time after. The mark is made in the same breath as the look, with no await
-    between them, so a double tap (two updates in flight at once, before
-    Telegram has taken the button off) cannot get both through. A plain bool,
-    because user_data is saved as JSON."""
-    if remembered.get("spent"):
+# How long after the delivery the redo button was tapped, as the counts name it:
+# [from, to) in seconds. A delivery saved by an older version has no "at": unknown.
+REDO_DELAY_BUCKETS = (
+    (60, "lt1m"), (120, "1-2m"), (300, "2-5m"), (900, "5-15m"), (3600, "15-60m"),
+)
+
+
+def _redo_delay_key(remembered: dict) -> str:
+    at = remembered.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return "redo.after.unknown"
+    seconds = time.time() - at
+    for limit, name in REDO_DELAY_BUCKETS:
+        if seconds < limit:
+            return f"redo.after.{name}"
+    return "redo.after.gt60m"
+
+
+def _spend_action(remembered: dict, action: str) -> bool:
+    """True the first time `action` ("redo", "pdf" or "zip") is taken from this
+    delivery, False every time after. Per action, not per delivery: the PDF of
+    an album and its ZIP are two different things to ask for, and each can be
+    asked for once -- what must not happen is the same one twice, which fetches
+    the album again against the allowance. The mark is made in the same breath
+    as the look, with no await between them, so a double tap (two updates in
+    flight at once) cannot get both through. A list, because user_data is saved
+    as JSON."""
+    spent = remembered.setdefault("spent", [])
+    if not isinstance(spent, list):
+        # 2.1.0 saved a bare True once its redo button was used; user_data
+        # outlives an upgrade, so that delivery's redo is still spent.
+        spent = remembered["spent"] = ["redo"]
+    if action in spent:
         return False
-    remembered["spent"] = True
+    spent.append(action)
     return True
 
 
-def _unspend_redo(remembered: dict) -> None:
-    """Give the button back: the tap that spent it came to nothing (the person
-    was out of downloads), so it is theirs to tap again."""
-    remembered.pop("spent", None)
+def _unspend_action(remembered: dict, action: str) -> None:
+    """Give `action` back: the tap that spent it came to nothing (the person
+    was out of downloads), so the button is theirs to tap again."""
+    spent = remembered.get("spent", [])
+    if isinstance(spent, list) and action in spent:
+        spent.remove(action)
+
+
+def _remembered_kb(lang: str, token: str, remembered: dict):
+    """The keyboard of a delivered album as it stands now: the same buttons it
+    was first sent with (the counts are kept in `remembered` by _send_media),
+    less every action already taken. A tap takes away its own button and no
+    other."""
+    return _nudge_kb(lang, token, remembered.get("lossless", False),
+                     photos=remembered.get("photos", 0), items=remembered.get("items", 0),
+                     spent=remembered.get("spent") if isinstance(remembered.get("spent"), (list, tuple))
+                     else ("redo",) if remembered.get("spent") else ())
 
 
 def _nudge_kb(lang: str | None = None, token: str | None = None,
-              lossless: bool = False) -> InlineKeyboardMarkup | None:
+              lossless: bool = False, photos: int = 0,
+              items: int = 0, spent=()) -> InlineKeyboardMarkup | None:
     # Point at ConvertBot too -- e.g. someone might want just the audio, or
     # a gif, out of what they just downloaded. No file handoff between bots
     # anymore (each bot is fully independent) -- they re-send it there.
@@ -942,21 +1174,35 @@ def _nudge_kb(lang: str | None = None, token: str | None = None,
         # The label says what tapping it *gets you*, not what mode you are in.
         # "Lossless: off" is a setting; "get it as a file" is a thing that
         # happens, and only one of the two reads as a button.
-        rows.append([InlineKeyboardButton(
-            i18n.t(lang, "redeliver_as_compressed" if lossless else "redeliver_as_file"),
-            callback_data=f"{REDELIVER_PREFIX}{token}")])
+        # `spent`: the actions already taken from this delivery, whose buttons are gone.
+        if "redo" not in spent:
+            rows.append([InlineKeyboardButton(
+                i18n.t(lang, "redeliver_as_compressed" if lossless else "redeliver_as_file"),
+                callback_data=f"{REDELIVER_PREFIX}{token}")])
+        # An album, in one file. PDF only where there are pages to make (two
+        # photos; a post of one photograph and a video has nothing to bind),
+        # ZIP wherever there is more than one thing to carry. Same token as the
+        # button above -- merge_callback finds the link the same way.
+        merge_row = []
+        if photos >= merge.MIN_PDF_PHOTOS and "pdf" not in spent:
+            merge_row.append(InlineKeyboardButton("📄 PDF", callback_data=f"{MERGE_PREFIX}pdf:{token}"))
+        if items >= merge.MIN_ZIP_ITEMS and "zip" not in spent:
+            merge_row.append(InlineKeyboardButton("🗜 ZIP", callback_data=f"{MERGE_PREFIX}zip:{token}"))
+        if merge_row:
+            rows.append(merge_row)
     kb_row = sibling_bots_keyboard_row(BOT_NAME, only="convertbot")
     if kb_row:
         rows.append(kb_row)
     return InlineKeyboardMarkup(rows) if rows else None
 
 
-async def _set_buttons(query, markup) -> None:
-    """Put `markup` under the message the tapped button was on."""
+async def _take_button_off(query, lang: str, token: str, remembered: dict) -> None:
+    """Put the delivery's keyboard under the message as it now stands (see
+    _remembered_kb): the buttons of the actions spent are gone, the rest stay."""
     try:
-        await query.edit_message_reply_markup(reply_markup=markup)
+        await query.edit_message_reply_markup(reply_markup=_remembered_kb(lang, token, remembered))
     except Exception:
-        logger.debug("Couldn't change the delivery's button", exc_info=True)
+        logger.debug("Couldn't change the delivery's buttons", exc_info=True)
 
 
 async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -966,23 +1212,34 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = await i18n.get_lang(update.effective_user.id, context)
     token = query.data[len(REDELIVER_PREFIX):]
     remembered = context.user_data.get("redeliver", {}).get(token)
-    if not remembered or not _spend_redo(remembered):
+    if not remembered or not _spend_action(remembered, "redo"):
+        # Counts only (note_tap): an old button, or one already used.
+        note_tap("redo.spent" if remembered else "redo.expired")
         await query.answer(i18n.t(lang, "redeliver_expired"), show_alert=True)
         return
     await query.answer()
+    # Which way, and how long after the delivery: the numbers that say whether the
+    # five-minute delivery cache is the right length (counts only).
+    note_tap("redo.to_compressed" if remembered.get("lossless") else "redo.to_file")
+    note_tap(_redo_delay_key(remembered))
+    # This link is now the person's latest, whatever else they were looking at:
+    # a kept delivery of any other link is dropped, one of this link keeps going
+    # (delivery_cache.note_link). Before the allowance below, like handle_link.
+    delivery_cache.note_link(update.effective_user.id, remembered["platform"], remembered["url"])
     # The button is spent (above, before any await: a double tap is two updates
     # in flight, and the markup below is only edited once Telegram answers):
     # tapping it twice would download the same file twice against the same
     # allowance, and the second tap is always a mis-tap. The markup is edited
     # rather than the text, because the message it is under is a photo or a
-    # video and edit_message_text does not work on those.
-    await _set_buttons(query, _nudge_kb())
+    # video and edit_message_text does not work on those. Only this button goes:
+    # the album's PDF and ZIP buttons stay, they are other things to ask for.
+    await _take_button_off(query, lang, token, remembered)
 
     allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
     if not allowance["allowed"]:
         # Nothing was started, so nothing is spent: the button comes back.
-        _unspend_redo(remembered)
-        await _set_buttons(query, _nudge_kb(lang, token, remembered["lossless"]))
+        _unspend_action(remembered, "redo")
+        await _take_button_off(query, lang, token, remembered)
         await query.message.reply_text(_allowance_message(lang, allowance))
         return
     await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
@@ -990,10 +1247,215 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     async def work():
         await _resolve_and_send(
             update, context, remembered["platform"], remembered["url"],
-            lossless_override=not remembered["lossless"],
+            lossless_override=not remembered["lossless"], from_redo=True,
         )
 
     _spawn_download(context, update, work)
+
+
+# ---------------------------------------------------------------------------
+# an album as one file
+# ---------------------------------------------------------------------------
+# 📄 PDF and 🗜 ZIP, on the line that follows a delivered album. They are the
+# redo button's sibling and work the same way: the token in the callback data
+# finds the link in user_data, the tap counts as one download, and the post is
+# resolved and fetched again. The delivery cache (delivery_cache.py) keeps the
+# files of the last download for five minutes, but a merge does not use them yet
+# (a follow-up): it fetches, builds, sends, and deletes what it touched. What is
+# built is sent as one document, and everything it touched is deleted, whatever
+# happened.
+
+class _MergeStop(Exception):
+    """The merge ends here, with this message (an i18n key) to the person."""
+
+    def __init__(self, key: str):
+        super().__init__(key)
+        self.key = key
+
+
+def _merge_text(lang: str, key: str) -> str:
+    # Every merge message gets every number any of them might mention.
+    return i18n.t(lang, key, items=MERGE_MAX_ITEMS, mb=MERGE_MAX_MB, mp=merge.MAX_MEGAPIXELS)
+
+
+def _remove_files(paths) -> None:
+    for path in paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            logger.warning("couldn't remove %s", path)
+
+
+async def merge_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The 📄 PDF and 🗜 ZIP buttons under a delivered album. Mirrors
+    redeliver_callback: answer, spend the buttons, count one download, and run
+    the work in a task of its own."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    kind, _, token = query.data[len(MERGE_PREFIX):].partition(":")
+    # This action is spent here, by the first tap, before any await: its button
+    # is only taken off further down, and until Telegram has done that a double
+    # tap (or a second device) delivers a second tap of the same button. It
+    # would fetch the album again and count a second download. The second tap
+    # says what any spent button says. The other action on the same album (the
+    # ZIP after the PDF) is a different thing to ask for and still works, and
+    # its button stays.
+    remembered = context.user_data.get("redeliver", {}).get(token) if kind in ("pdf", "zip") else None
+    if not remembered or not _spend_action(remembered, kind):
+        if not remembered:
+            note_tap("merge.expired")
+        await query.answer(i18n.t(lang, "redeliver_expired"), show_alert=True)
+        return
+    await query.answer()
+    # Only the tapped button goes (a second tap of it would fetch the same album
+    # a second time against the same allowance); the other merge button, the
+    # redo button and the nudge row stay.
+    await _take_button_off(query, lang, token, remembered)
+
+    allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
+    if not allowance["allowed"]:
+        # Nothing was started, so nothing is spent: the button comes back.
+        _unspend_action(remembered, kind)
+        await _take_button_off(query, lang, token, remembered)
+        await query.message.reply_text(_allowance_message(lang, allowance))
+        return
+    # Counted here, before anything is fetched, on purpose: it is a rate limit
+    # and not money, so a merge that is then refused (merge_no_photos, say)
+    # still counts, exactly as a download that fails does.
+    await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
+
+    async def work():
+        await _merge_and_send(update, context, kind, remembered["platform"], remembered["url"])
+
+    _spawn_download(context, update, work)
+
+
+async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          kind: str, platform: str, url: str) -> bool:
+    """Fetch the post again, build one PDF (its photos) or one ZIP (all of it),
+    send it as a document, delete everything. True if it was sent.
+
+    The same functions and the same limits as _resolve_and_send: the route
+    chain, resolvers.download() with its per-file ceiling, the free-space check,
+    and the same three kinds of slot. On top of those, the two limits of this
+    feature -- MERGE_MAX_ITEMS files, MERGE_MAX_MB in all -- and neither is
+    checked after the fact: a post with too many files is refused before the
+    first is fetched, and the fetching stops at the file that takes the total
+    past the MB limit."""
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    user_id, chat_id = update.effective_user.id, update.effective_chat.id
+    message = update.effective_message
+    refusal = await refuse_new_work(lang, user_id, chat_id)
+    if refusal:
+        await message.reply_text(refusal)
+        return False
+
+    status = await LiveMessage.reply_to(message, i18n.t(lang, "fetching"))
+    if _slots().locked() or _user_slots_full(user_id):
+        await status.set(context.bot, i18n.t(lang, "queued"))
+
+    paths: list[str] = []
+    resolved = None
+    # Under the work directory like every download, with a name nobody can
+    # guess or collide with; the person is shown the proper one (merge.output_name).
+    out_path = os.path.join(resolvers._WORK_DIR, f"{uuid.uuid4().hex}.{kind}")  # noqa: SLF001
+    async with _user_slot(user_id), _slots(), lifecycle.busy(
+            chat_id, i18n.t(lang, "restarting_send_again")):
+        # The inputs and the output it builds: kept deliveries give way first.
+        _make_room(MERGE_MAX_MB * 2)
+        free = _free_mb()
+        if free is not None and free < MIN_FREE_MB:
+            await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
+            return False
+        try:
+            try:
+                resolved = await resolvers.resolve(platform, url)
+            except resolvers.NothingWorked as exc:
+                logger.info("no route worked for %s (merge): %s", platform, exc)
+                if exc.kind not in ("missing", "too_big"):
+                    note_job(False)
+                raise _MergeStop({
+                    "missing": "download_missing",
+                    "blocked": "download_blocked",
+                    "too_big": "merge_too_big",
+                }.get(exc.kind, "download_all_routes_failed"))
+            # A PDF is made of the photos and nothing else; a video in the post
+            # is not fetched at all. A ZIP takes everything.
+            wanted = [item for item in resolved.items if item.kind == "photo"] \
+                if kind == "pdf" else list(resolved.items)
+            if kind == "pdf" and len(wanted) < merge.MIN_PDF_PHOTOS:
+                raise _MergeStop("merge_no_photos")
+            if len(wanted) > MERGE_MAX_ITEMS:
+                raise _MergeStop("merge_too_big")
+
+            await status.set(context.bot, i18n.t(lang, "downloading"))
+            total = 0
+            for item in wanted:
+                paths.append(await resolvers.download(item))
+                total += os.path.getsize(paths[-1])
+                if total > MERGE_MAX_MB * 1024 * 1024:
+                    raise _MergeStop("merge_too_big")
+
+            if kind == "pdf":
+                # One at a time across the whole process (merge.pdf_gate): a
+                # decode is a few hundred MB. Whoever waits sees the same
+                # "working" message as whoever builds.
+                try:
+                    await merge.build_pdf_queued(paths, out_path)
+                except (merge.NothingToMerge, merge.NotAPhoto):
+                    # build_pdf leaves out what is not a still photograph, as
+                    # this leaves out a video; with fewer than two left it is
+                    # the same ending as a post that had fewer to begin with.
+                    raise _MergeStop("merge_no_photos")
+            else:
+                await asyncio.to_thread(merge.build_zip, paths, out_path)
+            if os.path.getsize(out_path) > large_files.BOT_API_SEND_BYTES:
+                # Possible for a PDF (a PNG that is smaller than the JPEG
+                # it becomes); the Bot API would refuse it, so say so first.
+                raise _MergeStop("merge_too_big")
+
+            caption = None
+            if await asyncio.to_thread(get_caption_enabled, user_id):
+                caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+            with open(out_path, "rb") as handle:
+                # As a document, and with the content-type sniffing off, which
+                # is what keeps Telegram from deciding a ZIP of videos is a
+                # video (see _send_media).
+                await message.reply_document(
+                    handle, filename=merge.output_name(platform, kind),
+                    caption=caption, read_timeout=120, write_timeout=120,
+                    disable_content_type_detection=True,
+                )
+            await status.delete(context.bot)
+            note_job(True)
+        except _MergeStop as stop:
+            await status.set(context.bot, _merge_text(lang, stop.key), **NO_PREVIEW)
+            return False
+        except net.TooLarge:
+            await status.set(context.bot, _merge_text(lang, "merge_too_big"), **NO_PREVIEW)
+            return False
+        except merge.PictureTooLarge as exc:
+            logger.info("merge refused a picture: %s", exc)
+            await status.set(context.bot, _merge_text(lang, "merge_picture_too_big"), **NO_PREVIEW)
+            return False
+        except net.FetchError as exc:
+            note_job(False)
+            await status.set(context.bot, str(exc), **NO_PREVIEW)
+            return False
+        except Exception:
+            note_job(False)
+            logger.exception("Merging %s (%s) failed", platform, kind)
+            await status.set(context.bot, _merge_text(lang, "merge_failed"), **NO_PREVIEW)
+            return False
+        finally:
+            # Everything this touched, whatever happened: the files fetched, any
+            # a route had already put on disk (yt-dlp's), and the output.
+            _remove_files(paths + [item.path for item in (resolved.items if resolved else [])]
+                          + [out_path])
+
+    await _after_send(update, context, lang)
+    return True
 
 
 async def _after_send(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -1064,8 +1526,39 @@ async def _reply_image(update: Update, data: bytes, stem: str, reply_markup=None
         BytesIO(data), reply_markup=reply_markup)
 
 
+@contextmanager
+def _media_source(item, path):
+    """What goes to Telegram for one file: its stored file id (sent_files.StoredFile),
+    or the file on disk, opened to be streamed."""
+    stored = getattr(item, "file_id", None)
+    if stored:
+        yield stored
+    else:
+        with open(path, "rb") as handle:
+            yield handle
+
+
+def _file_id_of(sent, kind: str, lossless: bool) -> "str | None":
+    """The file id Telegram gave the message `sent`, or None when it does not carry
+    the kind of file the form expects: a clip with no sound that Telegram turned
+    into an animation, say. Then nothing is stored for the delivery."""
+    try:
+        if lossless:
+            attached = sent.document
+        elif kind == "video":
+            attached = sent.video
+        else:
+            photos = sent.photo
+            attached = photos[-1] if photos else None
+        file_id = attached.file_id if attached is not None else None
+    except (AttributeError, IndexError, TypeError):
+        return None
+    return file_id if isinstance(file_id, str) and file_id else None
+
+
 async def _send_media(update, context, items_with_paths, lang,
-                      lossless: bool | None = None, redeliver_token: str | None = None) -> None:
+                      lossless: bool | None = None, redeliver_token: str | None = None,
+                      probing: "video.ProbeRun | None" = None) -> "list[tuple[str, str]] | None":
     """Put what was resolved into the chat.
 
     One file goes as a photo or a video so it plays inline; several go as an
@@ -1075,45 +1568,92 @@ async def _send_media(update, context, items_with_paths, lang,
     the Bot API sniffs an uploaded .mp4, decides it is really a video, and
     delivers it re-encoded, which is the entire thing that branch exists to
     avoid.
+
+    A video sent as a video is measured first (video.probe) and goes with its
+    real width, height and duration: left out, Telegram draws it as a square.
+    Documents and photos are not measured. `probing` is the delivery's probe
+    budget (video.ProbeRun); a delivery sent in several calls (_send_large)
+    passes the same one to each, so the budget is one per delivery.
+
+    An item may carry a stored `file_id` instead of a file on disk
+    (sent_files.StoredFile; its path is None): it is sent by that id, with the
+    same captions, keyboard and album chunks, and is not measured -- Telegram
+    already has its shape.
+
+    Returns the file id Telegram gave each file, as (kind, file id) in the order
+    the items were given, so that the delivery can be stored (sent_files.py); None
+    if any of them is missing or is not the kind of file the form expects.
     """
     caption = None
     if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
     if lossless is None:
         lossless = await asyncio.to_thread(get_lossless_enabled, update.effective_user.id)
-    keyboard = _nudge_kb(lang, redeliver_token, lossless)
+    if probing is None:
+        probing = video.ProbeRun()
+
+    async def shape_of(path: str) -> dict:
+        """The keyword arguments that give a video its shape; none when it could
+        not be measured. After one ffprobe has been killed for taking too long the
+        rest of the delivery is not measured at all, so that an album built to
+        stall it costs one wait, not one per file."""
+        if probing.exhausted:
+            return {}
+        shape = await video.probe(path, probing)
+        if shape is None:
+            return {}
+        fields = {"width": shape.width, "height": shape.height}
+        if shape.duration is not None:
+            fields["duration"] = shape.duration
+        return fields
+
+    photos = sum(1 for item, _ in items_with_paths if item.kind == "photo")
+    # What the keyboard was built from stays with the delivery, so that a tap can
+    # rebuild it without the button it spent (_remembered_kb).
+    remembered = context.user_data.get("redeliver", {}).get(redeliver_token)
+    if remembered is not None:
+        remembered["photos"], remembered["items"] = photos, len(items_with_paths)
+    keyboard = _nudge_kb(lang, redeliver_token, lossless, photos=photos, items=len(items_with_paths))
     # See _reply_image: this is also reached from the redeliver button.
     message = update.effective_message
 
     if len(items_with_paths) == 1:
         item, path = items_with_paths[0]
+        shape = (await shape_of(path) if item.kind == "video" and not lossless
+                 and not getattr(item, "file_id", None) else {})
         # Streamed from disk by python-telegram-bot rather than read into
         # memory here first.
-        with open(path, "rb") as f:
+        with _media_source(item, path) as f:
             if lossless:
-                await message.reply_document(
+                sent = await message.reply_document(
                     f, filename=os.path.basename(item.filename or path),
                     caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                     disable_content_type_detection=True,
                 )
             elif item.kind == "video":
-                await message.reply_video(
+                sent = await message.reply_video(
                     f, caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
+                    **shape,
                 )
             else:
-                await message.reply_photo(
+                sent = await message.reply_photo(
                     f, caption=caption, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                 )
-        return
+        file_id = _file_id_of(sent, item.kind, lossless)
+        return [(item.kind, file_id)] if file_id else None
 
     # An album. The caption rides on the first item of the first group, which
     # is where Telegram shows an album's caption.
+    sent_ids: "list[tuple[str, str]] | None" = []
     for chunk_start in range(0, len(items_with_paths), 10):
         chunk = items_with_paths[chunk_start:chunk_start + 10]
-        handles = [open(path, "rb") for _, path in chunk]
+        shapes = [await shape_of(path) if item.kind == "video" and not lossless
+                  and not getattr(item, "file_id", None) else {}
+                  for item, path in chunk]
+        handles = [getattr(item, "file_id", None) or open(path, "rb") for item, path in chunk]
         try:
             group = []
             for n, ((item, path), handle) in enumerate(zip(chunk, handles)):
@@ -1123,26 +1663,154 @@ async def _send_media(update, context, items_with_paths, lang,
                         handle, filename=os.path.basename(item.filename or path),
                         caption=cap, disable_content_type_detection=True))
                 elif item.kind == "video":
-                    group.append(InputMediaVideo(handle, caption=cap))
+                    group.append(InputMediaVideo(handle, caption=cap, **shapes[n]))
                 else:
                     group.append(InputMediaPhoto(handle, caption=cap))
-            await message.reply_media_group(
+            sent_group = await message.reply_media_group(
                 group, read_timeout=120, write_timeout=120)
         finally:
             for handle in handles:
-                handle.close()
+                if not isinstance(handle, str):         # a stored file id has nothing to close
+                    handle.close()
+        try:
+            sent_group = list(sent_group)
+        except TypeError:
+            sent_group = []
+        file_ids = [_file_id_of(sent, item.kind, lossless) for (item, _), sent in zip(chunk, sent_group)]
+        if sent_ids is not None and len(sent_group) == len(chunk) and all(file_ids):
+            sent_ids += [(item.kind, file_id) for (item, _), file_id in zip(chunk, file_ids)]
+        else:
+            sent_ids = None
     # Telegram allows no inline keyboard on a media group, so the button that
     # would have been under the album goes on one line after it.
     if keyboard is not None:
         await message.reply_text(
             i18n.t(lang, "album_delivered", count=len(items_with_paths)),
             reply_markup=keyboard)
+    return sent_ids
+
+
+async def _store_sent_files(user_id: int, platform: str, url: str, lossless: bool, sent) -> None:
+    """After a delivery from bytes: keep the file ids Telegram gave (sent_files.py),
+    so the next person who sends this post gets it without a download. Only when the
+    store is on, the sender is one person's, and the delivery is 1 to 10 files with an
+    id each (`sent`, from _send_media: None if any is missing). Never raises: a
+    failed write is a line in the log and nothing else, and never touches the delivery."""
+    if not sent_files.usable(user_id) or not sent:
+        return
+    try:
+        text = sent_files.encode_items(sent)
+        if text is None:
+            return
+        await asyncio.to_thread(sent_files_put, sent_files.post_key(platform, url, lossless), text)
+        sent_files.note("stored")
+    except Exception as exc:
+        logger.warning("The sent-file store could not be written (%s)", type(exc).__name__)
+
+
+async def _forget_sent_files(key: str) -> None:
+    try:
+        await asyncio.to_thread(sent_files_drop, key)
+    except Exception as exc:
+        logger.warning("The sent-file store could not drop a row (%s)", type(exc).__name__)
+
+
+async def _resend_by_file_id(update, context, lang, status, platform: str, url: str,
+                             lossless_override: "bool | None") -> "bool | None":
+    """Send this post again from the file ids stored when it was last delivered
+    (sent_files.py), if there are any and the post is known to be public still.
+
+    None: nothing was sent, carry on with the normal path (no row, a row that cannot
+    be read, a post that is gone or cannot be confirmed, an id Telegram refused).
+    True: it was delivered. False: the send failed and the person has been told.
+
+    A row confirmed within the last DBOT_FILEID_CONFIRM_HOURS is sent as it is. An
+    older one is first checked with resolvers.lookup: present, and it is sent and the
+    confirmation renewed; missing, and the row is deleted; unknown, and the row is
+    kept but an unconfirmed post is never sent. The send mirrors the delivery-cache
+    hit in _resolve_and_send, step for step."""
+    user_id = update.effective_user.id
+    if not sent_files.usable(user_id):
+        return None
+    try:
+        if lossless_override is None:
+            lossless = await asyncio.to_thread(get_lossless_enabled, user_id)
+        else:
+            lossless = lossless_override
+        key = sent_files.post_key(platform, url, lossless)
+        row = await asyncio.to_thread(sent_files_get, key)
+    except Exception as exc:
+        # A database that hiccups costs a normal fetch, never a failed delivery.
+        logger.warning("The sent-file store could not be read (%s)", type(exc).__name__)
+        sent_files.note("miss")
+        return None
+    pairs = sent_files.decode_items(row[0]) if row else None
+    if pairs is None:
+        sent_files.note("miss")
+        return None
+    fresh = sent_files.is_fresh(row[1])
+    sent_files.note("hit" if fresh else "stale")
+
+    async with lifecycle.busy(update.effective_chat.id, i18n.t(lang, "restarting_send_again")):
+        if not fresh:
+            try:
+                async with _lookups():
+                    verdict = await resolvers.lookup(platform, url)
+            except Exception as exc:
+                logger.warning("The post could not be looked up (%s)", type(exc).__name__)
+                verdict = "unknown"
+            sent_files.note(verdict if verdict in ("present", "missing") else "unknown")
+            if verdict == "missing":
+                await _forget_sent_files(key)
+                return None
+            if verdict != "present":
+                return None
+        token = _remember_delivery(context, platform, url, lossless)
+        try:
+            await _send_media(update, context, [(file, None) for file in sent_files.stored_files(pairs)], lang,
+                              lossless=lossless, redeliver_token=token)
+            await status.delete(context.bot)
+            note_job(True)
+        except Exception as exc:
+            if isinstance(exc, BadRequest):
+                # Any refusal of the request itself drops the row, not only the wordings
+                # is_invalid_file_id knows: a row Telegram refuses would otherwise fail
+                # every send of this post, for everyone, until the 90-day sweep. A row
+                # dropped for a reason that had nothing to do with the ids costs the
+                # next person one ordinary download.
+                await _forget_sent_files(key)
+            if sent_files.is_invalid_file_id(exc):
+                # Telegram no longer knows these ids. Nothing was delivered (one file, or
+                # one chunk of at most ten), so: fetch the post as usual in this same
+                # job -- the status message is still up.
+                sent_files.note("invalid")
+                logger.info("A stored file id was refused (%s)", type(exc).__name__)
+                context.user_data.get("redeliver", {}).pop(token, None)
+                return None
+            note_job(False)
+            # The kind of failure only, in the log and to the person: the text of an
+            # error from these ids could carry one. The row stays: a blocked bot or a
+            # flood wait says nothing about the ids.
+            logger.warning("Delivering %s from the stored file ids failed (%s)", platform,
+                           type(exc).__name__)
+            await status.set(context.bot,
+                             i18n.t(lang, "download_failed", error=type(exc).__name__),
+                             **NO_PREVIEW)
+            return False
+    try:
+        # Used today. Seen public just now only if a lookup said so: a fresh row is
+        # trusted, not renewed, which is what makes "gone within 12 hours" true.
+        await asyncio.to_thread(sent_files_used if fresh else sent_files_confirmed, key)
+    except Exception as exc:
+        logger.warning("The sent-file store could not be updated (%s)", type(exc).__name__)
+    return True
 
 
 async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                             platform: str, url: str, status=None,
                             quiet_if_missing: bool = False,
-                            lossless_override: bool | None = None) -> bool:
+                            lossless_override: bool | None = None,
+                            from_redo: bool = False) -> bool:
     """The whole download path: pick a route that is working, fetch, send.
 
     Returns True if something was delivered. On failure the user has already
@@ -1152,6 +1820,9 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     Reuses an existing status message if one is passed in, instead of stacking
     a second "Fetching..." on top of whatever the caller already showed.
+
+    `from_redo` says the caller is the redo button: its look-up in the delivery
+    cache is counted as a hit or a miss (counts only), a pasted link's is not.
     """
     lang = await i18n.get_lang(update.effective_user.id, context)
     # A download outlasts the shutdown grace period, so starting one now would
@@ -1172,6 +1843,16 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
     else:
         await status.set(context.bot, i18n.t(lang, "fetching"))
 
+    # Sent before, to anybody? Then it goes again by the file ids Telegram gave
+    # (sent_files.py): no slot, no disk, no route asked for media. Before the slots
+    # on purpose -- it uploads nothing, and the flood gate, the waiting limit and
+    # the allowance already bound how many can ask. None: carry on as usual.
+    resent = await _resend_by_file_id(update, context, lang, status, platform, url, lossless_override)
+    if resent is not None:
+        if resent:
+            await _after_send(update, context, lang)
+        return resent
+
     # Say so rather than leaving them watching a "Fetching..." that has not
     # actually started yet.
     if _slots().locked() or _user_slots_full(update.effective_user.id):
@@ -1180,78 +1861,126 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
     paths: list[str] = []
     async with _user_slot(update.effective_user.id), _slots(), lifecycle.busy(
             update.effective_chat.id, i18n.t(lang, "restarting_send_again")):
-        free = _free_mb()
-        if free is not None and free < MIN_FREE_MB:
-            await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
-            return False
-        try:
-            resolved = await resolvers.resolve(platform, url)
-        except resolvers.NothingWorked as exc:
-            logger.info("no route worked for %s: %s", platform, exc)
-            if exc.kind == "missing" and quiet_if_missing:
-                return False
-            # A post with no media in it, or one that is too big, is the bot
-            # working correctly on something it cannot help with -- neither a
-            # success nor a failure, and counted as neither. Only a route
-            # failure counts against the outage alarm, or a quiet afternoon of
-            # text-only links would read as every provider being down.
-            if exc.kind == "too_big" and large_files.CONFIGURED:
-                return await _large_download(update, context, status, lang, platform, url)
-            if exc.kind not in ("missing", "too_big"):
+        # The same link, kept from the person's last delivery (delivery_cache.py)?
+        # Then it is sent again from the kept files: no route is asked, nothing is
+        # fetched and the disk is not looked at. It still takes the person's slot,
+        # the global slot and the restart note above, because the upload is the
+        # memory-heavy part, and it still counted as a download when the link was
+        # accepted (handle_link, redeliver_callback). The entry stays whatever
+        # happens to this send: a failure may have been Telegram having a moment.
+        cached = delivery_cache.take(update.effective_user.id, platform, url)
+        if from_redo and delivery_cache.usable(update.effective_user.id):
+            note_tap("redo.cache.hit" if cached is not None else "redo.cache.miss")
+        if cached is not None:
+            try:
+                if lossless_override is None:
+                    delivered_lossless = await asyncio.to_thread(
+                        get_lossless_enabled, update.effective_user.id)
+                else:
+                    delivered_lossless = lossless_override
+                token = _remember_delivery(context, platform, url, delivered_lossless)
+                # The file ids this send gets are not stored (_store_sent_files): a kept
+                # entry can outlive the post by any number of renewals, and a stored id
+                # is dated as "seen public just now" -- so only a fresh fetch stores.
+                await _send_media(update, context, list(cached.items), lang,
+                                  lossless=delivered_lossless, redeliver_token=token)
+                await status.delete(context.bot)
+                note_job(True)
+            except Exception as exc:
                 note_job(False)
-            key = {
-                "missing": "download_missing",
-                "blocked": "download_blocked",
-                "too_big": "download_too_big",
-            }.get(exc.kind, "download_all_routes_failed")
-            # NO_PREVIEW: yt-dlp's failures quote their own documentation URLs
-            # and Telegram expands the first link in a message, so a one-line
-            # "couldn't download that" once arrived as a full-width GitHub
-            # repository, logo and all, underneath a failed download.
-            await status.set(context.bot, i18n.t(lang, key), **NO_PREVIEW)
-            return False
-
-        try:
-            await status.set(context.bot, i18n.t(lang, "downloading"))
-            items = resolved.items
-            for item in items:
-                paths.append(await resolvers.download(item))
-            if lossless_override is None:
-                delivered_lossless = await asyncio.to_thread(
-                    get_lossless_enabled, update.effective_user.id)
-            else:
-                delivered_lossless = lossless_override
-            token = _remember_delivery(context, platform, url, delivered_lossless)
-            await _send_media(update, context, list(zip(items, paths)), lang,
-                              lossless=delivered_lossless, redeliver_token=token)
-            await status.delete(context.bot)
-            note_job(True)
-        except net.TooLarge as exc:
-            if not large_files.CONFIGURED:
-                await status.set(context.bot, str(exc), **NO_PREVIEW)
+                # The kind of failure only, in the log and to the person: the text
+                # of an error from these files would carry their path.
+                logger.warning("Delivering %s from the kept files failed (%s)", platform,
+                               type(exc).__name__)
+                await status.set(context.bot,
+                                 i18n.t(lang, "download_failed", error=type(exc).__name__),
+                                 **NO_PREVIEW)
                 return False
-            for path in paths:
-                if path and os.path.exists(path):
-                    os.remove(path)
-            paths.clear()
-            return await _large_download(update, context, status, lang, platform, url)
-        except net.FetchError as exc:
-            note_job(False)
-            await status.set(context.bot, str(exc), **NO_PREVIEW)
-            return False
-        except Exception as exc:
-            note_job(False)
-            logger.exception("Delivering %s via %s failed", platform, resolved.provider)
-            await status.set(context.bot, i18n.t(lang, "download_failed", error=exc),
-                             **NO_PREVIEW)
-            return False
-        finally:
-            for path in paths:
-                try:
+            finally:
+                delivery_cache.release(cached)
+        else:
+            free = _free_mb()
+            if free is not None and free < MIN_FREE_MB:
+                await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
+                return False
+            try:
+                resolved = await resolvers.resolve(platform, url)
+            except resolvers.NothingWorked as exc:
+                logger.info("no route worked for %s: %s", platform, exc)
+                if exc.kind == "missing" and quiet_if_missing:
+                    return False
+                # A post with no media in it, or one that is too big, is the bot
+                # working correctly on something it cannot help with -- neither a
+                # success nor a failure, and counted as neither. Only a route
+                # failure counts against the outage alarm, or a quiet afternoon of
+                # text-only links would read as every provider being down.
+                if exc.kind == "too_big" and large_files.CONFIGURED:
+                    return await _large_download(update, context, status, lang, platform, url)
+                if exc.kind not in ("missing", "too_big"):
+                    note_job(False)
+                key = {
+                    "missing": "download_missing",
+                    "blocked": "download_blocked",
+                    "too_big": "download_too_big",
+                }.get(exc.kind, "download_all_routes_failed")
+                # NO_PREVIEW: yt-dlp's failures quote their own documentation URLs
+                # and Telegram expands the first link in a message, so a one-line
+                # "couldn't download that" once arrived as a full-width GitHub
+                # repository, logo and all, underneath a failed download.
+                await status.set(context.bot, i18n.t(lang, key), **NO_PREVIEW)
+                return False
+
+            try:
+                await status.set(context.bot, i18n.t(lang, "downloading"))
+                items = resolved.items
+                for item in items:
+                    paths.append(await resolvers.download(item))
+                if lossless_override is None:
+                    delivered_lossless = await asyncio.to_thread(
+                        get_lossless_enabled, update.effective_user.id)
+                else:
+                    delivered_lossless = lossless_override
+                token = _remember_delivery(context, platform, url, delivered_lossless)
+                sent = await _send_media(update, context, list(zip(items, paths)), lang,
+                                         lossless=delivered_lossless, redeliver_token=token)
+                await status.delete(context.bot)
+                note_job(True)
+                # Delivered, so the cache may take the files (only if this is still
+                # the person's latest link, and there is room: delivery_cache.keep).
+                # If it does, they are its to delete and not ours.
+                kept = delivery_cache.keep(update.effective_user.id, platform, url,
+                                           list(zip(items, paths)), _cache_floor_mb())
+                if delivery_cache.usable(update.effective_user.id):
+                    note_tap("cache.kept" if kept else "cache.not_kept")      # counts only
+                if kept:
+                    paths.clear()
+                await _store_sent_files(update.effective_user.id, platform, url, delivered_lossless, sent)
+            except net.TooLarge as exc:
+                if not large_files.CONFIGURED:
+                    await status.set(context.bot, str(exc), **NO_PREVIEW)
+                    return False
+                for path in paths:
                     if path and os.path.exists(path):
                         os.remove(path)
-                except OSError:
-                    logger.warning("couldn't remove %s", path)
+                paths.clear()
+                return await _large_download(update, context, status, lang, platform, url)
+            except net.FetchError as exc:
+                note_job(False)
+                await status.set(context.bot, str(exc), **NO_PREVIEW)
+                return False
+            except Exception as exc:
+                note_job(False)
+                logger.exception("Delivering %s via %s failed", platform, resolved.provider)
+                await status.set(context.bot, i18n.t(lang, "download_failed", error=exc),
+                                 **NO_PREVIEW)
+                return False
+            finally:
+                for path in paths:
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except OSError:
+                        logger.warning("couldn't remove %s", path)
 
     await _after_send(update, context, lang)
     return True
@@ -1276,6 +2005,9 @@ async def _large_download(update, context, status, lang, platform: str, url: str
         await status.set(context.bot, i18n.t(lang, "large_files_no_credit", free=free, per=per, balance=balance))
         return False
 
+    # About to fetch up to LARGE_MAX_MB: kept deliveries give way first. After the
+    # refusals above, so that a person who is refused costs nobody their kept files.
+    _make_room(large_files.LARGE_MAX_MB)
     await status.set(context.bot, i18n.t(lang, "large_files_fetching", free=free, per=per))
     paths: list[str] = []
     try:
@@ -1332,12 +2064,13 @@ async def _send_large(update, context, items_with_paths, lang) -> None:
     caption = None
     if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+    probing = video.ProbeRun()          # one probe budget for the whole delivery
     for item, path in items_with_paths:
         if os.path.getsize(path) > large_files.BOT_API_SEND_BYTES:
             await big_files.send_document(update.effective_chat.id, path,
                                           os.path.basename(item.filename or path), caption or "")
         else:
-            await _send_media(update, context, [(item, path)], lang)
+            await _send_media(update, context, [(item, path)], lang, probing=probing)
 
 
 async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
@@ -1450,52 +2183,82 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not detected:
         return
     platform, url = detected
+    # Another link: the person's last delivery is no longer wanted, and goes now.
+    # The same link instead gives it five minutes more. Before every check below,
+    # so that a link refused for any reason still counts as the latest one.
+    found = delivery_cache.note_link(update.effective_user.id, platform, url)
+    if found == delivery_cache.NOTED_AGAIN_CACHED:
+        note_tap("link.again.cached")             # counts only: how often the same link comes back
+    elif found == delivery_cache.NOTED_AGAIN_NOT_CACHED:
+        note_tap("link.again.not_cached")
 
-    # Asked once, here, for every platform. The gate used to live inside the
-    # video path only -- which covers Instagram, TikTok and YouTube, and
-    # misses the paths that fetch an image and send it without ever reaching
-    # that function: a Pinterest pin, a Reddit image post and a Twitter photo
-    # set all sailed straight through an announced update. They are quicker
-    # than a video download, but "quick" is not the test: a redeploy lands
-    # whenever it lands, and a fetch that started ten seconds before it ends
-    # in silence exactly the same way.
-    lang = await i18n.get_lang(update.effective_user.id, context)
-    refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
-    if refusal:
-        await update.message.reply_text(refusal)
+    # The same person, in the same chat, sending the same link while a job they
+    # started from a link message for it is still queued or running: no new
+    # job, no allowance check, no record, no status message and no "busy" -- one
+    # 👌 on the copy (_answer_duplicate). The check and the mark are one
+    # synchronous stretch, nothing awaited between them, so that two copies
+    # handled at the same moment cannot both get through. Before everything
+    # below, which would each answer or charge for it.
+    key = (update.effective_chat.id, update.effective_user.id, platform, url)
+    if _already_in_flight(key):
+        await _answer_duplicate(update)
         return
+    stamp = _in_flight[key] = time.monotonic()
+    spawned = False
+    try:
+        # Asked once, here, for every platform. The gate used to live inside the
+        # video path only -- which covers Instagram, TikTok and YouTube, and
+        # misses the paths that fetch an image and send it without ever reaching
+        # that function: a Pinterest pin, a Reddit image post and a Twitter photo
+        # set all sailed straight through an announced update. They are quicker
+        # than a video download, but "quick" is not the test: a redeploy lands
+        # whenever it lands, and a fetch that started ten seconds before it ends
+        # in silence exactly the same way.
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
+        if refusal:
+            await update.message.reply_text(refusal)
+            return
 
-    # A share of the day, per person. MAX_CONCURRENT_DOWNLOADS above stops
-    # the box falling over; this is the different problem of one person
-    # holding both of its slots all afternoon while everybody else queues
-    # behind them. Checked here rather than inside the download so a refused
-    # link costs one query instead of a fetch -- and here rather than in each
-    # of the three branches below, because the Reddit and Twitter paths cost
-    # the same fetches and used to be the way past a limit that only the
-    # video path enforced.
-    # Checked before the allowance, so a link refused for being one too many
-    # does not also count against the day's share.
-    if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
-        await update.message.reply_text(
-            i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
-        return
-    allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
-    if not allowance["allowed"]:
-        await update.message.reply_text(_allowance_message(lang, allowance))
-        return
-    await asyncio.to_thread(record_download, update.effective_user.id, platform)
+        # A share of the day, per person. MAX_CONCURRENT_DOWNLOADS above stops
+        # the box falling over; this is the different problem of one person
+        # holding both of its slots all afternoon while everybody else queues
+        # behind them. Checked here rather than inside the download so a refused
+        # link costs one query instead of a fetch -- and here rather than in each
+        # of the three branches below, because the Reddit and Twitter paths cost
+        # the same fetches and used to be the way past a limit that only the
+        # video path enforced.
+        # Checked before the allowance, so a link refused for being one too many
+        # does not also count against the day's share.
+        if _user_pending.get(update.effective_user.id, 0) >= MAX_PENDING_PER_USER:
+            await update.message.reply_text(
+                i18n.t(lang, "download_queue_full", count=MAX_PENDING_PER_USER))
+            return
+        allowance = await asyncio.to_thread(download_allowance, update.effective_user.id)
+        if not allowance["allowed"]:
+            await update.message.reply_text(_allowance_message(lang, allowance))
+            return
+        await asyncio.to_thread(record_download, update.effective_user.id, platform)
 
-    async def work():
-        if platform == "reddit":
-            await _handle_reddit(update, context, url)
-        elif platform == "twitter":
-            await _handle_twitter(update, context, url)
-        else:
-            await _resolve_and_send(update, context, platform, url)
+        async def work():
+            if platform == "reddit":
+                await _handle_reddit(update, context, url)
+            elif platform == "twitter":
+                await _handle_twitter(update, context, url)
+            else:
+                await _resolve_and_send(update, context, platform, url)
 
-    # Returns straight away: the next link, and everybody else's, is read now
-    # rather than after this one has finished uploading.
-    _spawn_download(context, update, work)
+        # Returns straight away: the next link, and everybody else's, is read now
+        # rather than after this one has finished uploading.
+        _spawn_download(context, update, work, in_flight=key)
+        spawned = True
+    finally:
+        # Every way out that did not start the job -- the maintenance refusal,
+        # the full queue, the allowance, an exception, a create_task that
+        # raised -- takes the mark back. A job that started clears its own
+        # (_spawn_download's finally).
+        if not spawned:
+            _clear_in_flight(key, stamp)
 
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1510,6 +2273,21 @@ async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYP
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.message.reply_text(i18n.t(lang, "unknown_command"))
+
+
+async def _delete_my_data_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The shared erase button, and what only this bot holds on top of what it
+    erases: the person's kept delivery (delivery_cache.py), and the memory the
+    redo buttons read their links from. Their old buttons then answer "expired",
+    as they do after any restart. Done on the tap of "yes", before the erase
+    itself, so that even an erase that fails halfway leaves no file of theirs
+    here. forget_user also stops a download still in flight from being kept
+    when it lands."""
+    query = update.callback_query
+    if query is not None and query.data == ERASE_PREFIX + "yes":
+        delivery_cache.forget_user(update.effective_user.id)
+        context.user_data.pop("redeliver", None)
+    return await delete_my_data_chosen(update, context)
 
 
 async def _post_init(application):
@@ -1535,12 +2313,33 @@ async def _post_init(application):
     # still polling, both get 409 Conflict and this bot's updates are split
     # between them. See lifecycle.py.
     await lifecycle.on_start(BOT_NAME)
+    # After that, when the process this one replaces has let go: anything in the
+    # delivery cache's folder belongs to a process that is gone.
+    delivery_cache.wipe()
+    if application.job_queue is not None:
+        application.job_queue.run_repeating(
+            _sweep_delivery_cache, interval=DELIVERY_CACHE_SWEEP_SECONDS,
+            first=DELIVERY_CACHE_SWEEP_SECONDS)
     await publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS)
     await publish_profile(application)
     if big_files.CONFIGURED:
         task = asyncio.get_running_loop().create_task(_check_big_files())
         _background.add(task)
         task.add_done_callback(_background.discard)
+
+
+# How often a kept delivery that has run out of time is found and deleted. A
+# delivery lives DBOT_CACHE_SECONDS from its last use; this is only how late
+# after that its files may still be on the disk. take() looks at the time too, so
+# a late sweep never serves an expired one.
+DELIVERY_CACHE_SWEEP_SECONDS = 15
+
+
+async def _sweep_delivery_cache(_context=None) -> None:
+    try:
+        delivery_cache.sweep()
+    except Exception as exc:
+        logger.warning("The delivery cache sweep failed (%s)", type(exc).__name__)
 
 
 async def _check_big_files() -> None:
@@ -1596,6 +2395,9 @@ def main():
     # Counted first, then throttled: somebody who floods is still somebody
     # who was here, and /status is supposed to say so.
     attach_flood_gate(app, ADMIN_IDS)
+    # The 220 ⚡ gift: the first message while it is open claims it (see
+    # attach_promo_claim). Its own group, after the flood gate's.
+    attach_promo_claim(app)
     # Runs after track_activity but before every other handler -- a no-op
     # unless /feedback or a "Custom" donate button has just asked for
     # something to be typed, in which case it takes the answer and stops it
@@ -1606,7 +2408,10 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, None, HELP_PAGES, HELP_LABELS)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, None, HELP_PAGES, HELP_LABELS),
+                                         pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("settings", settings_command))
@@ -1620,6 +2425,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lossless_toggle_callback, pattern="^lossless:"))
     app.add_handler(CallbackQueryHandler(large_toggle_callback, pattern="^large:"))
     app.add_handler(CallbackQueryHandler(redeliver_callback, pattern="^redo:"))
+    app.add_handler(CallbackQueryHandler(merge_callback, pattern="^merge:"))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"))
     app.add_handler(CallbackQueryHandler(language_chosen, pattern="^setlang:"))
     app.add_handler(CommandHandler("language", language_command))
@@ -1637,7 +2443,7 @@ def main():
     app.add_handler(CommandHandler("paysupport", paysupport_command))
     app.add_handler(CallbackQueryHandler(problem_report_callback, pattern=r"^rpt"))
     app.add_handler(CommandHandler("deletemydata", delete_my_data_command))
-    app.add_handler(CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
+    app.add_handler(CallbackQueryHandler(_delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(platforms.ANY_LINK_RE), handle_link))
 
     # ---- donations (Telegram Stars) -- this bot's only Stars usage ----

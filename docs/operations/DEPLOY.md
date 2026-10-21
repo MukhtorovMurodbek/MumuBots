@@ -623,6 +623,11 @@ for when you want a different trade-off.
 | `DBOT_MAX_PER_USER` | `2` | DownloaderBot only. How many of those one person may hold at once. |
 | `DBOT_MAX_PENDING_PER_USER` | `5` | DownloaderBot only. Links one person may have waiting before another is refused. |
 | `DBOT_MIN_FREE_MB` | `300` | DownloaderBot only. Free disk a download needs before it starts. |
+| `DBOT_CACHE_SECONDS` | `300` | DownloaderBot only. How long the last download is kept for the redo button and the same link sent again. `0` turns the cache off. |
+| `DBOT_CACHE_ENTRY_MAX_MB` / `DBOT_CACHE_MAX_MB` | `100` / `400` | DownloaderBot only. The most one kept delivery may be, and the most all of them may be together. |
+| `DBOT_SENT_FILES` | `1` | DownloaderBot only. Whether a post the bot has already sent is sent again by its Telegram file ID, without downloading it. `0` (or a value that is not a whole number) turns it off: no reads, no writes. The references hold nothing about people. |
+| `DBOT_FILEID_CONFIRM_HOURS` | `12` | DownloaderBot only. How long a stored file reference is trusted after the post was last seen public; an older one is sent only after a lookup shows the post still public. The texts state 12 (and 90) as fixed numbers: change `PRIVACY.md`, `TERMS.md` and `privacy_stored` (en/uz/ru) first. Unreadable or under 1 means 12. |
+| `DBOT_FILEID_KEEP_DAYS` | `90` | DownloaderBot only. Stored file references nobody has used for this many days are deleted by the routine housekeeping. Unreadable or under 1 means 90. |
 | `ACTIVITY_RETENTION_DAYS` | `90` | How far back `/users` can see, against stored rows. |
 
 One more that isn't about tuning: `FAMILY_BUS=off` on any bot drops it back to

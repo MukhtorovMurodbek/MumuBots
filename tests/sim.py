@@ -569,8 +569,10 @@ class Sim:
     # -- updates -----------------------------------------------------------
 
     def _user(self, person: Person) -> dict:
+        # A test may set person.language_code (the language the person's
+        # Telegram app is set to); "en" otherwise, as before.
         return {"id": person.id, "is_bot": False, "first_name": person.name,
-                "language_code": "en"}
+                "language_code": getattr(person, "language_code", "en")}
 
     async def incoming(self, person: Person, text: str | None, reply_to: int | None,
                        media_group_id: str | None, kind: str,

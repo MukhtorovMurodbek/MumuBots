@@ -36,7 +36,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 SCRATCH = pathlib.Path(tempfile.mkdtemp(prefix="downloaderbot-large-"))
 os.environ.update(ENV_FILES="off", DBOT_TOKEN="123:test", DBOT_USERNAME="test", DATABASE_URL="postgresql://stub",
-                  DBOT_WORK_DIR=str(SCRATCH), DBOT_API_ID="12345", DBOT_API_HASH="0123456789abcdef")
+                  DBOT_WORK_DIR=str(SCRATCH), DBOT_API_ID="12345", DBOT_API_HASH="0123456789abcdef",
+                  DBOT_SENT_FILES="0")      # the file-id store has its own test (test_sent_files.py)
 for key in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "DBOT_LARGE_MAX_MB", "DBOT_LARGE_CREDITS_PER_100MB",
             "DBOT_MAX_DOWNLOAD_MB"):
     os.environ.pop(key, None)

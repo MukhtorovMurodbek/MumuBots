@@ -54,6 +54,11 @@ Conversions use bonus credit first, the soonest to expire first, so what
 expires is only bonus that went unused. `/balance` shows how much of your
 balance is bonus and when the next of it runs out.
 
+**Credit given free in a promotion (a gift) is bonus credit: it has no cash
+value, cannot be transferred to another account, is not refundable, and expires
+at the end of the last day stated when it is given (UTC).** Like other bonus
+credit it is spent first; ordinary credit does not expire.
+
 **Payments are final. Stars are not refunded, and credit is not money and it
 is not Stars: it cannot be withdrawn, turned back into Stars, or
 transferred.** Every bot says so in `/help`, and ConvertBot again before a paid

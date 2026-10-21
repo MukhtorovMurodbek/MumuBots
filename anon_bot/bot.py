@@ -94,10 +94,12 @@ from telegram.ext import (
     filters,
 )
 
+import db
 import family_link
 import i18n
 import lifecycle
 import live_message
+import shared_features
 import transcript
 from live_message import LiveMessage, edit_in_place
 from anon_logic import (
@@ -112,6 +114,7 @@ from anon_logic import (
 from db import (
     CONVERSATIONS_PER_PAGE,
     RELAY_RETENTION_DAYS,
+    claim_promo_seen,
     claim_reactions_note,
     clear_follower_state,
     count_owner_conversation_states,
@@ -162,7 +165,12 @@ from shared_features import (
     awaited_text_received,
     feedback_command,
     FORCE_REPLY_KEY,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    full_help_command,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_keyboard,
     help_toggle,
     wants_full_help,
@@ -252,11 +260,36 @@ def build_help_text(lang: str, full: bool = False) -> str:
     /start and /help show: how the inbox works, that reactions travel, and
     /feedback. The long one ("help_text", which tests/test_menu.py holds to
     naming every command) is a tap away, and lists every reaction a bot is
-    allowed to pass on."""
+    allowed to pass on. The per-command pages (HELP_PAGES below) are the
+    buttons under the help, not a line in it."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return (i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS))
-            + sibling_bots_blurb(BOT_NAME, lang))
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS)).rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+
+# ---------- /help <name> and the buttons under /help: a page for each command ----------
+# The mechanism is in shared_features ("A page for each command"). Every
+# number on a page is read from the module that owns it when the page is shown
+# -- by attribute, never copied -- so a page says what the code does now.
+
+def _help_page_link(lang: str) -> str:
+    return i18n.t(lang, "helppage_link")
+
+
+def _help_page_export(lang: str) -> str:
+    return i18n.t(lang, "helppage_export", max=transcript.MAX_MESSAGES, days=db.RELAY_RETENTION_DAYS)
+
+
+def _help_page_which(lang: str) -> str:
+    # The bot's own answer, as the inbox's owner gets it.
+    return i18n.t(lang, "helppage_which", example=i18n.t(lang, "which_owner", conv_number=4))
+
+
+HELP_PAGES = {"link": _help_page_link, "export": _help_page_export, "which": _help_page_which}
+HELP_ALIASES = {}
 
 
 # Public command menu (the "/" button in Telegram's chat UI) -- set on
@@ -348,7 +381,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)]),
+        reply_markup=help_keyboard(lang, False, [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES),
     )
     # The short help says reactions travel, so whoever has just read it has
     # been told -- the one-time note would only say it again.
@@ -538,9 +571,25 @@ async def start_follow_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/help is the short version; /help full is the long one."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        # A page says nothing about reactions, so it does not count as told.
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=shared_features.NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full))
+                                    reply_markup=help_keyboard(lang, full, (), HELP_PAGES))
+    await _knows_reactions(context, update.effective_user.id)
+
+
+_full_help = full_help_command(build_help_text, None, HELP_PAGES)
+
+
+async def fullhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/fullhelp: what /help full gives -- which lists every reaction, so
+    whoever reads it has been told about reactions too."""
+    await _full_help(update, context)
     await _knows_reactions(context, update.effective_user.id)
 
 
@@ -2102,6 +2151,95 @@ async def reactions_update_note(update: Update, context: ContextTypes.DEFAULT_TY
         await context.bot.send_message(chat_id=chat.id, text=i18n.t(lang, "reactions_update_note"))
     except Exception:
         logger.debug("Could not send the reactions note", exc_info=True)
+        return
+    # So that promo_ad_note, which runs right after this in the next group,
+    # leaves this message alone: one note per message.
+    context.user_data[NOTE_UPDATE_KEY] = update.update_id
+
+
+# The 220 gift's ad (2.2.0; family_link, "The 220 ⚡ gift"): every person who
+# writes to this bot while the gift is open and who has not had it is shown the
+# ad once, with a button to each of the two bots that give it. "Once per
+# person" is a row in promo_seen, written before the ad is sent -- so a failed
+# send is not retried, and two updates at once cannot both show it -- and
+# PROMO_AD_KEY remembers in this process that the question is settled, so the
+# next message costs no database trip at all.
+PROMO_AD_KEY = "_promo_ad"
+# The update the reactions note answered; the ad waits for the next message.
+NOTE_UPDATE_KEY = "_note_update"
+
+
+_NO_AD_COMMANDS = {"/deletemydata", "/privacy", "/terms"}
+
+
+def _no_ad_after(message) -> bool:
+    """Is this one of the commands the gift's ad never follows?"""
+    words = (message.text or "").split(None, 1)
+    return bool(words) and words[0].split("@", 1)[0].lower() in _NO_AD_COMMANDS
+
+
+async def promo_ad_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After whatever somebody came to do, and after the reactions note: if the
+    gift is open and they have not had it nor been shown this ad, show it once.
+
+    Quiet by design: a new message in a private chat only, never in the middle
+    of a question or an inbox link's first message, and any failure here just
+    means no ad (nothing is recorded unless the ad is about to be sent)."""
+    message, user, chat = update.message, update.effective_user, update.effective_chat
+    if message is None or user is None or chat is None or chat.type != "private":
+        return
+    if getattr(user, "is_bot", False):
+        return
+    # /start with something after it is somebody opening an inbox link, about
+    # to write their anonymous message: the ad waits for the one after. A bare
+    # /start may show it, after the welcome.
+    words = (message.text or "").split(None, 1)
+    if len(words) == 2 and words[0].split("@", 1)[0].lower() == "/start":
+        return
+    # Nor under the privacy pages or a request to be forgotten: an ad there,
+    # and a row saying it was shown, is the wrong answer to "delete my data".
+    if _no_ad_after(message):
+        return
+    if FORCE_REPLY_KEY in context.user_data:
+        return
+    if context.user_data.get(NOTE_UPDATE_KEY) == update.update_id:
+        return
+    if context.user_data.get(PROMO_AD_KEY) == family_link.PROMO_KEY:
+        return
+    try:
+        window = await asyncio.to_thread(family_link.promo_window)
+        # Nothing is remembered when it is not open: it may open later.
+        if window is None or not window[0] <= datetime.now(timezone.utc) < window[1]:
+            return
+        # One row, DownloaderBot first as in the text. An ad with no way to
+        # reach the bots is not worth the person's one chance at it.
+        row = (sibling_bots_keyboard_row(BOT_NAME, only="downloaderbot")
+               + sibling_bots_keyboard_row(BOT_NAME, only="convertbot"))
+        if not row:
+            return
+        # Not before they have chosen a language: a first /start shows the
+        # picker, and an ad in English under it would spend their one chance
+        # in what may be the wrong language. It comes with their next message.
+        # From the database only: get_lang caches "en" in user_data for somebody
+        # who never chose, which is not a choice.
+        lang = await asyncio.to_thread(get_user_language, user.id)
+        if not lang:
+            return
+        if await asyncio.to_thread(family_link.promo_given_to, user.id):
+            context.user_data[PROMO_AD_KEY] = family_link.PROMO_KEY
+            return
+        shown_now = await asyncio.to_thread(claim_promo_seen, user.id, family_link.PROMO_KEY)
+        context.user_data[PROMO_AD_KEY] = family_link.PROMO_KEY
+        if not shown_now:
+            return
+        await context.bot.send_message(
+            chat_id=chat.id, text=family_link.promo_ad(lang, window[1]),
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([row]), **NO_PREVIEW,
+        )
+    except Exception as exc:
+        # No user id in the log; before the claim nothing was recorded and the
+        # next message tries again, after it the one chance is spent.
+        logger.debug("The gift ad was not shown (%s)", type(exc).__name__)
 
 
 async def _route_into(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -2315,6 +2453,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("fullhelp", fullhelp_command))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("link", link_command))
@@ -2348,7 +2487,8 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX))
 
     app.add_handler(CallbackQueryHandler(language_chosen, pattern=r"^setlang:"))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, None, HELP_PAGES), pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern=r"^cancelpick:"))
     app.add_handler(CallbackQueryHandler(anonlink_toggle_callback, pattern=r"^anonlink:toggle$"))
     app.add_handler(CallbackQueryHandler(anonlink_newlink_callback, pattern=r"^anonlink:newlink$"))
@@ -2388,6 +2528,9 @@ def main():
     # After everything, in a group of its own: the one-time note that
     # reactions now travel, for whoever was here before they did.
     app.add_handler(TypeHandler(Update, reactions_update_note), group=1)
+    # And after that note, the 220 gift's ad -- a group of its own for the same
+    # reason: one handler runs per group, and the ad must come last.
+    app.add_handler(TypeHandler(Update, promo_ad_note), group=2)
 
     # ManagerBot's link: heartbeats, crash/donation events, and the queue it
     # uses to run this bot's owner-only commands remotely. Never raises --

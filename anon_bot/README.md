@@ -40,7 +40,8 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/balance` | The ⚡ credit balance — one balance shared by the family's four bots — and everything it was spent on. |
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions on their own, in short; `/help full` (or the button under them) is every command and every reaction that can be passed on. |
+| `/help` | A short guide to the inbox; the buttons under it open each command's page (also `/help <command>`), and "📖 Full guide" shows everything, every command and every reaction that can be passed on (also `/fullhelp`, `/help full`). |
+| `/fullhelp` | The full guide in one message, the same as `/help full`. |
 | `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
@@ -192,6 +193,14 @@ An inbox link is meant to be posted publicly, so both a per-minute message
 limit and a cooldown between opening conversations apply per account, and a
 ceiling on updates per minute applies before any handler runs. All are
 configurable; see `.env.example`.
+
+---
+
+## The 220 ⚡ gift
+
+While the family's 220 ⚡ gift is open, AnonBot shows an advertisement for it to everyone who writes to it and has not had the gift: once per person, after the bot's own answer, with a button to ConvertBot and one to DownloaderBot, which are where it is claimed (their first message gives it). It is not shown on the first `/start` of an inbox link, in the middle of a question, on the update the reactions note answered, or to anyone who already has the gift. AnonBot gives nothing itself.
+
+That a person was shown it is kept in a `promo_seen` table, so that it is shown once; `/deletemydata` removes it (see `PRIVACY.md`).
 
 ---
 

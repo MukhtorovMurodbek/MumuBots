@@ -1122,6 +1122,44 @@ async def _resolve(platform: str, url: str) -> Resolved:
     raise NothingWorked(platform, failures)
 
 
+async def lookup(platform: str, url: str) -> str:
+    """Is the post still public? "present", "missing" or "unknown" -- asked of the
+    routes without taking any media (sent_files.py: a stored file id is trusted
+    only while the post was seen public in the last few hours).
+
+    The platform's routes in their usual order, each under its usual limit, but
+    yt-dlp is never asked: it downloads inside resolve (video.py), and the whole
+    point here is to not download. And nothing is recorded -- no health score, no
+    cooldown -- because a deleted post is the post's failure, not the route's, and
+    a question is not traffic (the same rule as probe_all).
+
+    "present" as soon as one route returns an item. "missing" only if every route
+    asked said the post is missing: one route's word is not enough (tikwm reports
+    a rate limit as missing). Anything else -- a timeout, a network error, a mix of
+    answers, or no route left once yt-dlp is left out (Reddit has only yt-dlp) --
+    is "unknown", and the caller then does not trust the stored file ids."""
+    asked = said_missing = 0
+    skipped: set[str] = set()
+    for name, fn in _ordered(platform):
+        if name.startswith("ytdlp:") or name in skipped:
+            continue
+        asked += 1
+        try:
+            found = await asyncio.wait_for(fn(url), timeout=_timeout_for(name))
+        except ProviderFailed as exc:
+            skipped.update(exc.skip)
+            if exc.kind == "missing":
+                said_missing += 1
+            continue
+        except Exception as exc:        # a timeout, a network error, a route's own bug: no answer
+            logger.info("lookup: route %s gave no answer for %s (%s)", name, platform, type(exc).__name__)
+            continue
+        if found.items:
+            return "present"
+        said_missing += 1               # a route that returns nothing says what _resolve counts it as
+    return "missing" if asked and said_missing == asked else "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Asking every route, on purpose
 # ---------------------------------------------------------------------------

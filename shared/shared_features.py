@@ -159,18 +159,23 @@ def wants_full_help(context) -> bool:
     return bool(args) and str(args[0]).lower() in ("full", "all", "more")
 
 
-def help_keyboard(lang: str, full: bool, rows=()) -> InlineKeyboardMarkup:
-    """The button to the other version, then the bot's own rows."""
+def help_keyboard(lang: str, full: bool, rows=(), pages=None, labels=None) -> InlineKeyboardMarkup:
+    """The bot's page buttons (when it has pages), then the button to the other
+    version, then the bot's own rows -- the items first and "everything" last,
+    as under /ping."""
     toggle = (InlineKeyboardButton(i18n.t(lang, "help_brief_button"), callback_data="help:brief")
               if full else
               InlineKeyboardButton(i18n.t(lang, "help_full_button"), callback_data="help:full"))
-    return InlineKeyboardMarkup([[toggle]] + [list(row) for row in rows if row])
+    page_rows = help_page_buttons(lang, pages, labels) if pages else []
+    return InlineKeyboardMarkup(page_rows + [[toggle]] + [list(row) for row in rows if row])
 
 
-def help_toggle(build_text, rows=None):
+def help_toggle(build_text, rows=None, pages=None, labels=None):
     """The toggle's handler, for one bot: `build_text(lang, full=...)` is the
     bot's own build_help_text, and `rows(lang)` the button rows it keeps
-    under its help, if any. Register it with pattern=HELP_TOGGLE_PATTERN."""
+    under its help, if any. `pages` and `labels` are the page buttons (see
+    help_page_buttons); they are rebuilt in both directions, so the buttons
+    survive the toggle. Register it with pattern=HELP_TOGGLE_PATTERN."""
     async def toggle(update, context) -> None:
         query = update.callback_query
         await query.answer()
@@ -178,8 +183,96 @@ def help_toggle(build_text, rows=None):
         full = query.data == "help:full"
         await live_message.edit_in_place(
             query.message, context.bot, build_text(lang, full=full),
-            reply_markup=help_keyboard(lang, full, rows(lang) if rows else ()))
+            reply_markup=help_keyboard(lang, full, rows(lang) if rows else (), pages, labels))
     return toggle
+
+
+# ---------------------------------------------------------------------------
+# A page for each command
+# ---------------------------------------------------------------------------
+# The owner, 2026-10-17: each command that is complex or has options gets a
+# page of its own, "a detailed explanation and one simple example", and every
+# price and limit on it is worked out from the code that charges or limits,
+# never typed in.
+#
+# The help message carries one button per page, two to a row, above the
+# "Full guide" button -- the items first and "everything" last, as under
+# ManagerBot's /ping. A tap sends the page as a new message (the help message
+# stays as it is), /help <name> shows the same page, and /fullhelp is the full
+# guide in one tap -- /help full stays. A bot's pages are HELP_PAGES in its
+# bot.py: name -> function(lang) -> text, with every number looked up when the
+# page is shown (by attribute, on the module that owns it, so a value that
+# changes at runtime is read as it is now). A page is plain text, because its
+# examples hold links and angle brackets, and it carries no keyboard: it ends
+# by pointing at /fullhelp.
+
+HELP_PAGE_PREFIX = "helpdet:"
+HELP_PAGE_PATTERN = r"^helpdet:[a-z]{1,20}$"
+
+
+def help_page_name(context, pages, aliases=None) -> str | None:
+    """The page that `/help <word>` asks for, or None. Reads the first word
+    only, and forgives how it was typed: any case, a leading slash, the
+    "@botname" Telegram adds, a "help_" in front."""
+    args = getattr(context, "args", None) or []
+    if not args:
+        return None
+    word = str(args[0]).lower().lstrip("/").split("@", 1)[0]
+    if word.startswith("help_"):
+        word = word[len("help_"):]
+    word = (aliases or {}).get(word, word)
+    return word if word in pages else None
+
+
+def help_page_text(lang: str, pages, name: str) -> str:
+    """One page, then where the full guide is."""
+    return pages[name](lang).rstrip() + "\n\n" + i18n.t(lang, "help_page_everything")
+
+
+def help_page_buttons(lang: str, pages, labels=None) -> list[list[InlineKeyboardButton]]:
+    """One button per page, in the order of `pages` (an alias never gets one),
+    two to a row. The label is `labels[name]` translated when the bot gives
+    one, else the command's name with a slash."""
+    labels = labels or {}
+    buttons = [
+        InlineKeyboardButton(i18n.t(lang, labels[name]) if name in labels else "/" + name,
+                             callback_data=HELP_PAGE_PREFIX + name)
+        for name in pages
+    ]
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+
+def help_page_button(pages):
+    """The handler of a tap on a page button, for one bot: the page arrives as
+    a new message, so the help message above it is never edited and stays to
+    be tapped again. A name that is not a page (a button from before a
+    redeploy, or a forged one) is told so and nothing is sent. Register it
+    with pattern=HELP_PAGE_PATTERN."""
+    async def page(update, context) -> None:
+        query = update.callback_query
+        user = update.effective_user
+        lang = await i18n.get_lang(user.id, context)
+        name = query.data[len(HELP_PAGE_PREFIX):]
+        if name not in pages:
+            await query.answer(i18n.t(lang, "help_page_gone"), show_alert=True)
+            return
+        await query.answer()
+        chat_id = query.message.chat_id if query.message is not None else user.id
+        await context.bot.send_message(chat_id=chat_id, text=help_page_text(lang, pages, name),
+                                       link_preview_options=NO_PREVIEW)
+    return page
+
+
+def full_help_command(build_text, rows=None, pages=None, labels=None):
+    """The handler of /fullhelp: what /help full gives, for one bot --
+    `build_text(lang, full=...)` is its build_help_text, `rows(lang)` the
+    button rows it keeps under its help, if any, and `pages`/`labels` its page
+    buttons (see help_page_buttons)."""
+    async def fullhelp(update, context) -> None:
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        await update.message.reply_text(build_text(lang, full=True),
+                                        reply_markup=help_keyboard(lang, True, rows(lang) if rows else (), pages, labels))
+    return fullhelp
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +440,87 @@ def attach_flood_gate(app, admin_ids=(), group: int = -3, exempt=None) -> None:
         raise ApplicationHandlerStop
 
     app.add_handler(TypeHandler(Update, _gate), group=group)
+
+
+# ---------------------------------------------------------------------------
+# The 220 ⚡ gift, claimed by writing (ConvertBot and DownloaderBot, 2.2.0)
+# ---------------------------------------------------------------------------
+# While the gift is open (family_link, "The 220 ⚡ gift"), the first message
+# somebody sends one of these two bots gives it to them -- once across the
+# family -- and tells them. The bot's own answer is never held up for it: the
+# handler only decides whether to look, and the reading, the claim and the
+# notice run as a task of their own.
+
+PROMO_DONE_KEY = "_promo_done"
+# Whose claim is running now, so two messages at once claim once.
+_promo_claiming: set = set()
+# Set once the gift is over: from then on a message costs nothing at all.
+_promo_state = {"over": False}
+
+
+def _notice_language(user_id: int, telegram_code: "str | None") -> str:
+    """The language for the gift's notice. Blocking. The ad sends people to a
+    bot they have never used, so most claimants have chosen no language here
+    yet, and their first /start is showing the picker: the one they chose in
+    this bot if any, else the one their Telegram app is set to, else English.
+    Never i18n.get_lang, which would cache "en" for them as if they had chosen
+    it -- and never written back, so the picker still decides."""
+    chosen = family_link._language_of(user_id)
+    if chosen in i18n.SUPPORTED_LANGUAGES:
+        return chosen
+    code = (telegram_code or "").split("-")[0].lower()
+    return code if code in i18n.SUPPORTED_LANGUAGES else "en"
+
+
+async def _claim_and_tell(context, user_id: int, chat_id: int, telegram_code: "str | None" = None) -> None:
+    log = logging.getLogger(__name__)
+    try:
+        window = await asyncio.to_thread(family_link.promo_window)
+        now = datetime.now(timezone.utc)
+        if window is None or not window[0] <= now < window[1]:
+            # Not started yet (nothing remembered: it may start later), or over.
+            if window is not None and now >= window[1]:
+                _promo_state["over"] = True
+            return
+        outcome, expires = await asyncio.to_thread(family_link.claim_promo_gift, user_id)
+    except Exception as exc:
+        # Nothing was given (a claim is one transaction) and nothing is
+        # remembered, so their next message tries again.
+        log.warning("The gift could not be claimed (%s); the next message tries again", type(exc).__name__)
+        return
+    finally:
+        _promo_claiming.discard(user_id)
+    context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
+    if outcome != family_link.PROMO_GIVEN:
+        return
+    try:
+        lang = await asyncio.to_thread(_notice_language, user_id, telegram_code)
+        await context.bot.send_message(chat_id=chat_id, text=family_link.promo_notice(lang, expires))
+    except Exception:
+        # The credit is theirs either way, and /balance shows it.
+        log.debug("The gift's notice could not be sent", exc_info=True)
+
+
+def attach_promo_claim(app, group: int = -2) -> None:
+    """Register in a group of its OWN (python-telegram-bot runs one handler per
+    group), after the flood gate's: somebody being throttled claims nothing.
+    Only a new message in a private chat counts -- not a button, an edit or a
+    group -- because "the first message they send" is what the owner asked for."""
+
+    async def _claim_on_message(update, context) -> None:
+        if _promo_state["over"]:
+            return
+        user, chat = update.effective_user, update.effective_chat
+        if (update.message is None or user is None or chat is None or chat.type != "private"
+                or getattr(user, "is_bot", False)):
+            return
+        if context.user_data.get(PROMO_DONE_KEY) == family_link.PROMO_KEY or user.id in _promo_claiming:
+            return
+        _promo_claiming.add(user.id)
+        context.application.create_task(
+            _claim_and_tell(context, user.id, chat.id, getattr(user, "language_code", None)))
+
+    app.add_handler(TypeHandler(Update, _claim_on_message), group=group)
 
 # ---------------------------------------------------------------------------
 # Donation reminder + /donate (Telegram Stars)
@@ -986,6 +1160,9 @@ async def donation_payment_received(update, context) -> None:
 # and in what the bots say only Stars are ever refunded -- and they are not.
 _LEDGER_LABELS = {"refund": "returned"}
 
+# How many of the latest movements /balance prints; the balance page under /help says it.
+BALANCE_RECENT_ROWS = 8
+
 
 async def balance_command(update, context) -> None:
     """/balance -- what this person is holding, and what it is for.
@@ -1002,7 +1179,7 @@ async def balance_command(update, context) -> None:
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
     totals = await asyncio.to_thread(family_link.star_totals, user.id)
-    rows = await asyncio.to_thread(family_link.star_ledger_for, user.id, 8)
+    rows = await asyncio.to_thread(family_link.star_ledger_for, user.id, BALANCE_RECENT_ROWS)
     lines = [i18n.t(lang, "balance_header", balance=totals["balance"])]
     if totals["stars_paid"] > 0 or totals["spent"] > 0:
         lines.append(i18n.t(lang, "balance_totals", paid=totals["stars_paid"],
@@ -2912,6 +3089,7 @@ async def track_activity(update, context) -> None:
     # it is still the last thing on screen. Before the user check on purpose:
     # it is a property of the chat, not of who sent it.
     live_message.note_update(update)
+    _count_tap(update)
     user = update.effective_user
     if not user:
         return
@@ -3277,6 +3455,104 @@ def note_job(ok: bool) -> None:
         _usage_jobs_failed += 1
 
 
+# ---------------------------------------------------------------------------
+# Button taps, counted
+# ---------------------------------------------------------------------------
+# How often is each button tapped? The owner asked (2026-10-12) to measure "any
+# buttons that we might need info about". The answer is a count per button per
+# day for the whole bot, and nothing about who tapped it: no user id, no chat id,
+# no token, no link, no job id, no pack name, no conversation id, no amount is ever
+# part of a key, a log line or a row. track_activity sees every update before any
+# handler does, so one hook counts every button of the four public bots (ManagerBot
+# has its own track_activity in monitoring.py, which does not count: its buttons are
+# the owner's). The counts are written with the usage sample, every
+# USAGE_SAMPLE_MINUTES (family.button_taps, family_link.record_taps).
+#
+# What a key may be is decided here and only here (tap_key): the first part of the
+# callback data if it looks like a button's name, and the second part only for the
+# buttons whose second part is a choice from a short fixed list. Anything else (a
+# token, an id, a pack name, a number) never gets in.
+TAP_MAX_KEYS = 150           # distinct keys between two flushes, "other" included
+_TAP_FIRST = re.compile(r"[a-z][a-z0-9_]{0,23}")
+_TAP_SECOND = {
+    "help": re.compile(r"full|brief"),
+    "helpdet": re.compile(r"convert|recharge|balance|download|settings|newpack|addsticker|import|link|export|which"),
+    "setlang": re.compile(r"[a-z]{2,3}"),
+    "erasedata": re.compile(r"yes|no"),
+    "donatefiat": re.compile(r"[A-Za-z]{3}"),
+    "donatecustom": re.compile(r"[A-Za-z]{3}"),
+    "caption": re.compile(r"on|off"),
+    "lossless": re.compile(r"on|off"),
+    "large": re.compile(r"[a-z]{1,10}"),
+    "merge": re.compile(r"pdf|zip"),
+    "convfmt": re.compile(r"[a-z0-9]{1,10}"),
+    "fmtcat": re.compile(r"[a-z_]{1,16}"),
+    "aq_export": re.compile(r"pick|copy|doc|cancel"),
+    "anonlink": re.compile(r"toggle|newlink"),
+    "confirmremove": re.compile(r"yes|no"),
+}
+_MANAGER_BOT_ID = "managerbot"
+_taps: "dict[str, int]" = {}
+
+
+def tap_key(data) -> str:
+    """The key under which a tap of a button with this callback data is counted.
+    Pure. The button's name, plus its choice for the buttons that offer a fixed
+    list of them ("help:full", "setlang:uz"); "other" for anything that is not
+    shaped like a button's name."""
+    if not isinstance(data, str):
+        return "other"
+    parts = data.split(":", 2)
+    first = parts[0]
+    if _TAP_FIRST.fullmatch(first) is None:
+        return "other"
+    if len(parts) < 2:
+        return first
+    second = parts[1]
+    if first == "donate":
+        # The Stars menu is a fixed list of amounts; only those are kept.
+        return f"donate:{second}" if second in {str(amount) for amount in DONATE_STAR_OPTIONS} else first
+    pattern = _TAP_SECOND.get(first)
+    if pattern is not None and pattern.fullmatch(second) is not None:
+        return f"{first}:{second}"
+    return first
+
+
+def note_tap(key: str) -> None:
+    """Count one tap (or one event, for the bots that count things that are not
+    callbacks) under `key`. No I/O; never raises. At most TAP_MAX_KEYS distinct keys
+    between two flushes: past that a new key is counted as "other"."""
+    try:
+        if key in _taps:
+            _taps[key] += 1
+        elif key != "other" and len(_taps) < TAP_MAX_KEYS - (0 if "other" in _taps else 1):
+            _taps[key] = 1
+        else:
+            _taps["other"] = _taps.get("other", 0) + 1
+    except Exception:
+        pass
+
+
+def take_taps() -> "dict[str, int]":
+    """The counts so far, and a fresh start. Called on the event loop, where
+    note_tap runs, so no tap lands in the dict being written."""
+    global _taps
+    taps, _taps = _taps, {}
+    return taps
+
+
+def _count_tap(update) -> None:
+    """Count the button this update is a tap of, if it is one. Cannot raise and
+    cannot wait: it is on the path of every update."""
+    try:
+        query = update.callback_query
+        data = query.data if query is not None else None
+        if isinstance(data, str) and family_link._bot_id != _MANAGER_BOT_ID:  # noqa: SLF001
+            note_tap(tap_key(data))
+    except Exception:
+        pass
+
+
 def _alarm_due(kind: str) -> bool:
     now = time.time()
     if now - _usage_alarmed.get(kind, 0) < _ALARM_QUIET_SECONDS.get(kind, 3600):
@@ -3367,11 +3643,13 @@ def _check_usage_alarms(numbers: dict, updates: int, users: int,
         )
 
 
-def _sample_usage_now() -> None:
+def _sample_usage_now(taps: "dict[str, int] | None" = None) -> None:
     """One window: write the row, then decide whether to say anything.
 
     The counters are taken and reset first, so a slow database cannot make
-    the next window count this one's updates twice."""
+    the next window count this one's updates twice. `taps` is the button counts
+    of the window, swapped out by the job on the event loop (take_taps); a
+    caller that has none takes them here."""
     global _usage_updates, _usage_users
     updates, users = _usage_updates, len(_usage_users)
     _usage_updates, _usage_users = 0, set()
@@ -3400,6 +3678,16 @@ def _sample_usage_now() -> None:
         )
     except Exception:
         logging.getLogger(__name__).debug("Usage sample not written", exc_info=True)
+    # The button counts ride with the sample. Like the job counts above they were
+    # taken before the write, and if the write fails they are not put back: one
+    # window of counts is lost, which a count of taps can afford. The log says
+    # what kind of failure and nothing else.
+    if taps is None:
+        taps = take_taps()
+    try:
+        family_link.record_taps(taps)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Button taps not written (%s)", type(exc).__name__)
     try:
         _check_usage_alarms(numbers, updates, users, jobs_ok, jobs_failed)
     except Exception:
@@ -3408,7 +3696,10 @@ def _sample_usage_now() -> None:
 
 
 async def _usage_sample_job(context) -> None:
-    await asyncio.to_thread(_sample_usage_now)
+    # Swapped out here, on the event loop where the taps are counted, and written
+    # in the same thread hop as the usage row.
+    taps = take_taps()
+    await asyncio.to_thread(_sample_usage_now, taps)
 
 
 def build_status_text(start_time: datetime, users_last_hour: int, users_since_start: int) -> str:

@@ -9,8 +9,13 @@ FROM python:3.11-slim-bookworm
 # ffmpeg and bsdtar (libarchive's tar: it reads 7z and RAR and writes 7z) are
 # system programs this bot shells out to. Without bsdtar the bot starts and
 # simply does not offer 7z or RAR -- formats.probe() notices.
+# The four tesseract-ocr-* packages are language DATA for reading text from
+# pictures and scanned PDFs (English, Russian, Uzbek in Latin and Cyrillic). The
+# engine itself is inside PyMuPDF, so --no-install-recommends matters here: it
+# keeps these from pulling in the tesseract program, which nothing uses.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg libarchive-tools \
+    tesseract-ocr-eng tesseract-ocr-rus tesseract-ocr-uzb tesseract-ocr-uzb-cyrl \
  && rm -rf /var/lib/apt/lists/*
 
 # The running-cost settings the Nixpacks build had in nixpacks.toml: glibc's
@@ -22,7 +27,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MALLOC_ARENA_MAX=2 \
-    LOG_TO_FILES=0
+    LOG_TO_FILES=0 \
+    TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 
 WORKDIR /app
 COPY convert_bot/requirements.txt convert_bot/requirements.txt
@@ -32,8 +38,13 @@ COPY shared shared
 COPY convert_bot convert_bot
 # Every module this bot has, its own and shared/'s, imports -- or the image is
 # never deployed. ENV_FILES=off: an image never carries a .env to read anyway.
+# The self-test reads a line of English and a line of Russian from a page it
+# draws, so an image that cannot read text (no language data, a PyMuPDF
+# without the engine) fails here and not on somebody's scan. PYTHONPATH: it is
+# not bot.py, which finds shared/ for itself, that is being imported.
 RUN python -m compileall -q shared convert_bot \
  && cd convert_bot && ENV_FILES=off python -c "import bot" \
+ && ENV_FILES=off PYTHONPATH=../shared python -c "import ocr_convert; ocr_convert.selftest()" \
  && useradd --create-home --uid 10001 bot && chown -R bot /app
 USER bot
 

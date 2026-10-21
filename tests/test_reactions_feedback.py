@@ -161,15 +161,17 @@ for bot in PUBLIC:
     check(f"{bot}: every short help opens the same way and has the same /feedback bullet",
           all(t[lang].get("help_brief", "").startswith(("How it works:", "Bot qanday ishlaydi:",
                                                         "Как это устроено:")[LANGS.index(lang)])
-              and BULLET[lang] in t[lang].get("help_brief", "") and "/help full" in t[lang]["help_brief"]
+              and BULLET[lang] in t[lang].get("help_brief", "") and "/fullhelp" in t[lang]["help_brief"]
               for lang in LANGS))
     check(f"{bot}: the buttons say the same thing in every bot",
           all(t[lang].get("help_full_button") == anon[lang].get("help_full_button")
               and t[lang].get("help_brief_button") == anon[lang].get("help_brief_button") for lang in LANGS))
     source = (REPO / bot / "bot.py").read_text(encoding="utf-8")
-    check(f"{bot}: wires the shared toggle, and /help full",
+    check(f"{bot}: wires the shared toggle, /help full, /fullhelp and a page per command",
           "help_toggle(build_help_text" in source and "pattern=HELP_TOGGLE_PATTERN" in source
-          and "wants_full_help(context)" in source and "help_keyboard(lang" in source)
+          and "wants_full_help(context)" in source and "help_keyboard(lang" in source
+          and "fullhelp" in source and "help_page_button(HELP_PAGES)" in source
+          and "pattern=HELP_PAGE_PATTERN" in source)
 check("the toggle answers help:full and help:brief and nothing else",
       __import__("re").fullmatch(getattr(sf, "HELP_TOGGLE_PATTERN", "x").lstrip("^").rstrip("$"),
                                  "help:full") is not None)

@@ -388,6 +388,31 @@ PROBLEMS = {
         "The compressed/uncompressed button refers to a download that is no longer remembered.",
         "An old message, or a restart.",
         "Nothing."),
+    "DL-MERGE-TOO-BIG": Problem(
+        "DownloaderBot", "An album too big to put in one file",
+        "The 📄 PDF or 🗜 ZIP button was tapped on an album with more than DBOT_MERGE_MAX_ITEMS files (20), or "
+        "whose files came to more than DBOT_MERGE_MAX_MB (48) when fetched, or whose PDF or ZIP came out over "
+        "the 50 MB the Bot API takes; or one picture was over 20 megapixels (too many for a PDF page). "
+        "Fetching stopped at the file that passed the limit and nothing was built.",
+        "A large carousel or a post of long videos; a very high-resolution photograph.",
+        "Nothing; the person still has the files from the delivery. Raise the two DBOT_MERGE_* limits if "
+        "ordinary albums are being refused (merge.py)."),
+    "DL-MERGE-NO-PHOTOS": Problem(
+        "DownloaderBot", "A PDF asked for, fewer than two photos found",
+        "The 📄 PDF button was tapped, and when the post was fetched again fewer than two photos came back -- "
+        "no PDF was built.",
+        "The post was edited or deleted since it was delivered, or a different route answered this time "
+        "and returned only a video or a cover picture.",
+        "Nothing, unless it happens to albums that are still up: then compare what the routes return for "
+        "that link (/probe in ManagerBot)."),
+    "DL-MERGE-FAILED": Problem(
+        "DownloaderBot", "Building or sending an album's PDF or ZIP failed",
+        "The files were fetched but the single PDF or ZIP could not be built or uploaded; everything was "
+        "deleted and the person was offered a report.",
+        "For a PDF, a file that is not an image although the post called it a photo, an animated picture, or "
+        "one in a format other than JPEG, PNG, WEBP and GIF (all refused unread); Pillow running out of "
+        "memory on a large picture; a full disk; or Telegram refusing the upload.",
+        "The traceback in the log beside the incident id ('Merging ... failed'); merge.py."),
 
     # ---- StickerBot ----------------------------------------------------------------
     "ST-WHOMADE-UNKNOWN": Problem(
@@ -713,6 +738,10 @@ KEYS = {
         "twitter_fetch_failed_link": "DL-TWITTER-CARD",
         "unrecognized_message": "DL-UNRECOGNIZED",
         "redeliver_expired": "DL-BUTTON-EXPIRED",
+        "merge_too_big": "DL-MERGE-TOO-BIG",
+        "merge_picture_too_big": "DL-MERGE-TOO-BIG",
+        "merge_no_photos": "DL-MERGE-NO-PHOTOS",
+        "merge_failed": "DL-MERGE-FAILED",
         "large_files_off": "DL-LARGE-OFF",
         "large_files_private_only": "DL-LARGE-PRIVATE",
         "large_files_no_credit": "DL-LARGE-NO-CREDIT",
@@ -817,7 +846,7 @@ SIMPLE = frozenset({
     "CV-JOB-GONE", "CV-NO-CREDIT", "CV-MIXED-BATCH", "CV-UNRECOGNIZED", "CV-TOO-SLOW", "CV-NO-MEMORY",
     "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-UNRECOGNIZED",
     "DL-LARGE-OFF", "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
-    "DL-BUTTON-EXPIRED",
+    "DL-BUTTON-EXPIRED", "DL-MERGE-TOO-BIG", "DL-MERGE-NO-PHOTOS",
     "ST-WHOMADE-UNKNOWN", "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
     "ST-TITLE-EMPTY", "ST-ANIMATED", "ST-IMPORT-SOURCE", "ST-TG-PACK-FULL", "ST-UNRECOGNIZED",
     "ST-NOTHING-ADDED", "ST-NO-STICKER",
@@ -942,11 +971,12 @@ KINDS = {
         "CV-TOO-SLOW", "CV-NO-MEMORY",
         "DL-QUOTA-HOUR", "DL-QUOTA-DAY", "DL-QUEUE-FULL", "DL-TOO-BIG", "DL-LARGE-OFF",
         "DL-LARGE-PRIVATE", "DL-LARGE-NO-CREDIT", "DL-LARGE-TOO-BIG", "DL-LARGE-SHORT",
+        "DL-MERGE-TOO-BIG",
         "ST-ANIMATED", "ST-TG-PACK-FULL",
         "AN-TOO-FAST", "AN-REACTION-NOT-PASSED",
     }),
     GONE: frozenset({
-        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED",
+        "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED", "DL-MERGE-NO-PHOTOS",
         "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
         "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
     }),

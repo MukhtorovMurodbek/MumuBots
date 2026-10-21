@@ -86,7 +86,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
-        "privacy_stored": '• your Telegram user id, and the language you chose\n• the file you send — deleted as soon as it has been converted, or kept for up to 15 minutes after each conversion if you turn on "keep file" to convert it to more formats; anything a crash leaves behind is swept up on a timer and at startup\n• a timestamp each time you use the bot, so its owner can tell whether anyone is using it\n• your ⚡ credit balance, and a record of every top-up, conversion charge and ⚡ returned to your balance: the amount, what it was for, and Telegram\'s payment id for anything paid\n• whatever the bot is in the middle of doing with you, until it is finished',
+        "privacy_stored": '• your Telegram user id, and the language you chose\n• the file you send — deleted as soon as it has been converted, or kept for up to 15 minutes after each conversion if you turn on "keep file" to convert it to more formats; anything a crash leaves behind is swept up on a timer and at startup\n• a timestamp each time you use the bot, so its owner can tell whether anyone is using it\n• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• your ⚡ credit balance, and a record of every top-up, conversion charge and ⚡ returned to your balance: the amount, what it was for, and Telegram\'s payment id for anything paid\n• whatever the bot is in the middle of doing with you, until it is finished',
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
             "Every error this bot shows anybody is written down by itself: the error code, an "
@@ -180,15 +180,86 @@ STRINGS = {
             "How it works:\n"
             "\n"
             "• Send me a file — a picture, camera raw photo, video, audio, document, spreadsheet, subtitles or archive — and choose what it should become. /formats lists everything.\n"
+            "• 📝 Text from a photo or a scanned PDF: send it and choose TXT or Searchable PDF.\n"
             "• A conversion costs ⚡ credit, and its price is shown before anything is taken. /recharge tops it up; /balance shows what you have and where it went.\n"
             "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
             "\n"
             "Main commands: /convert · /formats · /balance · /recharge · /cancel\n"
-            "Every command, and the prices: the full guide, below or /help full.\n"
+            "Every command, and the prices: the full guide, below or /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
+        "help_page_everything": "The full guide: /fullhelp",
+        "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
+        "price_free_upto": "0–{mb} MB: ",
+        "price_over": "over {mb} MB: ",
+        "helppage_convert": (
+            "🔄 /convert — turning a file into another format\n"
+            "\n"
+            "1. Send me the file — or send /convert first, then the file. Up to {max_mb} MB.\n"
+            "2. I list the formats it can become. Tap one; \"⋯ More formats\" shows the rest.\n"
+            "3. A free conversion starts at once. Otherwise you first see the price, and only \"✅ Convert\" starts it — nothing is taken before that.\n"
+            "\n"
+            "Price in ⚡ credit:\n"
+            "{pricing}\n"
+            "\n"
+            "• Free: the file you send and the file you get back come to less than {free_mb} MB together.\n"
+            "• The ⚡ is taken when the conversion starts, not while it waits its turn. If I fail it (I refuse the file, it runs out of time, or the result can't be sent), the ⚡ goes back to your balance. If you stop it yourself, it doesn't.\n"
+            "• The price screen says how big the result may be. If it comes out bigger, it isn't sent, and the ⚡ goes back.\n"
+            "• An album of pictures gets one menu for all of them (up to {batch} files). PDF puts one picture on each page; the other formats come back as a ZIP.\n"
+            "• 📝 Text from a photo or a scanned PDF: choose TXT (just the text) or Searchable PDF (the same pages, with text you can select and search). For a picture, both are under \"⋯ More formats\". A Searchable PDF can be made from up to {ocr_pages} scanned pages. \"🔤 Text language\" switches between English, Russian and Uzbek. Up to {ocr_free_pages} page(s), with the files under {free_mb} MB, reading the text is free.\n"
+            "• \"📌 Keep file for more formats\" keeps your file {minutes} minutes after each conversion, so you can convert it again without sending it again. It is off at first: the file is deleted straight after.\n"
+            "• I wait {minutes} minutes for you to choose a format.\n"
+            "\n"
+            "Example: send report.docx and tap PDF. A small document converts at once, for free. A bigger one first shows its price — {least} ⚡ or more — and \"✅ Convert\" starts it."
+        ),
+        "helppage_recharge": (
+            "⭐ /recharge — topping up ⚡ credit\n"
+            "\n"
+            "Conversions are paid in ⚡ credit, and ⚡ is bought with Telegram Stars (⭐).\n"
+            "1. Send /recharge and tap an amount ({options} ⭐), or \"✏️ Custom ⭐\" for your own. Or straight away: /recharge 200.\n"
+            "2. Telegram asks you to pay. The ⚡ is on your balance as soon as the payment arrives.\n"
+            "\n"
+            "What one ⭐ buys depends on how many Stars you have paid in all, ever, in any of our bots:\n"
+            "{ladder}\n"
+            "{bonus_rule}\n"
+            "• Bonus credit is spent first, the soonest-to-expire first, so only bonus you haven't used can run out. /balance shows how much of yours is bonus, and when it runs out.\n"
+            "• Payments are final: Stars are not refunded, and ⚡ can't be withdrawn or turned back into Stars.\n"
+            "• /donate is the same command.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_recharge_step_first": "  • your first {stars} ⭐: {each} ⚡ each{split}",
+        "helppage_recharge_step_next": "  • the next {stars} ⭐: {each} ⚡ each{split}",
+        "helppage_recharge_step_after": "  • after that: {rate} ⚡ each",
+        "helppage_recharge_flat": "  • {rate} ⚡ for every ⭐",
+        "helppage_recharge_bonus_part": " ({rate} + {bonus} bonus)",
+        "helppage_recharge_bonus_rule": "The {rate} ⚡ per ⭐ never expire. The bonus expires {days} days after the payment.",
+        "helppage_recharge_example": "Example: a first payment of {stars} ⭐ gives {total} ⚡: {base} ⚡ that never expire, and {bonus} ⚡ bonus.",
+        "helppage_recharge_example_flat": "Example: {stars} ⭐ give {total} ⚡.",
+        "helppage_balance": (
+            "⚡ /balance — your credit, and where it went\n"
+            "\n"
+            "/balance shows:\n"
+            "• your balance, and in all: the Stars you paid, the ⚡ they gave, the ⚡ you spent;\n"
+            "• how much of the balance is bonus, how much of that runs out first, and on which day;\n"
+            "• what your next Stars would buy;\n"
+            "• your last {rows} movements, each with its date and one word:\n"
+            "  topup — ⚡ for Stars you paid\n"
+            "  bonus — the extra ⚡ a top-up gave; it expires {days} days after the payment\n"
+            "  grant — ⚡ given to you: a gift (bonus that expires at the end of the day it names) or credit added by the person who runs these bots (it doesn't expire)\n"
+            "  spend — a conversion\n"
+            "  returned — a conversion's ⚡ back, because I failed it\n"
+            "  adjustment — a correction by the person who runs these bots\n"
+            "  expired — bonus that ran out unused\n"
+            "• Bonus is spent before the rest, the soonest-to-expire first.\n"
+            "• One wallet: the same balance in all our bots.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_balance_example": "Example: after a first payment of {stars} ⭐ you would see \"+{base} ⚡ topup\" and \"+{bonus} ⚡ bonus\".",
+        "helppage_balance_example_one": "Example: after a first payment of {stars} ⭐ you would see \"+{total} ⚡ topup\".",
         "privacy_feedback_heading": "If you send /feedback:",
         "privacy_feedback": (
             "What you write reaches the person who runs these bots as a Telegram message, with "
@@ -200,7 +271,7 @@ STRINGS = {
         "cancel_button_conversion": "🔄 The file waiting to convert",
         # ---- convert_bot-specific keys ----
         "start_greeting": "Hey! Send me a file and I'll convert it to another format.\n\n",
-        "help_text": "Send me a file and I'll convert it to another format — pictures, camera raw photos, video, audio, documents, spreadsheets, subtitles and archives.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
+        "help_text": "Send me a file and I'll convert it to another format — pictures, camera raw photos, video, audio, documents, spreadsheets, subtitles and archives.\n\nCommands:\n/convert - start a conversion (or just send a file directly)\n/formats - every format I read and write\n/balance (or /mystars) - your ⚡ credit and what it was spent on\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/recharge (or /donate) - top up your ⚡ credit\n/en, /uz, /rus - switch language (or /language, which asks)\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n\nPrice in ⚡ credit:\n{pricing}\n\n⚠️ NOTE: Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn. A conversion's ⚡ is taken when it STARTS, and goes back to your balance only if the bot fails it.\n\n",
         "convert_start_prompt": (
             "Send me a file to convert, up to {max_mb} MB — a picture, a video, a "
             "sound, a document, a spreadsheet or a subtitle file. Send several "
@@ -233,8 +304,11 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 I'm being updated right now, so I can't start anything new — please try again shortly. I'll message you when I'm back.",
         "update_will_reset": "🔧 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a few minutes.",
         "update_done_try_now": '✅ The update is done — go ahead and try again now.',
+        "gift_granted": "🎁 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, good until {date}. It pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}. Your balance: /balance",
+        "gift_claimed": "🎁 Gift received: {amount} ⚡ of free credit! Mumu bots have passed {users} users, and this is our thank-you.\nIt is good until {date} (UTC) and pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}.\nYour balance: /balance",
         "download_failed": "Couldn't download that file: {error}",
         "unsupported_format": "\".{ext}\" isn't a format I convert — /formats lists the ones I do.",
+        "not_for_this_file": "That one isn't available for this file (an album, or a PDF with no scanned page).",
         "file_too_large_convert": "That file is {size} MB, over the {max_mb} MB limit — can't convert it.",
         "no_target_formats": "No different target format is available for that file.",
         "category_image": "image",
@@ -270,6 +344,13 @@ STRINGS = {
         "too_big_to_send_alert": 'That format would come out over the {limit} MB a bot can send for this picture.',
         "keep_toggle_off": '📌 Keep file for more formats: off',
         "keep_toggle_on": '📌 Keep file for more formats: on',
+        "ocr_lang_toggle": "🔤 Text language: {name} (tap to change)",
+        "ocr_lang_set": "Text language is now {name}.",
+        "ocr_lang_eng": "English",
+        "ocr_lang_rus": "Russian",
+        "ocr_lang_uzb": "Uzbek (Latin and Cyrillic)",
+        "ocr_too_many_pages_note": "⚠️ NOTE: more than {max} pages of this PDF are pictures without text. Text is recognised on at most {max} such pages here, so TXT gives only the text the other pages already have, and a searchable PDF is not offered.",
+        "target_ocrpdf": "Searchable PDF",
         "keep_explained_on": "I'll keep your file for {minutes} minutes after each conversion, so you can convert it to other formats too. /cancel deletes it sooner.",
         "keep_explained_off": 'Your file will be deleted as soon as it has been converted.',
         "storage_full_user": 'You already have {used} MB of files with me, and I hold up to {limit} MB per person. Let a conversion finish or /cancel one, then send it again.',
@@ -428,7 +509,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• yuborgan faylingiz — o'girilishi bilanoq o'chiriladi; «faylni saqlash» yoqilgan bo'lsa, boshqa formatlarga ham o'girish uchun har konvertatsiyadan keyin 15 daqiqagacha saqlanadi; nosozlikdan keyin qolib ketgan fayllar muntazam va bot ishga tushganda tozalanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• ⚡ kredit balansingiz va har bir to'ldirish, konvertatsiya uchun yechilgan hamda balansga qaytgan ⚡ yozuvi: miqdori, nima uchunligi va pullik to'lovlarda Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• yuborgan faylingiz — o'girilishi bilanoq o'chiriladi; «faylni saqlash» yoqilgan bo'lsa, boshqa formatlarga ham o'girish uchun har konvertatsiyadan keyin 15 daqiqagacha saqlanadi; nosozlikdan keyin qolib ketgan fayllar muntazam va bot ishga tushganda tozalanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• ⚡ kredit balansingiz va har bir to'ldirish, konvertatsiya uchun yechilgan hamda balansga qaytgan ⚡ yozuvi: miqdori, nima uchunligi va pullik to'lovlarda Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -480,15 +561,86 @@ STRINGS = {
             "Bot qanday ishlaydi:\n"
             "\n"
             "• Menga fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv — va u nimaga aylanishini tanlang. Barcha formatlar: /formats\n"
+            "• 📝 Rasm yoki skanerlangan PDF dagi matn: faylni yuboring va TXT yoki Matnli PDF ni tanlang.\n"
             "• Har bir konvertatsiya ⚡ kredit turadi, narxi esa hech narsa yechilishidan oldin ko'rsatiladi. Kreditni /recharge bilan to'ldirasiz; /balance qancha qolgani va nimaga sarflanganini ko'rsatadi.\n"
             "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
             "\n"
             "Asosiy buyruqlar: /convert · /formats · /balance · /recharge · /cancel\n"
-            "Barcha buyruqlar va narxlar: to'liq qo'llanmada — pastdagi tugma yoki /help full.\n"
+            "Barcha buyruqlar va narxlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
+        "help_page_everything": "To'liq qo'llanma: /fullhelp",
+        "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
+        "price_free_upto": "0–{mb} MB: ",
+        "price_over": "{mb} MB dan ortiq: ",
+        "helppage_convert": (
+            "🔄 /convert — faylni boshqa formatga o'girish\n"
+            "\n"
+            "1. Faylni yuboring — yoki avval /convert, keyin faylni. {max_mb} MB gacha.\n"
+            "2. Uni qaysi formatlarga o'girish mumkinligini ko'rsataman. Birini bosing; \"⋯ Yana formatlar\" qolganlarini ochadi.\n"
+            "3. Bepul konvertatsiya darhol boshlanadi. Aks holda avval narxini ko'rasiz va uni faqat \"✅ O'girish\" tugmasi boshlaydi — undan oldin hech narsa yechilmaydi.\n"
+            "\n"
+            "⚡ kreditdagi narx:\n"
+            "{pricing}\n"
+            "\n"
+            "• Bepul: yuborgan faylingiz va qaytadigan fayl birgalikda {free_mb} MB dan kichik bo'lsa.\n"
+            "• ⚡ navbat kutayotganda emas, konvertatsiya boshlanganda yechiladi. Agar uni bajara olmasam (faylni rad etsam, vaqt yetmasa yoki natijani yuborib bo'lmasa), ⚡ balansingizga qaytadi. O'zingiz to'xtatsangiz, qaytmaydi.\n"
+            "• Narx ekrani natija qanchalik katta bo'lishi mumkinligini aytadi. Undan katta chiqsa, yuborilmaydi va ⚡ qaytadi.\n"
+            "• Rasmlar albomi uchun hammasiga bitta menyu chiqadi ({batch} tagacha fayl). PDF har bir rasmni alohida sahifaga qo'yadi; boshqa formatlar ZIP bo'lib keladi.\n"
+            "• 📝 Rasm yoki skanerlangan PDF'dan matn: TXT (faqat matn) yoki Matnli PDF (o'sha sahifalar, matnini belgilash va qidirish mumkin) ni tanlang. Rasm uchun ikkalasi ham \"⋯ Yana formatlar\" ichida. Matnli PDF {ocr_pages} tagacha skanerlangan sahifadan yasaladi. \"🔤 Matn tili\" inglizcha, ruscha va o'zbekcha orasida almashtiradi. {ocr_free_pages} sahifagacha va fayllar {free_mb} MB dan kichik bo'lsa, matnni o'qish bepul.\n"
+            "• \"📌 Faylni boshqa formatlar uchun saqlash\" faylingizni har bir konvertatsiyadan keyin {minutes} daqiqa saqlaydi — qayta yubormasdan yana o'girishingiz mumkin. Dastlab o'chiq: fayl darhol o'chiriladi.\n"
+            "• Format tanlashingizni {minutes} daqiqa kutaman.\n"
+            "\n"
+            "Misol: hisobot.docx ni yuboring va PDF ni bosing. Kichik hujjat darhol va bepul o'giriladi. Kattarog'i avval narxini ko'rsatadi — {least} ⚡ yoki ko'proq — va uni \"✅ O'girish\" boshlaydi."
+        ),
+        "helppage_recharge": (
+            "⭐ /recharge — ⚡ kreditni to'ldirish\n"
+            "\n"
+            "Konvertatsiyalar ⚡ kredit bilan to'lanadi, ⚡ esa Telegram Stars (⭐) bilan sotib olinadi.\n"
+            "1. /recharge yuboring va miqdorni bosing ({options} ⭐) yoki o'z miqdoringiz uchun \"✏️ Boshqa ⭐\". Yoki to'g'ridan-to'g'ri: /recharge 200.\n"
+            "2. Telegram to'lovni so'raydi. To'lov kelishi bilan ⚡ balansingizda bo'ladi.\n"
+            "\n"
+            "Bitta ⭐ qancha ⚡ berishi siz shu paytgacha istalgan botimizda jami qancha Stars to'laganingizga bog'liq:\n"
+            "{ladder}\n"
+            "{bonus_rule}\n"
+            "• Avval bonus kredit sarflanadi, muddati eng tez tugaydigani birinchi, shuning uchun faqat ishlatilmagan bonus yo'qolishi mumkin. Bonusingiz qancha va qachon tugashini /balance ko'rsatadi.\n"
+            "• To'lovlar qaytarilmaydi: Stars qaytarilmaydi, ⚡ ni yechib olib yoki Stars'ga aylantirib bo'lmaydi.\n"
+            "• /donate — xuddi shu buyruq.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_recharge_step_first": "  • dastlabki {stars} ⭐: har biri {each} ⚡{split}",
+        "helppage_recharge_step_next": "  • keyingi {stars} ⭐: har biri {each} ⚡{split}",
+        "helppage_recharge_step_after": "  • undan keyin: har biri {rate} ⚡",
+        "helppage_recharge_flat": "  • har bir ⭐ uchun {rate} ⚡",
+        "helppage_recharge_bonus_part": " ({rate} + {bonus} bonus)",
+        "helppage_recharge_bonus_rule": "Har ⭐ uchun {rate} ⚡ hech qachon tugamaydi. Bonusning muddati to'lovdan {days} kun o'tib tugaydi.",
+        "helppage_recharge_example": "Misol: birinchi marta {stars} ⭐ to'lasangiz, {total} ⚡ olasiz: muddati tugamaydigan {base} ⚡ va {bonus} ⚡ bonus.",
+        "helppage_recharge_example_flat": "Misol: {stars} ⭐ — {total} ⚡.",
+        "helppage_balance": (
+            "⚡ /balance — kreditingiz va u qayerga ketgani\n"
+            "\n"
+            "/balance quyidagilarni ko'rsatadi:\n"
+            "• balansingiz va jami: to'lagan Stars, ular bergan ⚡, sarflagan ⚡;\n"
+            "• balansning qanchasi bonus, uning qanchasi birinchi bo'lib va qaysi kuni tugashi;\n"
+            "• keyingi Stars'ingiz qancha ⚡ berishi;\n"
+            "• oxirgi {rows} ta amal, har biri sanasi va bitta so'z bilan:\n"
+            "  topup — to'lagan Stars'ingiz uchun ⚡\n"
+            "  bonus — to'ldirish bergan qo'shimcha ⚡; to'lovdan {days} kun o'tib tugaydi\n"
+            "  grant — sizga berilgan ⚡: sovg'a (ko'rsatilgan kun oxirida tugaydigan bonus) yoki botlarni yuritayotgan odam qo'shgan kredit (u tugamaydi)\n"
+            "  spend — konvertatsiya\n"
+            "  returned — men bajara olmagan konvertatsiyaning qaytgan ⚡ i\n"
+            "  adjustment — botlarni yuritayotgan odamning tuzatishi\n"
+            "  expired — ishlatilmay tugagan bonus\n"
+            "• Bonus qolganidan oldin sarflanadi, muddati eng tez tugaydigani birinchi.\n"
+            "• Hamyon bitta: barcha botlarimizda balans bir xil.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_balance_example": "Misol: birinchi marta {stars} ⭐ to'lagach \"+{base} ⚡ topup\" va \"+{bonus} ⚡ bonus\" ni ko'rasiz.",
+        "helppage_balance_example_one": "Misol: birinchi marta {stars} ⭐ to'lagach \"+{total} ⚡ topup\" ni ko'rasiz.",
         "privacy_feedback_heading": "/feedback yuborsangiz:",
         "privacy_feedback": (
             "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
@@ -499,7 +651,7 @@ STRINGS = {
         "cancel_item_conversion": "o'girilishi kutilayotgan .{ext} fayli",
         "cancel_button_conversion": "🔄 Konvertatsiyani kutayotgan fayl",
         "start_greeting": "Salom! Menga faylni yuboring va men uni boshqa formatga o'giraman.\n\n",
-        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
+        "help_text": "Menga fayl yuboring — uni boshqa formatga o'girib beraman: rasm, kamera raw, video, audio, hujjat, jadval, subtitr va arxivlar.\n\nBuyruqlar:\n/convert - konvertatsiyani boshlash (yoki shunchaki fayl yuboring)\n/formats - qo'llab-quvvatlanadigan barcha formatlar\n/balance (yoki /mystars) - ⚡ kreditingiz va u nimaga sarflangani\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/recharge (yoki /donate) - ⚡ kreditni to'ldirish\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n\nNarxlar ⚡ kreditda:\n{pricing}\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — to'langan Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Konvertatsiya narxi u BOSHLANGANDA yechiladi va faqat bot tomonidagi xatolik tufayli bajarilmasa, ⚡ balansingizga qaytib tushadi.\n\n",
         "convert_start_prompt": "O'girish uchun {max_mb} MB gacha fayl yuboring — rasm, kamera raw, video, audio, hujjat, jadval, subtitr yoki arxiv. Bir nechta rasmni birga yuborsangiz, ularni bitta PDF qilib beraman.\n\nBarcha formatlar: /formats\n\nNarxlar ⚡ kreditda:\n{pricing}\n\nBekor qilish uchun: /cancel",
         "cancelled": "Bekor qilindi.",
         "btn_cancel_conversion": "✖️ Bekor qilish",
@@ -522,8 +674,11 @@ STRINGS = {
         "update_soon_try_later_soon": "🔧 Bot hozir yangilanmoqda, shuning uchun yangi ishni boshlab bo'lmaydi — birozdan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
         "update_will_reset": "🔧 Diqqat: bot yangilanadi va hozir bajarilayotgan ishingiz to'xtab qoladi. Bir necha daqiqadan keyin qaytadan boshlashingiz mumkin.",
         "update_done_try_now": "✅ Yangilanish tugadi — endi qaytadan urinib ko'rishingiz mumkin.",
+        "gift_granted": "🎁 Bizda 100 dan ortiq foydalanuvchi bo'ldi, rahmat! Sizga {amount} ⚡ bepul kredit berildi, u {date} gacha amal qiladi. Bu {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi. Balansingiz: /balance",
+        "gift_claimed": "🎁 Sovg'a: {amount} ⚡ bepul kredit! Mumu botlarida {users} dan ortiq foydalanuvchi bo'ldi, bu bizning minnatdorchiligimiz.\nU {date} gacha (UTC) amal qiladi va {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi.\nBalansingiz: /balance",
         "download_failed": "Faylni yuklab bo'lmadi: {error}",
         "unsupported_format": '".{ext}" formatini o\'gira olmayman. Qo\'llab-quvvatlanadigan formatlar: /formats',
+        "not_for_this_file": "Bu variant bu fayl uchun mavjud emas (albom yoki skanerlangan sahifasi yo'q PDF).",
         "file_too_large_convert": "Fayl hajmi {size} MB — bu {max_mb} MB chegarasidan katta, shuning uchun uni o'girib bo'lmaydi.",
         "no_target_formats": "Bu faylni o'girish mumkin bo'lgan boshqa format yo'q.",
         "category_image": "rasm",
@@ -559,6 +714,13 @@ STRINGS = {
         "too_big_to_send_alert": 'Bu rasm shu formatda bot yubora oladigan {limit} MB dan katta chiqadi.',
         "keep_toggle_off": "📌 Faylni boshqa formatlar uchun saqlash: o'chirilgan",
         "keep_toggle_on": '📌 Faylni boshqa formatlar uchun saqlash: yoqilgan',
+        "ocr_lang_toggle": "🔤 Matn tili: {name} (o'zgartirish uchun bosing)",
+        "ocr_lang_set": "Endi matn tili: {name}.",
+        "ocr_lang_eng": "inglizcha",
+        "ocr_lang_rus": "ruscha",
+        "ocr_lang_uzb": "o'zbekcha (lotin va kirill)",
+        "ocr_too_many_pages_note": "⚠️ ESLATMA: bu PDF ning {max} tadan ortiq sahifasi matnsiz rasm. Bu yerda ko'pi bilan {max} ta shunday sahifadagi matn aniqlanadi, shuning uchun TXT faqat boshqa sahifalarda bor matnni beradi, matnli PDF esa taklif qilinmaydi.",
+        "target_ocrpdf": "Matnli PDF",
         "keep_explained_on": "Har bir konvertatsiyadan keyin faylingizni {minutes} daqiqa saqlab turaman — uni boshqa formatlarga ham o'girishingiz mumkin. Ertaroq o'chirish uchun: /cancel",
         "keep_explained_off": "Faylingiz o'girilishi bilanoq o'chiriladi.",
         "storage_full_user": "Fayllaringiz {used} MB joy egallagan, bir kishiga esa {limit} MB gacha ajratiladi. Biror konvertatsiya tugashini kuting yoki /cancel qiling, so'ng qaytadan yuboring.",
@@ -679,7 +841,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
-        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
+        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
@@ -759,15 +921,86 @@ STRINGS = {
             "Как это устроено:\n"
             "\n"
             "• Пришлите файл — картинку, raw-фото, видео, аудио, документ, таблицу, субтитры или архив — и выберите, во что его превратить. Все форматы: /formats\n"
+            "• 📝 Текст с фото или скана PDF: отправьте файл и выберите TXT или PDF с текстом.\n"
             "• Конвертация стоит ⚡ кредит, и цена видна до того, как что-то списано. Пополнить — /recharge; /balance покажет остаток и на что он ушёл.\n"
             "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
             "\n"
             "Основные команды: /convert · /formats · /balance · /recharge · /cancel\n"
-            "Все команды и цены — в полном руководстве: кнопка ниже или /help full.\n"
+            "Все команды и цены — в полном руководстве: кнопка ниже или /fullhelp.\n"
             "\n"
         ),
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
+        "help_page_everything": "Полное руководство: /fullhelp",
+        "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
+        "price_free_upto": "0–{mb} МБ: ",
+        "price_over": "больше {mb} МБ: ",
+        "helppage_convert": (
+            "🔄 /convert — перевести файл в другой формат\n"
+            "\n"
+            "1. Пришлите файл — или сначала /convert, потом файл. До {max_mb} МБ.\n"
+            "2. Я покажу, во что его можно перевести. Нажмите нужный формат; «⋯ Ещё форматы» покажет остальные.\n"
+            "3. Бесплатная конвертация начинается сразу. Иначе вы сначала увидите цену, и запустит её только «✅ Конвертировать» — до этого ничего не списывается.\n"
+            "\n"
+            "Цена в ⚡ кредите:\n"
+            "{pricing}\n"
+            "\n"
+            "• Бесплатно: присланный файл и готовый вместе меньше {free_mb} МБ.\n"
+            "• ⚡ списывается, когда конвертация начинается, а не пока она ждёт очереди. Если я её не выполню (откажу, не уложусь во время или не смогу отправить результат), ⚡ вернётся на баланс. Если остановите её сами — не вернётся.\n"
+            "• На экране с ценой сказано, каким большим может быть результат. Если он получится больше, его не отправят, а ⚡ вернётся.\n"
+            "• На альбом картинок — одно меню на все (до {batch} файлов). PDF кладёт по картинке на страницу; остальные форматы приходят ZIP-архивом.\n"
+            "• 📝 Текст с фото или скана PDF: выберите TXT (только текст) или «PDF с текстом» (те же страницы, текст можно выделять и искать). Для картинки оба варианта — в «⋯ Ещё форматы». PDF с текстом делается максимум из {ocr_pages} отсканированных страниц. «🔤 Язык текста» переключает английский, русский и узбекский. Распознавание бесплатно, если страниц не больше {ocr_free_pages} и файлы меньше {free_mb} МБ.\n"
+            "• «📌 Хранить файл для других форматов» хранит файл {minutes} мин после каждой конвертации — можно перевести его ещё раз, не присылая заново. Сначала выключено: файл удаляется сразу.\n"
+            "• Выбора формата я жду {minutes} мин.\n"
+            "\n"
+            "Пример: пришлите otchet.docx и нажмите PDF. Небольшой документ переведётся сразу и бесплатно. Для большего сначала будет цена — от {least} ⚡ — и запустит его «✅ Конвертировать»."
+        ),
+        "helppage_recharge": (
+            "⭐ /recharge — пополнить ⚡ кредит\n"
+            "\n"
+            "Конвертации оплачиваются ⚡ кредитом, а ⚡ покупается за Telegram Stars (⭐).\n"
+            "1. Отправьте /recharge и нажмите сумму ({options} ⭐) или «✏️ Другое ⭐». Или сразу: /recharge 200.\n"
+            "2. Telegram попросит оплатить. ⚡ появится на балансе, как только придёт оплата.\n"
+            "\n"
+            "Сколько ⚡ даёт одна ⭐, зависит от того, сколько Stars вы заплатили всего, за всё время, в любом из наших ботов:\n"
+            "{ladder}\n"
+            "{bonus_rule}\n"
+            "• Сначала тратится бонусный кредит, начиная с того, что сгорает раньше, — поэтому сгореть может только неиспользованный бонус. /balance покажет, сколько у вас бонуса и когда он сгорает.\n"
+            "• Платежи окончательны: Stars не возвращаются, а ⚡ нельзя вывести или обратно превратить в Stars.\n"
+            "• /donate — та же команда.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_recharge_step_first": "  • первые {stars} ⭐: по {each} ⚡{split}",
+        "helppage_recharge_step_next": "  • следующие {stars} ⭐: по {each} ⚡{split}",
+        "helppage_recharge_step_after": "  • дальше: по {rate} ⚡",
+        "helppage_recharge_flat": "  • {rate} ⚡ за каждую ⭐",
+        "helppage_recharge_bonus_part": " ({rate} + {bonus} бонус)",
+        "helppage_recharge_bonus_rule": "{rate} ⚡ за каждую ⭐ не сгорают никогда. Бонус сгорает через {days} дн. после оплаты.",
+        "helppage_recharge_example": "Пример: первая оплата {stars} ⭐ даёт {total} ⚡: {base} ⚡, которые не сгорают, и {bonus} ⚡ бонуса.",
+        "helppage_recharge_example_flat": "Пример: {stars} ⭐ дают {total} ⚡.",
+        "helppage_balance": (
+            "⚡ /balance — ваш кредит и куда он ушёл\n"
+            "\n"
+            "/balance показывает:\n"
+            "• баланс и итоги: сколько Stars вы заплатили, сколько ⚡ они дали, сколько ⚡ потрачено;\n"
+            "• сколько из баланса — бонус, сколько из него сгорает первым и в какой день;\n"
+            "• сколько ⚡ дадут ваши следующие Stars;\n"
+            "• последние {rows} операций, у каждой дата и одно слово:\n"
+            "  topup — ⚡ за оплаченные Stars\n"
+            "  bonus — дополнительные ⚡ от пополнения; сгорают через {days} дн. после оплаты\n"
+            "  grant — ⚡, которые вам дали: подарок (бонус, сгорает в конце указанного в нём дня) или кредит от того, кто ведёт этих ботов (не сгорает)\n"
+            "  spend — конвертация\n"
+            "  returned — ⚡ конвертации вернулись, потому что я её не выполнил\n"
+            "  adjustment — исправление от того, кто ведёт этих ботов\n"
+            "  expired — бонус, сгоревший неиспользованным\n"
+            "• Бонус тратится раньше остального, начиная с того, что сгорает раньше.\n"
+            "• Кошелёк один: баланс одинаковый во всех наших ботах.\n"
+            "\n"
+            "{example}"
+        ),
+        "helppage_balance_example": "Пример: после первой оплаты {stars} ⭐ вы увидите «+{base} ⚡ topup» и «+{bonus} ⚡ bonus».",
+        "helppage_balance_example_one": "Пример: после первой оплаты {stars} ⭐ вы увидите «+{total} ⚡ topup».",
         "privacy_feedback_heading": "Если вы отправляете /feedback:",
         "privacy_feedback": (
             "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
@@ -777,7 +1010,7 @@ STRINGS = {
         "cancel_item_conversion": "\u0444\u0430\u0439\u043b .{ext}, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u0432\u044b \u043a\u043e\u043d\u0432\u0435\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043b\u0438",
         "cancel_button_conversion": "🔄 Файл, ждущий конвертации",
         "start_greeting": "Здравствуйте! Пришлите мне файл, и я преобразую его в другой формат.\n\n",
-        "help_text": 'Пришлите мне файл, и я преобразую его в другой формат — картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы.\n\nКоманды:\n/convert - начать конвертацию (или просто отправьте файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
+        "help_text": 'Пришлите мне файл, и я преобразую его в другой формат — картинки, raw-фото, видео, аудио, документы, таблицы, субтитры и архивы.\n\nКоманды:\n/convert - начать конвертацию (или просто отправьте файл напрямую)\n/formats - все форматы, которые я читаю и пишу\n/balance (или /mystars) - ваш ⚡ кредит и на что он потрачен\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/recharge (или /donate) - пополнить ⚡ кредит\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n\nЦена в ⚡ кредите:\n{pricing}\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести. ⚡ за конвертацию списывается при СТАРТЕ и возвращается на баланс, только если сбой по вине бота.\n\n',
         "convert_start_prompt": (
             "Пришлите файл для конвертации, до {max_mb} МБ — картинку, видео, звук, "
             "документ, таблицу или файл субтитров. Пришлите несколько картинок "
@@ -810,8 +1043,11 @@ STRINGS = {
         "update_soon_try_later_soon": '🔧 Сейчас меня обновляют, поэтому я не могу начать ничего нового — попробуйте снова чуть позже. Я напишу, когда вернусь.',
         "update_will_reset": '🔧 Внимание: меня скоро обновят, и то, что вы сейчас начали, будет сброшено. Через несколько минут сможете начать заново.',
         "update_done_try_now": '✅ Обновление завершено — можете пробовать снова.',
+        "gift_granted": "🎁 Нас уже больше 100 — спасибо! Вам начислено {amount} ⚡ бесплатного кредита, он действует до {date}. Этого хватит примерно на {conversions} платных конвертаций в {convert} или на скачивание больших файлов в {download}. Ваш баланс: /balance",
+        "gift_claimed": "🎁 Подарок: {amount} ⚡ бесплатного кредита! У Mumu ботов уже больше {users} пользователей — это наше спасибо.\nОн действует до {date} (UTC). Этого хватит на платные конвертации (около {conversions}) в {convert} или на скачивание больших файлов в {download}.\nВаш баланс: /balance",
         "download_failed": "Не удалось скачать этот файл: {error}",
         "unsupported_format": "«.{ext}» — не тот формат, который я конвертирую — /formats покажет те, что умею.",
+        "not_for_this_file": "Для этого файла такой вариант недоступен (альбом или PDF без отсканированных страниц).",
         "file_too_large_convert": 'Этот файл весит {size} МБ, что больше лимита в {max_mb} МБ — конвертировать его нельзя.',
         "no_target_formats": "Для этого файла нет доступного другого формата.",
         "category_image": "изображение",
@@ -847,6 +1083,13 @@ STRINGS = {
         "too_big_to_send_alert": 'Этот формат для такой картинки выйдет больше {limit} МБ, которые бот может отправить.',
         "keep_toggle_off": '📌 Хранить файл для других форматов: выкл',
         "keep_toggle_on": '📌 Хранить файл для других форматов: вкл',
+        "ocr_lang_toggle": "🔤 Язык текста: {name} (нажмите, чтобы сменить)",
+        "ocr_lang_set": "Теперь язык текста: {name}.",
+        "ocr_lang_eng": "английский",
+        "ocr_lang_rus": "русский",
+        "ocr_lang_uzb": "узбекский (латиница и кириллица)",
+        "ocr_too_many_pages_note": "⚠️ ВАЖНО: в этом PDF больше {max} страниц без текста (только картинка). Текст распознаётся максимум на {max} таких страницах, поэтому TXT содержит только текст остальных страниц, а PDF с текстом не предлагается.",
+        "target_ocrpdf": "PDF с текстом",
         "keep_explained_on": 'После каждой конвертации я буду хранить файл {minutes} минут, чтобы вы могли конвертировать его и в другие форматы. /cancel удалит его раньше.',
         "keep_explained_off": 'Файл удалится сразу после конвертации.',
         "storage_full_user": 'У меня уже {used} МБ ваших файлов, а на одного человека я храню до {limit} МБ. Дождитесь окончания конвертации или отмените её через /cancel и пришлите снова.',
@@ -966,6 +1209,18 @@ def t(lang: str | None, key: str, **kwargs) -> str:
     template = table.get(key) or STRINGS["en"].get(key, key)
     text = template.format(**kwargs) if kwargs else template
     return text + problems.code_line(problems.code_for(_BOT, key))
+
+
+# Targets that are not a file extension: `ocrpdf` is a searchable PDF, whose file
+# is `<name>.pdf`. Their name is a string of its own, never the pseudo-extension.
+_TARGET_NAMES = {"ocrpdf": "target_ocrpdf"}
+
+
+def target_label(lang: str | None, ext: str | None) -> str:
+    """What a target format is called on a button or in a sentence: its
+    extension in capitals (PNG), or for a pseudo-target its name."""
+    key = _TARGET_NAMES.get(ext or "")
+    return t(lang, key) if key else (ext or "?").upper()
 
 
 async def get_lang(user_id: int, context) -> str:

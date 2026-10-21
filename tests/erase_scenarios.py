@@ -123,6 +123,7 @@ def main(bot: str) -> int:
             db.add_editor(name, user_id)
         if hasattr(db, "get_or_create_anon_link"):               # AnonBot
             db.get_or_create_anon_link(user_id)
+            db.claim_promo_seen(user_id, "gift-220-users")       # the 220 gift's ad, shown once
 
     wipe()
     seed(TARGET, "target")

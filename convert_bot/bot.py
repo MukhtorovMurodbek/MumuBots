@@ -77,6 +77,7 @@ from telegram.ext import (
 import family_link
 import i18n
 import lifecycle
+import shared_features
 from live_message import LiveMessage, edit_in_place
 from db import (
     init_db,
@@ -91,6 +92,7 @@ from db import (
 import big_files
 import convert_utils
 import raw_convert
+import ocr_convert
 import formats
 import jobs
 from convert_runner import ConvertRunner, download_card
@@ -125,6 +127,7 @@ from shared_features import (
     problem_report_callback,
     refuse_new_work,
     attach_flood_gate,
+    attach_promo_claim,
     attach_maintenance,
     CANCEL_PICK_ALL,
     CANCEL_PICK_NONE,
@@ -149,8 +152,14 @@ from shared_features import (
     donate_custom_button_chosen,
     awaited_text_received,
     feedback_command,
+    HELP_PAGE_PATTERN,
     HELP_TOGGLE_PATTERN,
+    NO_PREVIEW,
+    full_help_command,
     help_keyboard,
+    help_page_button,
+    help_page_name,
+    help_page_text,
     help_toggle,
     wants_full_help,
     donation_precheckout,
@@ -354,10 +363,78 @@ async def _conversions_in_flight_job(context: ContextTypes.DEFAULT_TYPE) -> None
 def build_help_text(lang: str, full: bool = False) -> str:
     """The short version unless asked for the long one -- the family's help
     template (shared_features, "/help in two lengths"). The long one carries
-    the price tiers and every command."""
+    the price tiers and every command. Both end with the sibling-bots
+    pointer; the per-command pages (HELP_PAGES below) are the buttons under
+    the help, not a line in it."""
     if not full:
-        return i18n.t(lang, "help_brief") + sibling_bots_blurb(BOT_NAME, lang)
-    return i18n.t(lang, "help_text", pricing=price_tiers_text(lang)) + sibling_bots_blurb(BOT_NAME, lang)
+        text = i18n.t(lang, "help_brief").rstrip("\n")
+    else:
+        text = i18n.t(lang, "help_text", pricing=price_tiers_text(lang)).rstrip("\n")
+    blurb = sibling_bots_blurb(BOT_NAME, lang)
+    return text + "\n\n" + blurb if blurb else text
+
+
+# ---------- /help <name> and the buttons under /help: a page for each command ----------
+# The mechanism is in shared_features ("A page for each command"). Every
+# number on a page is read from the module that owns it when the page is shown
+# -- by attribute, never copied -- so a page says what the code does now.
+
+def _help_page_convert(lang: str) -> str:
+    return i18n.t(lang, "helppage_convert",
+                  max_mb=convert_utils.MAX_FILE_MB, pricing=price_tiers_text(lang),
+                  free_mb=convert_utils.FREE_UNDER_MB, batch=formats.MAX_BATCH,
+                  ocr_pages=ocr_convert.OCR_MAX_PAGES, ocr_free_pages=ocr_convert.OCR_FREE_PAGES,
+                  minutes=max(1, PENDING_TTL_SECONDS // 60), least=convert_utils.least_paid_price())
+
+
+def _help_topup_ladder(lang: str) -> tuple[str, str]:
+    """(the ladder as lines, the sentence about the bonus) -- walked the way
+    family_link.quote_credit prices a payment, from family_link.TOPUP_LADDER as
+    it is now. No ladder: one flat line, and no bonus to talk about."""
+    # The multiplier itself, not credit_for_stars(1): that rounds to whole credits,
+    # so a FAMILY_TOPUP_MULTIPLIER of 1.5 would print as 1 while quote_credit pays 1.5.
+    per_star = family_link.TOPUP_MULTIPLIER
+    rate = f"{per_star:g}"
+    if not family_link.TOPUP_LADDER:
+        return i18n.t(lang, "helppage_recharge_flat", rate=rate), ""
+    lines = []
+    for number, (stars, multiplier) in enumerate(family_link.TOPUP_LADDER):
+        extra = per_star * multiplier - per_star
+        split = i18n.t(lang, "helppage_recharge_bonus_part", rate=rate, bonus=f"{extra:g}") if extra > 0 else ""
+        lines.append(i18n.t(lang, "helppage_recharge_step_next" if number else "helppage_recharge_step_first",
+                            stars=stars, each=f"{per_star * multiplier:g}", split=split))
+    lines.append(i18n.t(lang, "helppage_recharge_step_after", rate=rate))
+    return "\n".join(lines), i18n.t(lang, "helppage_recharge_bonus_rule", rate=rate,
+                                    days=family_link.BONUS_EXPIRY_DAYS)
+
+
+def _help_page_recharge(lang: str) -> str:
+    ladder, bonus_rule = _help_topup_ladder(lang)
+    quote = family_link.quote_credit(0, shared_features.DONATE_STAR_OPTIONS[0])
+    if quote["bonus"] > 0:
+        example = i18n.t(lang, "helppage_recharge_example", stars=quote["stars"], total=quote["total"],
+                         base=quote["base"], bonus=quote["bonus"])
+    else:
+        example = i18n.t(lang, "helppage_recharge_example_flat", stars=quote["stars"], total=quote["total"])
+    text = i18n.t(lang, "helppage_recharge", options=" · ".join(str(n) for n in shared_features.DONATE_STAR_OPTIONS),
+                  ladder=ladder, bonus_rule=bonus_rule, example=example)
+    # With no bonus sentence the template leaves an empty line before the bullets.
+    return text if bonus_rule else text.replace(ladder + "\n\n", ladder + "\n", 1)
+
+
+def _help_page_balance(lang: str) -> str:
+    quote = family_link.quote_credit(0, shared_features.DONATE_STAR_OPTIONS[0])
+    if quote["bonus"] > 0:
+        example = i18n.t(lang, "helppage_balance_example", stars=quote["stars"], base=quote["base"],
+                         bonus=quote["bonus"])
+    else:
+        example = i18n.t(lang, "helppage_balance_example_one", stars=quote["stars"], total=quote["total"])
+    return i18n.t(lang, "helppage_balance", rows=shared_features.BALANCE_RECENT_ROWS,
+                  days=family_link.BONUS_EXPIRY_DAYS, example=example)
+
+
+HELP_PAGES = {"convert": _help_page_convert, "recharge": _help_page_recharge, "balance": _help_page_balance}
+HELP_ALIASES = {"donate": "recharge", "mystars": "balance"}
 
 
 # Public command menu (the "/" button in Telegram's chat UI) -- set on
@@ -435,7 +512,7 @@ async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     await _reply(
         update,
         i18n.t(lang, "start_greeting") + build_help_text(lang),
-        reply_markup=help_keyboard(lang, False, help_rows(lang)),
+        reply_markup=help_keyboard(lang, False, help_rows(lang), HELP_PAGES),
     )
 
 
@@ -488,9 +565,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     of /start, which stopped being a way to reach them once /start became
     the language picker."""
     lang = await i18n.get_lang(update.effective_user.id, context)
+    page = help_page_name(context, HELP_PAGES, HELP_ALIASES)
+    if page:
+        await update.message.reply_text(help_page_text(lang, HELP_PAGES, page),
+                                        link_preview_options=NO_PREVIEW)
+        return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full, help_rows(lang)))
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES))
 
 
 async def _apply_language(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -600,7 +682,7 @@ def _formats_overview(lang: str) -> tuple[str, InlineKeyboardMarkup]:
 def _formats_category(lang: str, category: str) -> tuple[str, InlineKeyboardMarkup]:
     label = i18n.t(lang, f"category_{category}")
     reads = ", ".join(ext.upper() for ext in formats.supported_sources(category))
-    writes = ", ".join(ext.upper() for ext in formats.supported_targets(category))
+    writes = ", ".join(i18n.target_label(lang, ext) for ext in formats.supported_targets(category))
     text = joined(
         heading(i18n.t(lang, "formats_category_title", category=label.title())),
         lead_in(f"{i18n.t(lang, 'formats_reads')}: {reads}"),
@@ -627,7 +709,7 @@ def _format_lookup(lang: str, word: str) -> str | None:
     return i18n.t(
         lang, "formats_lookup", ext=ext,
         category=i18n.t(lang, f"category_{formats.category_of(ext)}"),
-        targets=", ".join(target.upper() for target in targets),
+        targets=", ".join(i18n.target_label(lang, target) for target in targets),
     )
 
 
@@ -683,9 +765,9 @@ async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
         items.append(CancelItem(
             f"job_{job.id}",
             i18n.t(lang, "cancel_item_job_running" if job.state == "running" else "cancel_item_job_queued",
-                   target=job.target_ext.upper(), src=job.src_ext.upper(),
+                   target=i18n.target_label(lang, job.target_ext), src=job.src_ext.upper(),
                    size=f"{job.size / 1024 / 1024:.1f}"),
-            i18n.t(lang, "cancel_button_job", target=job.target_ext.upper()),
+            i18n.t(lang, "cancel_button_job", target=i18n.target_label(lang, job.target_ext)),
         ))
     state = context.user_data.get("convert")
     if state:
@@ -960,8 +1042,7 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
         await status.delete(context.bot)
 
     if joining:
-        state["paths"].append(str(path))
-        state["size"] += path.stat().st_size
+        _join_album(state, path)
         _schedule_batch(context, msg, update.effective_user, group_id)
         return
 
@@ -979,6 +1060,21 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await _present_conversion_options(msg, context, update.effective_user, [path], ext)
+
+
+def _join_album(state: dict, path: Path) -> None:
+    """A file joins the pending conversion of its album.
+
+    The menu already on the screen may have been drawn for the first file alone
+    (the rest of the album is slower than the wait before the menu), with that
+    file's page count and its scanned pages in the state. Until the menu is
+    drawn again for all of them, a tap on it must find an album: neither
+    priced nor timed as a text-recognition job, nor as a document of the
+    first one's pages. So both are forgotten here, not at the redraw."""
+    state["paths"].append(str(path))
+    state["size"] += path.stat().st_size
+    state["ocr_pages"] = 0
+    state["pages"] = None
 
 
 def _schedule_batch(context: ContextTypes.DEFAULT_TYPE, message, user, group_id: str) -> None:
@@ -1028,20 +1124,26 @@ def _what_formats_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def _format_rows(lang: str, targets: list[str], expanded: bool, total: int,
-                 keep: bool | None = None) -> list[list]:
+                 keep: bool | None = None, ocr: str | None = None) -> list[list]:
     """Three formats to a row, then whatever navigation the list needs.
 
     A long list is cut to POPULAR_COUNT with a "More formats" button under it
     rather than shown whole: an image now has fourteen targets, and fourteen
     buttons is a menu somebody has to read instead of a menu somebody can use.
+
+    `ocr` is the language text is read in ("eng", "rus" or "uzb"), given only
+    when a button in `targets` reads text: it becomes the row that changes it.
     """
-    buttons = [InlineKeyboardButton(target.upper(), callback_data=f"convfmt:{target}")
+    buttons = [InlineKeyboardButton(i18n.target_label(lang, target), callback_data=f"convfmt:{target}")
                for target in targets]
     rows = [buttons[index:index + 3] for index in range(0, len(buttons), 3)]
     if total > len(targets):
         rows.append([InlineKeyboardButton(i18n.t(lang, "btn_more_formats"), callback_data="convmore")])
     elif expanded:
         rows.append([InlineKeyboardButton(i18n.t(lang, "btn_fewer_formats"), callback_data="convless")])
+    if ocr is not None:
+        rows.append([InlineKeyboardButton(
+            i18n.t(lang, "ocr_lang_toggle", name=i18n.t(lang, f"ocr_lang_{ocr}")), callback_data="convocr")])
     if keep is not None:
         # The consent to hold a file past its first conversion, asked where
         # it matters and remembered. Off unless somebody turns it on: the
@@ -1096,7 +1198,7 @@ def _quote_text(lang: str, src_ext: str, target_ext: str, in_bytes: int,
     agree to, which can then be revised upwards once they have agreed, is not
     a quote -- it is a deposit, and nobody signed up for one.
     """
-    lines = [f"{src_ext.upper()} → {target_ext.upper()}",
+    lines = [f"{src_ext.upper()} → {i18n.target_label(lang, target_ext)}",
              i18n.t(lang, "quote_line_sizes", in_size=human_size(in_bytes),
                     out_size=human_size(out_bytes))]
     if price == 0:
@@ -1129,14 +1231,55 @@ def _quote_keyboard(lang: str, price: int) -> InlineKeyboardMarkup:
     ])
 
 
+def _ocr_withheld(state: dict) -> set[str]:
+    """The targets that read text which THIS file must not be offered, though
+    the host can write them (formats.targets_for says only that it can).
+
+    An album is converted a picture at a time and each would be read for the
+    price of one, so neither is offered for it. A PDF is offered a searchable
+    PDF only when it has pages to read, and not when it has more than
+    ocr_convert.OCR_MAX_PAGES: one conversion reads no more than that. Its TXT
+    is still offered, and is the ordinary one (convert_utils.ocr_job_pages
+    reads no page of such a PDF), as it is for a PDF whose pages could not be
+    counted."""
+    if len(state["paths"]) > 1:
+        if formats.category_of(state["src_ext"], state.get("animated")) == formats.IMAGE:
+            return {"txt", "ocrpdf"}
+        return {"ocrpdf"}
+    if state["src_ext"] != "pdf":
+        return set()
+    pages = state.get("ocr_pages") or 0
+    return set() if 0 < pages <= ocr_convert.OCR_MAX_PAGES else {"ocrpdf"}
+
+
 def _offered_targets(state: dict) -> list[str]:
     """What the menu offers for a pending conversion, computed one way for
-    every redraw: the menu, More/Less, and the keep toggle."""
+    every redraw: the menu, More/Less, the keep toggle and the text language."""
     targets = formats.targets_for(state["src_ext"], state.get("animated"))
     if len(state["paths"]) > 1:
         targets = [target for target in targets if target != state["src_ext"]]
-    blocked = set(state.get("blocked") or ())
+    blocked = set(state.get("blocked") or ()) | _ocr_withheld(state)
     return [target for target in targets if target not in blocked]
+
+
+def _ocr_choice(context: ContextTypes.DEFAULT_TYPE, lang: str) -> str:
+    """The language text is read in: the person's choice, remembered for their
+    next file, or until they make one, the language they use the bot in."""
+    choice = context.user_data.get("ocr_lang")
+    return choice if choice in ocr_convert.CHOICES else ocr_convert.default_choice(lang)
+
+
+def _ocr_row(context: ContextTypes.DEFAULT_TYPE, lang: str, state: dict, shown) -> str | None:
+    """The text language for the menu's toggle row -- None unless one of the
+    buttons on the screen being drawn reads text: the row changes how those are
+    read, so it is not on a screen that has none (a picture's TXT and searchable
+    PDF are under More formats, so its first screen has no row). Asked of
+    convert_utils.ocr_job_pages, the function the price and the queue ask, so
+    the row is there exactly when a conversion that reads text is."""
+    pages = state.get("ocr_pages") or 0
+    if any(convert_utils.ocr_job_pages(state["src_ext"], target, pages, len(state["paths"])) for target in shown):
+        return _ocr_choice(context, lang)
+    return None
 
 
 async def _present_conversion_options(
@@ -1208,8 +1351,26 @@ async def _present_conversion_options(
     # rendering it. It is what stops a 900 KB PDF of four hundred pages being
     # quoted as though four hundred PNGs would weigh 900 KB.
     pages = None
-    if len(paths) == 1 and formats.category_of(src_ext, animated) == formats.DOCUMENT:
+    # ...and how many of a PDF's pages are pictures of text, which are read when
+    # it is converted to TXT or a searchable PDF and are what that is priced by.
+    # A picture is one such page. A PDF is looked at in a child process too
+    # (jobs.describe_pdf), whose answer is None when it could not be read: then
+    # the PDF converts as it did before text was read, and its TXT is that one.
+    ocr_pages = 0
+    if len(paths) == 1 and src_ext == "pdf" and formats.category_of(src_ext, animated) == formats.DOCUMENT:
+        counted = await jobs.describe_pdf(paths[0])
+        if counted is not None:
+            pages = counted["pages"]
+            # "scanned" is None when the pages could not be looked at in the
+            # few seconds the menu may wait (or the host cannot read text): the
+            # PDF is priced by its page count and its TXT is today's.
+            if formats.met("ocr") and counted["scanned"] is not None:
+                ocr_pages = counted["scanned"]
+    elif len(paths) == 1 and formats.category_of(src_ext, animated) == formats.DOCUMENT:
         pages = await asyncio.to_thread(document_pages, paths[0], src_ext)
+    elif (len(paths) == 1 and formats.category_of(src_ext, animated) == formats.IMAGE
+          and src_ext not in formats.RAW_FORMATS and src_ext != "svg" and formats.met("ocr")):
+        ocr_pages = 1
 
     state = {
         "state": "awaiting_format",
@@ -1221,6 +1382,7 @@ async def _present_conversion_options(
         "animated": animated,
         "megapixels": megapixels,
         "pages": pages,
+        "ocr_pages": ocr_pages,
     }
     every_target = _offered_targets(state)
     blocked = jobs.unsendable_targets(megapixels, every_target, size, message.chat_id,
@@ -1242,6 +1404,8 @@ async def _present_conversion_options(
             which, width, height, fit_w, fit_h = fit
             notes.append(i18n.t(lang, f"video_fit_{which}_note", w=width, h=height,
                                 fw=fit_w, fh=fit_h))
+    if ocr_pages > ocr_convert.OCR_MAX_PAGES:
+        notes.append(i18n.t(lang, "ocr_too_many_pages_note", max=ocr_convert.OCR_MAX_PAGES))
     state["notes"] = notes
 
     targets = _offered_targets(state)
@@ -1258,7 +1422,8 @@ async def _present_conversion_options(
     shown = [target for target in shown if target in targets] or targets
     await message.reply_text(
         _options_text(lang, paths, src_ext, size, animated, notes),
-        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep)),
+        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep,
+                                                       ocr=_ocr_row(context, lang, state, shown))),
     )
 
 
@@ -1284,11 +1449,47 @@ async def convert_keep_callback(update: Update, context: ContextTypes.DEFAULT_TY
     targets = _offered_targets(state)
     shown = [target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
              if target in targets] or targets
+    state["expanded"] = False
     await edit_in_place(
         query.message, context.bot,
         _options_text(lang, state["paths"], state["src_ext"], state["size"],
                       state.get("animated"), state.get("notes") or ()),
-        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep)),
+        reply_markup=InlineKeyboardMarkup(_format_rows(lang, shown, False, len(targets), keep=keep,
+                                                       ocr=_ocr_row(context, lang, state, shown))),
+    )
+
+
+async def convert_ocr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The text-language toggle under the format menu: English, Russian,
+    Uzbek, and round again. It is the language the words in a picture or a
+    scanned PDF are read in, so it only matters to the formats that read them.
+
+    Remembered for the person's next file, as the keep-file choice is, and
+    fixed for a conversion when it is queued (_enqueue). The menu is redrawn
+    as it was -- still expanded if More formats was open, because that is
+    where a picture's text formats are."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    state = context.user_data.get("convert")
+    if not state or state.get("state") != "awaiting_format":
+        await query.answer(i18n.t(lang, "conversion_expired"), show_alert=True)
+        return
+    choices = ocr_convert.CHOICES
+    chosen = choices[(choices.index(_ocr_choice(context, lang)) + 1) % len(choices)]
+    context.user_data["ocr_lang"] = chosen
+    await query.answer(i18n.t(lang, "ocr_lang_set", name=i18n.t(lang, f"ocr_lang_{chosen}")))
+    targets = _offered_targets(state)
+    expanded = bool(state.get("expanded"))
+    shown = targets if expanded else [
+        target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
+        if target in targets] or targets
+    await edit_in_place(
+        query.message, context.bot,
+        _options_text(lang, state["paths"], state["src_ext"], state["size"],
+                      state.get("animated"), state.get("notes") or ()),
+        reply_markup=InlineKeyboardMarkup(_format_rows(
+            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 
@@ -1306,6 +1507,7 @@ async def convert_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
     animated = state.get("animated")
     targets = _offered_targets(state)
     expanded = query.data == "convmore"
+    state["expanded"] = expanded
     shown = targets if expanded else [
         target for target in formats.popular_targets(src_ext, animated) if target in targets
     ] or targets
@@ -1314,7 +1516,8 @@ async def convert_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _options_text(lang, state["paths"], src_ext, state["size"], animated,
                       state.get("notes") or ()),
         reply_markup=InlineKeyboardMarkup(_format_rows(
-            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")))),
+            lang, shown, expanded, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 
@@ -1384,6 +1587,22 @@ async def _enqueue(context: ContextTypes.DEFAULT_TYPE, message, user, lang: str,
     """
     keep = bool(context.user_data.get("keep_files"))
     paths = list(conv_state["paths"])
+    # A conversion that reads text is given the time limit its price was made
+    # from (ocr_limit, the same function the quote used), the language
+    # chosen now, and the number of pages the price counted: the worker reads
+    # no more than that. Anything else is timed as it always was. An album is
+    # never one that reads (ocr_job_pages is given the number of files).
+    reading = convert_utils.ocr_job_pages(conv_state["src_ext"], target_ext, conv_state.get("ocr_pages") or 0,
+                                          len(paths))
+    if reading:
+        time_limit = convert_utils.ocr_limit(conv_state["src_ext"], target_ext, conv_state["size"],
+                                             conv_state.get("est_out") or 0, reading,
+                                             paid=conv_state["price"] > 0, pages=conv_state.get("pages"))
+    else:
+        time_limit = jobs.time_limit_for(
+            convert_utils.billable_bytes(conv_state["size"], conv_state.get("est_out") or 0),
+            convert_utils.work_factor(conv_state["src_ext"], target_ext),
+            paid=conv_state["price"] > 0)
     job = jobs.Job(
         user_id=user.id, chat_id=message.chat_id, paths=paths,
         src_ext=conv_state["src_ext"], target_ext=target_ext,
@@ -1391,17 +1610,15 @@ async def _enqueue(context: ContextTypes.DEFAULT_TYPE, message, user, lang: str,
         username=user.username, keep_file=keep,
         send_limit=jobs.send_limit_for(conv_state["size"], conv_state.get("est_out"),
                                        message.chat_id),
-        time_limit=jobs.time_limit_for(
-            convert_utils.billable_bytes(conv_state["size"], conv_state.get("est_out") or 0),
-            convert_utils.work_factor(conv_state["src_ext"], target_ext),
-            paid=conv_state["price"] > 0),
+        time_limit=time_limit,
+        ocr_lang=_ocr_choice(context, lang) if reading else "", ocr_pages=reading,
     )
     ahead = sum(1 for other in jobs._jobs.values() if other.state in ("queued", "running"))
     if ahead:
-        text = i18n.t(lang, "job_queued", src=job.src_ext.upper(), target=target_ext.upper(),
+        text = i18n.t(lang, "job_queued", src=job.src_ext.upper(), target=i18n.target_label(lang, target_ext),
                       ahead=ahead, price=job.price)
     else:
-        text = i18n.t(lang, "job_starting", src=job.src_ext.upper(), target=target_ext.upper())
+        text = i18n.t(lang, "job_starting", src=job.src_ext.upper(), target=i18n.target_label(lang, target_ext))
     runner = _runner(context.application)
 
     if keep:
@@ -1466,6 +1683,12 @@ async def convert_format_chosen(update: Update, context: ContextTypes.DEFAULT_TY
                                   limit=jobs.send_ceiling_mb(query.message.chat_id)),
                            show_alert=True)
         return
+    if target_ext not in _offered_targets(conv_state):
+        # Left off this file's menu for a reason that is not the host's (an
+        # album cannot be read for text, a PDF with no scanned page has no
+        # searchable PDF to make): refused here as well, whatever was sent back.
+        await query.answer(i18n.t(lang, "not_for_this_file"), show_alert=True)
+        return
 
     in_paths = conv_state["paths"]
     src_ext = conv_state["src_ext"]
@@ -1478,7 +1701,8 @@ async def convert_format_chosen(update: Update, context: ContextTypes.DEFAULT_TY
 
     # The price, at last: both sizes and how hard the pair is to run.
     price, est_out = price_for_job(src_ext, target_ext, conv_state["size"],
-                                   conv_state.get("pages"))
+                                   conv_state.get("pages"), conv_state.get("ocr_pages") or 0,
+                                   len(in_paths))
     conv_state["price"] = price
     conv_state["est_out"] = est_out
     conv_state["target_ext"] = target_ext
@@ -1513,12 +1737,14 @@ async def convert_quote_back(update: Update, context: ContextTypes.DEFAULT_TYPE)
     targets = _offered_targets(state)
     shown = [target for target in formats.popular_targets(state["src_ext"], state.get("animated"))
              if target in targets] or targets
+    state["expanded"] = False
     await edit_in_place(
         query.message, context.bot,
         _options_text(lang, state["paths"], state["src_ext"], state["size"],
                       state.get("animated"), state.get("notes") or ()),
         reply_markup=InlineKeyboardMarkup(_format_rows(
-            lang, shown, False, len(targets), keep=bool(context.user_data.get("keep_files")))),
+            lang, shown, False, len(targets), keep=bool(context.user_data.get("keep_files")),
+            ocr=_ocr_row(context, lang, state, shown))),
     )
 
 
@@ -1584,15 +1810,19 @@ async def _start_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE,
             conv_state["state"] = "awaiting_payment"
             await asyncio.to_thread(
                 record_star_invoice, user.id, user.username, stars,
-                f"top-up for a {src_ext}->{target_ext} conversion", payload)
+                f"top-up for a {src_ext}->{'searchable-pdf' if target_ext == 'ocrpdf' else target_ext} conversion",
+                payload)
             await context.bot.send_invoice(
                 chat_id=query.message.chat_id,
-                title=i18n.t(lang, "convert_invoice_title", src=src_ext.upper(), target=target_ext.upper()),
+                title=i18n.t(lang, "convert_invoice_title", src=src_ext.upper(),
+                             target=i18n.target_label(lang, target_ext)),
                 description=i18n.t(lang, "convert_invoice_description", size_kb=f"{conv_state['size'] / 1024:.0f}"),
                 payload=payload,
                 provider_token="",  # empty string is required for Telegram Stars payments
                 currency="XTR",
-                prices=[LabeledPrice(i18n.t(lang, "convert_invoice_label", src=src_ext, target=target_ext), stars)],
+                prices=[LabeledPrice(i18n.t(lang, "convert_invoice_label", src=src_ext,
+                                           target=target_ext if target_ext != "ocrpdf" else i18n.target_label(lang, target_ext)),
+                                     stars)],
             )
             await edit_in_place(query.message, context.bot,
                                 i18n.t(lang, "topup_needed", price=needed, balance=max(balance, 0),
@@ -1858,6 +2088,9 @@ def main():
     # Counted first, then throttled: somebody who floods is still somebody
     # who was here, and /status is supposed to say so.
     attach_flood_gate(app, ADMIN_IDS)
+    # The 220 ⚡ gift: the first message while it is open claims it (see
+    # attach_promo_claim). Its own group, after the flood gate's.
+    attach_promo_claim(app)
     # Runs after track_activity but before every other handler -- a no-op
     # unless /feedback or a "Custom" donate button has just asked for
     # something to be typed, in which case it takes the answer and stops it
@@ -1868,8 +2101,10 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows),
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES),
                                          pattern=HELP_TOGGLE_PATTERN))
+    app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("convert", convert_start))
     app.add_handler(CommandHandler("formats", formats_command))
@@ -1888,6 +2123,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_conversion_callback, pattern="^convcancel$"))
     app.add_handler(CallbackQueryHandler(convert_stop_callback, pattern="^convstop:"))
     app.add_handler(CallbackQueryHandler(convert_keep_callback, pattern="^convkeep$"))
+    app.add_handler(CallbackQueryHandler(convert_ocr_callback, pattern="^convocr$"))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"))
     app.add_handler(CallbackQueryHandler(language_chosen, pattern="^setlang:"))
     app.add_handler(CommandHandler("language", language_command))

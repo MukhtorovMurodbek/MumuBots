@@ -429,6 +429,20 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+        # Telegram's file ids for what this bot has sent, so the same post can be
+        # sent again without being downloaded again (sent_files.py has the whole
+        # argument). The row holds nothing about people: the key is a keyed hash of
+        # the post, not the post and not the person; the day is a day, not a moment.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sent_files (
+                post_key     TEXT PRIMARY KEY,
+                items        TEXT NOT NULL,
+                confirmed_at TIMESTAMPTZ NOT NULL,
+                last_used    DATE NOT NULL DEFAULT CURRENT_DATE
+            )
+            """
+        )
         conn.commit()
 
 
@@ -847,6 +861,77 @@ def save_provider_health(rows: list[tuple]) -> None:
         conn.commit()
 
 
+# ---------- Telegram file ids of what was sent (sent_files.py) ----------
+
+def _days_from_env(name: str, default: int) -> int:
+    """A whole number of days, `default` when it is unset, unreadable or under 1:
+    a typo here must not stop the bot starting, and 0 must not delete every row."""
+    try:
+        days = int(os.environ.get(name) or default)
+    except ValueError:
+        return default
+    return days if days >= 1 else default
+
+
+# Rows nobody has used for this long are deleted by prune_old_data.
+SENT_FILES_KEEP_DAYS = _days_from_env("DBOT_FILEID_KEEP_DAYS", 90)
+
+
+def sent_files_get(post_key: str):
+    """(items text, confirmed_at) of this post's row, or None. A read: any error
+    is the caller's to treat as "no row"."""
+    with pooled_read() as conn:
+        row = conn.execute(
+            "SELECT items, confirmed_at FROM sent_files WHERE post_key = %s",
+            (post_key,),
+        ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def sent_files_put(post_key: str, items_text: str) -> None:
+    """Store a delivery: the ids, seen public now, used today. Replaces what was there."""
+    with pooled() as conn:
+        conn.execute(
+            """
+            INSERT INTO sent_files (post_key, items, confirmed_at, last_used)
+            VALUES (%s, %s, now(), CURRENT_DATE)
+            ON CONFLICT (post_key) DO UPDATE SET
+                items = EXCLUDED.items,
+                confirmed_at = now(),
+                last_used = CURRENT_DATE
+            """,
+            (post_key, items_text),
+        )
+        conn.commit()
+
+
+def sent_files_confirmed(post_key: str) -> None:
+    """The post was seen public just now (a lookup found it), and the row was used."""
+    with pooled() as conn:
+        conn.execute(
+            "UPDATE sent_files SET confirmed_at = now(), last_used = CURRENT_DATE WHERE post_key = %s",
+            (post_key,),
+        )
+        conn.commit()
+
+
+def sent_files_used(post_key: str) -> None:
+    """The row was used today. confirmed_at stays: only a fetch or a lookup proves
+    that the post is still public."""
+    with pooled() as conn:
+        conn.execute(
+            "UPDATE sent_files SET last_used = CURRENT_DATE WHERE post_key = %s",
+            (post_key,),
+        )
+        conn.commit()
+
+
+def sent_files_drop(post_key: str) -> None:
+    with pooled() as conn:
+        conn.execute("DELETE FROM sent_files WHERE post_key = %s", (post_key,))
+        conn.commit()
+
+
 def prune_old_data() -> int:
     """Returns how many rows were removed. Safe to run at any time."""
     with pooled() as conn:
@@ -861,6 +946,14 @@ def prune_old_data() -> int:
         cur = conn.execute(
             "DELETE FROM download_events WHERE occurred_at < now() - make_interval(days => %s)",
             (DOWNLOAD_RETENTION_DAYS,),
+        )
+        removed += cur.rowcount
+        # File ids nobody has used for DBOT_FILEID_KEEP_DAYS. A row that is used is
+        # touched at most once a day (a date, not a moment), so "unused for N days"
+        # is exact to the day.
+        cur = conn.execute(
+            "DELETE FROM sent_files WHERE last_used < CURRENT_DATE - make_interval(days => %s)",
+            (SENT_FILES_KEEP_DAYS,),
         )
         removed += cur.rowcount
         conn.commit()

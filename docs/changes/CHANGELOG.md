@@ -97,14 +97,7 @@ predecessors'.
 
 ---
 
-## 🚩 CHECKPOINT: v2.1.0
-
-Full detail in `CHANGES_v2.1.0.md`. Finalised by the owner on 2026-10-10 and released at 04:00 Tashkent
-(08:00 KST) as MumuBots `v2.1.0` and MumuCombined `v2.1.0C`: the review of everything, reactions and
-`/feedback`, a daily route check, archives and camera raw photos, and then reviews of all of it with only fixes.
-OCR and DownloaderBot's album buttons, built in the same weeks, went to 2.2.0.
-
-## v2.1.0: reviews of all of it, and only fixes (2026-10-07 to 2026-10-10)
+## v2.1.0, ready to finalise: reviews of all of it, and only fixes (2026-10-07 to 2026-10-10)
 
 Full detail in `CHANGES_v2.1.0.md` ("Reviews of all of it"). Everything since 2026-10-07 was read again by a
 fresh reviewer, and each review found what the green tests had not. **DownloaderBot**: a 421-byte brotli answer
@@ -117,8 +110,7 @@ formally (вы / siz). **The deploy itself**: the release script could leave the
 cannot; every database connection has time limits; a normal start takes no table lock; a single getUpdates
 `Conflict` is a warning, three in two minutes an alert. `versions` lists what production really runs. **OCR and
 DownloaderBot's album buttons were built in the same weeks and moved to 2.2.0** (`MumuBots2.2.0`, the owner's
-decision of 2026-10-10: only fixes in this version). The first run on Linux CI found the archive test's hand-made
-RAR malformed for libarchive 3.6-3.7 (fixed in the test); extraction now sets folders' modes last (`-p`).
+decision of 2026-10-10: only fixes in this version). No checkpoint until the owner finalises.
 
 ## v2.1.0, in progress: everything that did not need the owner (2026-10-07)
 

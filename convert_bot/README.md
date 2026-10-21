@@ -31,7 +31,8 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/paysupport` | How to reach the operator about a payment that went wrong. |
 | `/start` | Instructions. The first `/start` from a new user asks which language to use, once. |
 | `/language`, `/en`, `/uz`, `/rus` | Switch language. Each reprints the instructions in the language chosen. |
-| `/help` | The instructions in short, with a button for the full guide; `/help full` goes straight to it. |
+| `/help` | A short guide; the buttons under it open each command's page (also `/help <command>`), and "📖 Full guide" shows everything (also `/fullhelp`, `/help full`). |
+| `/fullhelp` | The full guide in one message, the same as `/help full`. |
 | `/feedback` | A suggestion or a report about anything, for whoever runs the bots: sent as one message, or asked for and typed as a reply. It carries the words, which bot and the language — not who wrote them — and is deleted after 30 days. It is one-way: only the operator reads it, and nobody can write back. |
 | `/privacy` | What the bot holds about the person asking, who else sees it, and how long it stays. |
 | `/terms` | What the bot may be used for, and where the money stands. |
@@ -62,10 +63,10 @@ at.
 
 | | reads | writes |
 |---|---|---|
-| **Pictures** | PNG, JPEG, WEBP, BMP, TIFF, ICO, HEIC/HEIF, AVIF, JPEG 2000, PSD, TGA, PCX, DDS, PPM, SGI, XBM, XPM, ICNS, QOI, BLP, SVG — and camera raw: CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 (to JPEG, PNG, WEBP, AVIF, HEIC or a 16-bit TIFF only) | PNG, JPEG, WEBP, **PDF**, ICO, TIFF, BMP, GIF, AVIF, HEIC, JPEG 2000, TGA, PPM, QOI, ICNS |
+| **Pictures** | PNG, JPEG, WEBP, BMP, TIFF, ICO, HEIC/HEIF, AVIF, JPEG 2000, PSD, TGA, PCX, DDS, PPM, SGI, XBM, XPM, ICNS, QOI, BLP, SVG — and camera raw: CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 (to JPEG, PNG, WEBP, AVIF, HEIC or a 16-bit TIFF only) | PNG, JPEG, WEBP, **PDF**, ICO, TIFF, BMP, GIF, AVIF, HEIC, JPEG 2000, TGA, PPM, QOI, ICNS — and, read from the picture's text, plain text and a searchable PDF |
 | **Video** | MP4, MOV, M4V, AVI, WEBM, MKV, FLV, WMV, TS, M2TS, MPEG, 3GP, OGV, ASF, GIF, APNG | MP4, WEBM, MKV, MOV, AVI, GIF, animated WEBP, APNG — and the audio on its own, in any audio format below |
 | **Audio** | MP3, WAV, OGG, Opus, M4A, AAC, FLAC, AIFF, WMA, AMR, AC3, MP2, AU, CAF, W64, VOC | MP3, M4A, AAC, OGG, Opus, WAV, FLAC, AIFF, WMA, AC3 |
-| **Documents** | PDF, DOCX, EPUB, MOBI, FB2, CBZ, XPS, Markdown, HTML, plain text | PDF, PNG, JPEG, WEBP, TIFF, SVG, plain text, HTML, Markdown |
+| **Documents** | PDF, DOCX, EPUB, MOBI, FB2, CBZ, XPS, Markdown, HTML, plain text | PDF, PNG, JPEG, WEBP, TIFF, SVG, plain text, HTML, Markdown — and from a PDF with scanned pages, a searchable PDF |
 | **Data** | CSV, TSV, JSON, YAML, XLSX, XML | JSON, CSV, TSV, YAML, XLSX, Markdown table, HTML table, PDF |
 | **Subtitles** | SRT, VTT, ASS/SSA | SRT, VTT, ASS — or the transcript with the timings removed |
 | **Archives** | ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, 7z, RAR | ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, 7z (RAR is read, never written) |
@@ -90,6 +91,26 @@ Some combinations worth knowing about:
 - A **CSV, JSON or XML export** becomes an XLSX spreadsheet, and a workbook
   becomes a CSV per sheet.
 - **Subtitles** convert between SRT, VTT and ASS, or reduce to the transcript.
+- **Text from a picture or a scanned PDF** is read on the bot's own machine (Tesseract, which MuPDF
+  carries inside PyMuPDF; only the language data is added to the image). A photo or screenshot becomes
+  **TXT** or a **searchable PDF** (one page showing the picture, with an invisible text layer you can
+  search and copy). A **PDF** converts to TXT as before, and its pages that have no text of their own
+  (fewer than 20 characters: a scan) are read too; **Searchable PDF** is offered for a PDF that has
+  such pages, and gives the same PDF, every page looking as before, with a text layer added to the
+  scanned ones. A row under the formats changes the **text language** — English, Russian or Uzbek
+  (Latin and Cyrillic read together); it is shown with the TXT and Searchable PDF buttons (for a
+  picture, under More formats), until you pick one it follows the language you use the bot in,
+  and the choice is remembered. One scanned page, and a file under 3 MB, is free; more pages are
+  priced by the time they may take (what any conversion of that file is given, plus 15 seconds a page,
+  up to ten minutes). A scanned page is one with a picture on it and under 20 characters of its own
+  text (a blank or title-only page is not one). At most 30 scanned pages are read in one conversion:
+  a PDF with more is not offered a searchable PDF, its TXT is the ordinary one (the text its other
+  pages already have), and the menu says why. The bot waits at most 5 seconds for a PDF's pages to be
+  looked at; a PDF that takes longer is converted as before, with no page read. A TIFF of several
+  pages is refused (convert it to PDF first). A page is drawn for the engine at up to 300 dpi and never over 12 megapixels
+  (a big photograph is decoded at a fraction of its size, so the full picture is never in memory); a
+  page so large it would need under 50 dpi is not read. Without the language data on the host none of
+  this is offered and a PDF with no text is refused as it was.
 - A **camera raw photo** — a phone's DNG, a camera's CR3, NEF or ARW — is developed with the camera's own
   white balance, the right way up, into a JPEG, PNG, WEBP, AVIF or HEIC, or a 16-bit TIFF for editing.
   The full picture is made up to 40 megapixels; a bigger one is made at half size (a quarter of the
@@ -136,6 +157,14 @@ account, buy ⚡ credit. Every payment, charge and return is recorded in a
 ledger, so `/balance` and `/stars` are reads rather than reconstructions. A
 conversion that fails for the bot's reasons gives its credit back
 automatically.
+
+**The 220 ⚡ gift.** While the family's 220 ⚡ gift is open (the owner starts
+it once, and it can be claimed for 14 days), the first message a person sends
+this bot or DownloaderBot gives them 220 ⚡ of bonus credit, once across the
+two, and a notice in their language. Bonus credit is spent before ordinary
+credit and runs out 28 days after the day it was claimed. The claim runs
+beside the bot's own answer and never holds it up (`attach_promo_claim`, in
+`shared/shared_features.py`).
 
 **Conversion.** Pillow for still pictures, `ffmpeg` for video, audio and
 subtitles, PyMuPDF for documents and e-books, and the standard library with
@@ -271,6 +300,7 @@ python db_merge.py --from local --into cloud
 | `data_convert.py` | CSV, TSV, JSON, YAML, XLSX and XML |
 | `archive_convert.py` | ZIP, TAR, 7z and RAR |
 | `raw_convert.py` | Camera raw photos |
+| `ocr_convert.py` | Text read from pictures and scanned PDFs |
 | `db.py` | This bot's schema, the Stars ledger, and the connection pool |
 | `i18n.py` | English, Uzbek and Russian strings |
 | `family_link.py` | Heartbeats, crash reporting, and the command queue a monitoring bot uses |
@@ -287,7 +317,11 @@ bot is a separate deployment, so nothing crosses a repository boundary.
 
 Python 3.11 or newer, Postgres 16 or newer, and `ffmpeg`. The optional
 converters need PyMuPDF, pillow-heif, mammoth, Markdown, openpyxl, PyYAML and
-defusedxml; all are in `requirements.txt` and all install from wheels.
+defusedxml; all are in `requirements.txt` and all install from wheels. Reading
+text from pictures also needs the Tesseract language data (English, Russian, Uzbek
+in Latin and Cyrillic) in the folder `TESSDATA_PREFIX` names -- the Debian
+`tesseract-ocr-eng`, `-rus`, `-uzb` and `-uzb-cyrl` packages, which the Dockerfile
+installs; the engine itself is inside PyMuPDF.
 
 ## Licence
 

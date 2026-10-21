@@ -60,6 +60,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import socket
 import time
 from collections import deque
@@ -78,7 +79,7 @@ FAMILY_SCHEMA = "family"
 # Bumped with the family's version (see CHANGELOG.md) -- reported in
 # heartbeats so /status can show which bots are running stale code after a
 # partial deploy.
-VERSION = os.environ.get("FAMILY_VERSION", "2.1.0")
+VERSION = os.environ.get("FAMILY_VERSION", "2.2.0")
 
 # Before 1.7.0 a row in family.problem_reports only existed because somebody
 # tapped Report, so every row older than this is one of those and is marked
@@ -305,6 +306,23 @@ def init_family_schema() -> None:
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_family_usage_recent "
             f"ON {FAMILY_SCHEMA}.usage_samples (bot_id, sampled_at DESC)"
+        )
+        # How often each button is tapped: a count per bot, per day (UTC), per
+        # button, written with the usage sample. Counts only -- the key is the
+        # button's name (and, for a few, its choice from a short fixed list), never
+        # an id, a link or a name; shared_features.tap_key decides what a key may be.
+        # Created like usage_samples above: IF NOT EXISTS, no ALTER, no lock on any
+        # table that already exists.
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.button_taps (
+                bot_id TEXT NOT NULL,
+                day DATE NOT NULL,
+                button TEXT NOT NULL,
+                taps INTEGER NOT NULL,
+                PRIMARY KEY (bot_id, day, button)
+            )
+            """
         )
         # ManagerBot's memory of who was up last time it looked, so it can
         # alert on the *transition* (down -> up, up -> down) instead of
@@ -951,6 +969,58 @@ def grant_stars_once(user_id: int, amount: int, key: str, detail: str | None = N
         raise
 
 
+# The most one gift may give one person. A gift goes to everybody at once, so a
+# slipped digit (1000 for 100) would be multiplied by every account there is;
+# past this the owner has to change the code, not just the command.
+GIFT_MAX_CREDIT = 1000
+
+
+def grant_bonus_once(user_id: int, amount: int, key: str, expires_at: datetime,
+                     detail: str | None = None) -> "int | None":
+    """A gift: `amount` credits of bonus that runs out at `expires_at`, given
+    the first time this (key, user) is ever asked for and never again. Returns
+    the new balance, or None if it had already been given.
+
+    The same claim as grant_stars_once (`stars:granted:<key>:<user>`), so one
+    key can never pay twice through the two of them. Unlike it, the claim and
+    the credit are one transaction, staked the way topup() stakes a charge id:
+    they stand or fall together, and two bots granting the same person at once
+    take turns on the wallet's lock, the second finding the claim taken.
+
+    It is bonus, not ordinary credit: a lot of its own in star_bonus_lots, spent
+    before ordinary credit and taken back by _expire_in when it runs out."""
+    if not 0 < amount <= GIFT_MAX_CREDIT:
+        raise ValueError(f"a gift is 1..{GIFT_MAX_CREDIT} credits, not {amount}")
+    if expires_at.tzinfo is None:
+        raise ValueError("a gift's expiry must carry its time zone")
+    if expires_at <= datetime.now(timezone.utc):
+        raise ValueError("a gift that has already expired gives nothing")
+    claim = f"stars:granted:{key}:{user_id}"
+    with _connect() as conn:
+        _lock_wallet_in(conn, user_id)
+        won = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO NOTHING RETURNING key",
+            (claim, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()
+        if not won:
+            conn.rollback()
+            return None
+        _expire_in(conn, user_id)
+        # The last day it can be spent, as the owner typed it: expires_at is the
+        # moment after it (midnight UTC that ends the day).
+        last_day = expires_at - timedelta(microseconds=1)
+        balance = _move_in(conn, user_id, amount, "grant",
+                           detail or f"gift {key}, bonus through {last_day:%Y-%m-%d}")
+        conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.star_bonus_lots (user_id, amount, remaining, expires_at) "
+            f"VALUES (%s, %s, %s, %s)",
+            (user_id, amount, amount, expires_at),
+        )
+        conn.commit()
+    return balance
+
+
 def expire_bonus_credit() -> int:
     """Housekeeping: expire every person's run-out bonus. Returns how much
     credit it took in total. Safe from five bots at once -- each wallet is
@@ -1468,6 +1538,43 @@ def record_usage(window_minutes: int, rss_mb, peak_rss_mb, ceiling_mb,
         conn.commit()
 
 
+def record_taps(taps: dict) -> None:
+    """Add a window's button counts to today's (UTC) row of each button. Blocking.
+    One transaction; `taps` is {key: count}, nothing else is stored."""
+    if not _enabled or not taps:
+        return
+    rows = [(_bot_id, key, count) for key, count in taps.items()
+            if isinstance(key, str) and isinstance(count, int) and not isinstance(count, bool) and count > 0]
+    if not rows:
+        return
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO {FAMILY_SCHEMA}.button_taps AS t (bot_id, day, button, taps) "
+                f"VALUES (%s, (now() AT TIME ZONE 'UTC')::date, %s, %s) "
+                f"ON CONFLICT (bot_id, day, button) DO UPDATE SET taps = t.taps + EXCLUDED.taps",
+                rows,
+            )
+        conn.commit()
+
+
+def button_taps_history(days: int = 7) -> list[dict]:
+    """Taps per bot and button over the last `days` UTC days (today and the days-1
+    before it), most tapped first within a bot. Every bot's rows: this is what
+    ManagerBot asks for."""
+    if not _enabled:
+        return []
+    with _connect() as conn:
+        cur = conn.execute(
+            f"SELECT bot_id, button, SUM(taps)::bigint AS taps FROM {FAMILY_SCHEMA}.button_taps "
+            f"WHERE day > (now() AT TIME ZONE 'UTC')::date - %s "
+            f"GROUP BY bot_id, button ORDER BY bot_id, SUM(taps) DESC, button",
+            (days,),
+        )
+        names = [column.name for column in cur.description]
+        return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
 def usage_history(bot_id: str | None = None, hours: int = 24) -> list[dict]:
     """Recent samples, newest first. `bot_id=None` means every bot, which is
     what ManagerBot asks for."""
@@ -1809,8 +1916,15 @@ def _tail_lines(path: Path, wanted: int) -> list[str]:
     return data.decode("utf-8", errors="replace").splitlines()[-wanted:]
 
 
+# How much of a log /logs prints: this many lines when none are asked for, and
+# never more than the maximum. Named so ManagerBot's logs page under /help reads the same
+# numbers the command uses.
+LOG_TAIL_DEFAULT = 40
+LOG_TAIL_MAX = 500
+
+
 async def _cmd_logs(context, args):
-    lines_wanted = min(int(args[0]), 500) if args and args[0].isdigit() else 40
+    lines_wanted = min(int(args[0]), LOG_TAIL_MAX) if args and args[0].isdigit() else LOG_TAIL_DEFAULT
     which = "errors.log"
     if args and args[-1] in ("bot", "all"):
         which = "bot.log"
@@ -1903,11 +2017,21 @@ _PLAIN = {
     "update_soon_try_later_soon": "\U0001f527 I'm about to be updated, so I can't start anything new right now. Please try again shortly.",
     "update_will_reset": "\U0001f527 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a moment.",
     "update_done_try_now": "✅ The update is done. You can go ahead and try again now.",
+    "gift_granted": "\U0001f381 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, "
+                    "good until {date}. It pays for about {conversions} paid conversions in {convert} "
+                    "or big-file downloads in {download}. Your balance: /balance",
+    "gift_claimed": "\U0001f381 Gift received: {amount} ⚡ of free credit! Mumu bots have passed {users} users, "
+                    "and this is our thank-you.\nIt is good until {date} (UTC) and pays for about {conversions} "
+                    "paid conversions in {convert} or big-file downloads in {download}.\nYour balance: /balance",
+    "gift_ad": "\U0001f389 Mumu bots have passed {users} unique users, so we decided to give out {amount} ⚡ of "
+               "free credit! You can claim it and use it in {download} and {convert}.\n\n<i>To claim it, send any "
+               "message to either bot: the gift is added automatically. Claim it by {claim_by}; once claimed, "
+               "it lasts {days} days.</i>",
 }
 
 
 def phrase(key: str, lang: str | None = None, **kwargs) -> str:
-    """One of the four sentences above, translated if this bot can."""
+    """One of the sentences above, translated if this bot can."""
     i18n = _i18n()
     if i18n is not None:
         try:
@@ -2047,6 +2171,394 @@ async def _cmd_broadcast(context, args):
     )
 
 
+# ---- the gift: bonus credit for everyone, once -----------------------------
+# One promotion at a time: `amount` of bonus credit for everyone this bot knows,
+# once per person across the family (grant_bonus_once's claim), and a notice in
+# their own language from the bot that won the claim -- so somebody who uses two
+# bots is given it once and told once. Without --go it only counts.
+#
+# Run --go once per bot, at the moment the promotion is announced: a later run
+# also reaches whoever arrived in between, and a fixed moment is what stops the
+# gift being farmed with fresh accounts.
+
+GIFT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,39}$")
+# What _gift_args says of a key that does not fit GIFT_KEY_RE; ManagerBot's
+# gift page under /help prints the same sentence.
+GIFT_KEY_RULE = "The key is 3-40 lowercase letters, digits or dashes, starting with a letter or digit."
+GIFT_MAX_DAYS = 400
+# Never real people: anonymous group admins, channels posting as themselves, and
+# Telegram (the ids delivery_cache.SHARED_SENDER_IDS also refuses).
+_GIFT_NOT_PEOPLE = {1087968824, 136817688, 777000}
+# What a paid conversion costs, roughly, for the notice's "about N conversions":
+# 6-7 ⚡ for a small one, 13-33 for a big video. Ten is the honest middle.
+GIFT_CREDITS_PER_CONVERSION = 10
+
+
+def _gift_last_day(text: str) -> "datetime | None":
+    """`YYYY-MM-DD` -> the moment the gift runs out: the end of that day, UTC."""
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day + timedelta(days=1)
+
+
+def _gift_args(args: list[str]) -> "tuple[str, int, datetime, str] | str":
+    """(key, amount, expires_at, last day as written), or the sentence saying
+    what is wrong. ManagerBot checks the same rules before it queues."""
+    if len(args) != 3:
+        return "Usage: gift <key> <credits> <last day YYYY-MM-DD> [--go]"
+    key, raw_amount, raw_day = args
+    if not GIFT_KEY_RE.fullmatch(key):
+        return GIFT_KEY_RULE
+    if key == PROMO_KEY:
+        # Its claims are the 220 gift's: /gift under it would count as claims
+        # in /promo and turn the people it reached into "already had it".
+        return "That key belongs to the 220 ⚡ gift (/promo). Choose another."
+    amount = int(raw_amount) if re.fullmatch(r"[0-9]{1,6}", raw_amount) else 0
+    if not 0 < amount <= GIFT_MAX_CREDIT:
+        return f"The amount is a whole number of credits, 1 to {GIFT_MAX_CREDIT}."
+    expires = _gift_last_day(raw_day)
+    now = datetime.now(timezone.utc)
+    if expires is None or not now + timedelta(days=1) <= expires <= now + timedelta(days=GIFT_MAX_DAYS + 1):
+        return f"The last day is a date, YYYY-MM-DD, from tomorrow (UTC) to {GIFT_MAX_DAYS} days ahead."
+    return key, amount, expires, raw_day
+
+
+def _gift_already_given(key: str) -> set:
+    prefix = f"stars:granted:{key}:"
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT key FROM {FAMILY_SCHEMA}.settings WHERE key LIKE %s", (prefix + "%",)
+        ).fetchall()
+    given = set()
+    for (claim,) in rows:
+        tail = claim[len(prefix):]
+        if tail.lstrip("-").isdigit():
+            given.add(int(tail))
+    return given
+
+
+def _bot_handle(bot_id: str, fallback: str) -> str:
+    """A sibling as somebody can tap it, from SIBLING_BOTS (the format
+    shared_features documents), or its plain name."""
+    for entry in os.environ.get("SIBLING_BOTS", "").split(","):
+        parts = entry.strip().split(":")
+        if len(parts) == 3 and parts[0] == bot_id and parts[2].strip().lstrip("@"):
+            return "@" + parts[2].strip().lstrip("@")
+    return fallback
+
+
+def gift_notice(lang: "str | None", amount: int, expires_at: datetime) -> str:
+    last_day = expires_at - timedelta(days=1)
+    return phrase(
+        "gift_granted", lang, amount=amount, date=last_day.strftime("%d.%m.%Y"),
+        conversions=max(1, amount // GIFT_CREDITS_PER_CONVERSION),
+        convert=_bot_handle("convertbot", "ConvertBot"),
+        download=_bot_handle("downloaderbot", "DownloaderBot"),
+    )
+
+
+async def _cmd_gift(context, args):
+    go = "--go" in args
+    parsed = _gift_args([a for a in args if a != "--go"])
+    if isinstance(parsed, str):
+        return parsed, None, None
+    key, amount, expires, raw_day = parsed
+    fn = getattr(db, "list_all_users", None)
+    if fn is None:
+        return "This bot keeps no list of its users, so it has nobody to give to.", None, None
+    try:
+        users = [uid for uid in await asyncio.to_thread(fn)
+                 if isinstance(uid, int) and uid > 0 and uid not in _GIFT_NOT_PEOPLE]
+    except Exception as exc:
+        return f"Could not read this bot's users ({type(exc).__name__}); nothing was given.", None, None
+    users = list(dict.fromkeys(users))
+    given = await asyncio.to_thread(_gift_already_given, key)
+    due = [uid for uid in users if uid not in given]
+    head = (f"Gift '{key}': {amount} ⚡ of bonus credit each, good until {raw_day} "
+            f"(the end of that day, UTC).")
+
+    if not go:
+        return (
+            f"{head}\nThis bot knows {len(users)} people; {len(due)} would get it now "
+            f"({len(users) - len(due)} already have it, from this bot or another), "
+            f"{len(due) * amount} ⚡ in all.\nNothing was given: this was only the count.\n\n"
+            f"What each of them is told (in their own language; English here):\n"
+            f"{gift_notice('en', amount, expires)}",
+            None, None,
+        )
+
+    granted = already = failed = told = unreachable = 0
+    delay = 1.0 / BROADCAST_PER_SECOND if BROADCAST_PER_SECOND > 0 else 0
+    for uid in due:
+        try:
+            balance = await asyncio.to_thread(grant_bonus_once, uid, amount, key, expires)
+        except Exception as exc:
+            failed += 1
+            logger.warning("Gift %s: could not give it to one person (%s)", key, type(exc).__name__)
+            continue
+        if balance is None:
+            already += 1
+            continue
+        granted += 1
+        try:
+            lang = await asyncio.to_thread(_language_of, uid)
+            await context.bot.send_message(chat_id=uid, text=gift_notice(lang, amount, expires))
+            told += 1
+        except Exception as exc:
+            unreachable += 1
+            logger.debug("Gift %s: a notice could not be delivered (%s)", key, type(exc).__name__)
+        if delay:
+            await asyncio.sleep(delay)
+    out = (f"{head}\nGave it to {granted} people ({granted * amount} ⚡) and told {told} of them"
+           + (f"; {unreachable} could not be reached but have the credit" if unreachable else "")
+           + f". {len(users) - len(due) + already} already had it.")
+    if failed:
+        out += f"\n{failed} failed (database errors, see the log); run the same command again to finish them."
+    return out, None, None
+
+
+# ---------------------------------------------------------------------------
+# The 220 ⚡ gift: claimed by writing to ConvertBot or DownloaderBot (2.2.0)
+# ---------------------------------------------------------------------------
+# One promotion, not a tool (the owner, 2026-10-18: "Make this one gift not
+# general, so it dies after first usage"). ManagerBot counts the family's unique
+# users and tells the owner once they reach PROMO_USERS; the owner's /promo then
+# starts it. The start is a row in family.settings that is written once and
+# never changed, so this gift can never run a second time.
+#
+# From the start, for PROMO_CLAIM_DAYS, the first message somebody sends to
+# ConvertBot or DownloaderBot gives them PROMO_CREDITS ⚡ of bonus credit, once
+# (grant_bonus_once: the claim and the credit in one transaction), to spend
+# within PROMO_SPEND_DAYS of that day. AnonBot shows its ad to each person once
+# meanwhile. /promo stop ends the claiming early; credit already given stays.
+#
+# Every day here ends at midnight UTC, the rule gift dates already follow (TERMS:
+# "expires at the end of the last day stated"), so the dates people are shown
+# are whole days.
+
+PROMO_KEY = "gift-220-users"
+PROMO_USERS = 220
+PROMO_CREDITS = 220
+PROMO_CLAIM_DAYS = 14
+PROMO_SPEND_DAYS = 28
+PROMO_STARTED = f"promo:{PROMO_KEY}:started"
+PROMO_STOPPED = f"promo:{PROMO_KEY}:stopped"
+PROMO_MILESTONE = f"promo:{PROMO_KEY}:milestone"
+# How stale a bot's idea of "has it started" may be. Only the start can lag: the
+# end is read off the clock, and a claim re-reads both before it gives anything.
+PROMO_REFRESH_SECONDS = 60
+# What claim_promo_gift says happened.
+PROMO_GIVEN, PROMO_HAD, PROMO_CLOSED = "given", "had", "closed"
+
+_promo_cache: dict = {"at": None, "started": None, "stopped": None}
+
+
+def _end_of_day(day) -> datetime:
+    """The moment a date ends: the midnight UTC after it."""
+    return datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+
+def _moment(text: "str | None") -> "datetime | None":
+    if not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return when.astimezone(timezone.utc) if when.tzinfo is not None else None
+
+
+# Everything below reads and writes the database itself, never get_setting's
+# in-process fallback: that fallback is what a process gets when its family bus
+# did not come up, and a gift started in one process's memory would be "started"
+# for ManagerBot's card and for nobody else.
+
+def _claim_setting(key: str, value: str) -> bool:
+    """Write a setting only if it is not there yet. True if this call wrote it.
+    Blocking; raises on a database error (unlike set_setting: a caller that
+    starts something has to know whether it did)."""
+    with _connect() as conn:
+        won = conn.execute(
+            f"INSERT INTO {FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO NOTHING RETURNING key",
+            (key, value),
+        ).fetchone()
+        conn.commit()
+    return bool(won)
+
+
+def _read_promo(fresh: bool = False) -> tuple:
+    """(started, stopped), each a UTC datetime or None. Blocking.
+
+    Cached for PROMO_REFRESH_SECONDS. A `fresh` read raises on a database error,
+    so that a claim never takes a failed read for "not stopped". A cached-path
+    read that fails answers "not started" until the next refresh: closed, which
+    gives nothing away, and one connection attempt a minute rather than one per
+    message while the database is down."""
+    at = _promo_cache["at"]
+    if not fresh and at is not None and time.monotonic() - at < PROMO_REFRESH_SECONDS:
+        return _promo_cache["started"], _promo_cache["stopped"]
+    try:
+        with _connect() as conn:
+            values = dict(conn.execute(
+                f"SELECT key, value FROM {FAMILY_SCHEMA}.settings WHERE key IN (%s, %s)",
+                (PROMO_STARTED, PROMO_STOPPED),
+            ).fetchall())
+    except Exception:
+        if fresh:
+            raise
+        logger.debug("Could not read the gift's state; closed until the next try", exc_info=True)
+        _promo_cache.update(at=time.monotonic(), started=None, stopped=None)
+        return None, None
+    started, stopped = _moment(values.get(PROMO_STARTED)), _moment(values.get(PROMO_STOPPED))
+    _promo_cache.update(at=time.monotonic(), started=started, stopped=stopped)
+    return started, stopped
+
+
+def promo_closes_for(started: datetime) -> datetime:
+    """When claiming ends for a gift started at `started`, unless it is
+    stopped first: the end of the PROMO_CLAIM_DAYS-th day after the start (UTC).
+    ManagerBot's card uses it to say what a start now would mean."""
+    return _end_of_day((started.astimezone(timezone.utc) + timedelta(days=PROMO_CLAIM_DAYS)).date())
+
+
+def promo_window(fresh: bool = False) -> "tuple[datetime, datetime] | None":
+    """(started, closes) once the owner has started the gift, else None.
+    `closes` is the end of the PROMO_CLAIM_DAYS-th day after the start, or the
+    moment it was stopped if that came first. Blocking; raises on a database
+    error."""
+    started, stopped = _read_promo(fresh)
+    if started is None:
+        return None
+    closes = promo_closes_for(started)
+    if stopped is not None and stopped < closes:
+        closes = stopped
+    return started, closes
+
+
+def promo_open(now: "datetime | None" = None, fresh: bool = False) -> bool:
+    """Can the gift be claimed at `now`? Blocking. Only a `fresh` read raises
+    on a database error; the cached one answers False (see _read_promo)."""
+    window = promo_window(fresh)
+    if window is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return window[0] <= now < window[1]
+
+
+def promo_expiry(claimed_at: datetime) -> datetime:
+    """When a gift claimed at `claimed_at` runs out: the end of the
+    PROMO_SPEND_DAYS-th day after the day it was claimed (UTC)."""
+    return _end_of_day((claimed_at.astimezone(timezone.utc) + timedelta(days=PROMO_SPEND_DAYS)).date())
+
+
+def claim_promo_gift(user_id: int) -> "tuple[str, datetime | None]":
+    """Give this person the gift if it is open and they never had it:
+    (PROMO_GIVEN, when it runs out), (PROMO_HAD, None) or (PROMO_CLOSED, None).
+    Re-reads the start and the stop first, so a cached "open" does not outlive
+    /promo stop. (A claim that read "open" in the moment before the stop was
+    committed still pays: a handful at most, accepted.) Blocking; raises on a
+    database error, and then nothing was given."""
+    if not (isinstance(user_id, int) and user_id > 0) or user_id in _GIFT_NOT_PEOPLE:
+        return PROMO_CLOSED, None
+    now = datetime.now(timezone.utc)
+    if not promo_open(now, fresh=True):
+        return PROMO_CLOSED, None
+    expires = promo_expiry(now)
+    if grant_bonus_once(user_id, PROMO_CREDITS, PROMO_KEY, expires) is None:
+        return PROMO_HAD, None
+    return PROMO_GIVEN, expires
+
+
+def promo_given_to(user_id: int) -> bool:
+    """Has this person had the gift? Blocking; raises on a database error."""
+    claim = f"stars:granted:{PROMO_KEY}:{user_id}"
+    with _connect() as conn:
+        return conn.execute(
+            f"SELECT 1 FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (claim,)
+        ).fetchone() is not None
+
+
+def promo_claim_count() -> int:
+    """How many people have had the gift. Blocking; raises on a database error."""
+    return len(_gift_already_given(PROMO_KEY))
+
+
+def _refresh_promo_after_write() -> None:
+    """Re-read the state after this process changed it. Never raises: the
+    write is already committed, and a failed read-back must not make the
+    owner's card say that nothing happened."""
+    try:
+        _read_promo(fresh=True)
+    except Exception:
+        _promo_cache["at"] = None
+        logger.debug("The gift's state changed; reading it back failed", exc_info=True)
+
+
+def start_promo() -> "tuple[datetime, bool]":
+    """Start the gift -- possible once, ever. (when it started, True if this
+    call started it). Blocking; raises on a database error, but never after
+    this call's start is written."""
+    now = datetime.now(timezone.utc)
+    if _claim_setting(PROMO_STARTED, now.isoformat()):
+        _refresh_promo_after_write()
+        return now, True
+    started, _ = _read_promo(fresh=True)
+    return started, False
+
+
+def stop_promo() -> bool:
+    """End the claiming now, if the gift is open. True if this call ended it.
+    Credit already given is kept. Blocking; raises on a database error."""
+    if not promo_open(fresh=True):
+        return False
+    won = _claim_setting(PROMO_STOPPED, datetime.now(timezone.utc).isoformat())
+    _refresh_promo_after_write()
+    return won
+
+
+def note_promo_milestone() -> bool:
+    """True the first time ever this is called: ManagerBot's one notice to the
+    owner that the users have reached PROMO_USERS. Blocking; raises on a
+    database error."""
+    return _claim_setting(PROMO_MILESTONE, datetime.now(timezone.utc).isoformat())
+
+
+def promo_milestone_at() -> "datetime | None":
+    """When the users first reached PROMO_USERS, if they have. Blocking; raises
+    on a database error."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT value FROM {FAMILY_SCHEMA}.settings WHERE key = %s", (PROMO_MILESTONE,)
+        ).fetchone()
+    return _moment(row[0]) if row else None
+
+
+def _promo_bots() -> dict:
+    return {"convert": _bot_handle("convertbot", "ConvertBot"),
+            "download": _bot_handle("downloaderbot", "DownloaderBot")}
+
+
+def promo_notice(lang: "str | None", expires_at: datetime) -> str:
+    """What somebody reads in ConvertBot or DownloaderBot when the gift was
+    just given to them. Plain text."""
+    return phrase(
+        "gift_claimed", lang, amount=PROMO_CREDITS, users=PROMO_USERS,
+        date=(expires_at - timedelta(days=1)).strftime("%d.%m.%Y"),
+        conversions=max(1, PROMO_CREDITS // GIFT_CREDITS_PER_CONVERSION), **_promo_bots(),
+    )
+
+
+def promo_ad(lang: "str | None", closes: datetime) -> str:
+    """AnonBot's ad for the gift, in HTML (the last paragraph is in italics)."""
+    return phrase(
+        "gift_ad", lang, amount=PROMO_CREDITS, users=PROMO_USERS, days=PROMO_SPEND_DAYS,
+        claim_by=(closes - timedelta(microseconds=1)).strftime("%d.%m.%Y"), **_promo_bots(),
+    )
+
+
 async def _cmd_pause(context, args):
     """Stop starting work a redeploy would throw away, and say so.
 
@@ -2124,6 +2636,7 @@ COMMANDS = {
     "pause": _cmd_pause,
     "warnbusy": _cmd_warnbusy,
     "resume": _cmd_resume,
+    "gift": _cmd_gift,
 }
 
 COMMAND_HELP = {
@@ -2142,6 +2655,7 @@ COMMAND_HELP = {
     "pause": "pause [minutes] -- decline new long work and say why",
     "warnbusy": "tell whoever is mid-something that it is about to be reset",
     "resume": "reopen, and tell everyone who was turned away",
+    "gift": "gift <key> <credits> <last day YYYY-MM-DD> [--go] -- bonus credit for everyone, once each; counts unless --go",
 }
 
 
@@ -2288,7 +2802,7 @@ async def _send_heartbeat(context) -> None:
 # no coordination is needed -- target_bot / bot_id already partition the shared
 # tables perfectly, and activity_events lives in the bot's own schema.
 
-def _prune_family_rows() -> tuple[int, int]:
+def _prune_family_rows() -> tuple[int, int, int, int]:
     with _connect() as conn:
         cur = conn.execute(
             f"DELETE FROM {FAMILY_SCHEMA}.commands "
@@ -2310,13 +2824,21 @@ def _prune_family_rows() -> tuple[int, int]:
             (_bot_id, USAGE_RETENTION_DAYS),
         )
         samples = cur.rowcount
+        # Button-tap counts live as long as the usage samples do.
+        cur = conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.button_taps "
+            f"WHERE bot_id = %s AND day < (now() AT TIME ZONE 'UTC')::date - %s",
+            (_bot_id, USAGE_RETENTION_DAYS),
+        )
+        taps = cur.rowcount
         conn.commit()
-    return commands, events, samples
+    return commands, events, samples, taps
 
 
 def _prune() -> str:
-    commands, events, samples = _prune_family_rows()
-    parts = [f"{commands} command(s)", f"{events} event(s)", f"{samples} usage sample(s)"]
+    commands, events, samples, taps = _prune_family_rows()
+    parts = [f"{commands} command(s)", f"{events} event(s)", f"{samples} usage sample(s)",
+             f"{taps} button tap row(s)"]
     try:
         parts.append(f"{expire_bonus_credit()} expired bonus credit")
     except Exception:

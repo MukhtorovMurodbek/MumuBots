@@ -169,9 +169,13 @@ ANIMATED_TARGETS = ("mp4", "webm", "gif", "webp", "apng", "mkv", "mov", "png", "
 # below cuts each list where the rest stops being worth a first screen.
 
 TARGETS_BY_CATEGORY = {
+    # The last two read the text in the picture (ocr_convert.py): they are
+    # past POPULAR_COUNT, so they sit in "More formats", and they are only
+    # offered where the host has the language data (the "ocr" requirement).
     IMAGE: (
         "png", "jpg", "webp", "pdf", "ico", "tiff",
         "bmp", "gif", "avif", "heic", "jp2", "tga", "ppm", "qoi", "icns",
+        "txt", "ocrpdf",
     ),
     VIDEO: (
         "mp4", "webm", "gif", "mp3", "mkv", "mov",
@@ -197,7 +201,7 @@ TARGETS_BY_CATEGORY = {
 # page, the other is reflowable text, and the arrow between them only points
 # one way.
 TARGETS_BY_FORMAT = {
-    "pdf": ("docx", "png", "jpg", "txt", "html", "webp", "svg", "tiff"),
+    "pdf": ("docx", "png", "jpg", "txt", "ocrpdf", "html", "webp", "svg", "tiff"),
     "epub": ("pdf", "docx", "txt", "html", "png", "jpg"),
     "mobi": ("pdf", "docx", "txt", "html", "png", "jpg"),
     "fb2": ("pdf", "docx", "txt", "html", "png", "jpg"),
@@ -255,6 +259,11 @@ POPULAR_COUNT = 6
 #   rawpy     LibRaw, which develops a camera raw photo (and brings numpy).
 #   bsdtar    libarchive's tar: reads 7z and RAR, writes 7z. ZIP and TAR are
 #             Python's own and need nothing.
+#   ocr       text recognition (ocr_convert.py): PyMuPDF, whose MuPDF links the
+#             Tesseract engine (`Pixmap.pdfocr_tobytes`), and the language data
+#             in TESSDATA_PREFIX. There is no tesseract binary to look for.
+#             Without it no OCR target is offered, and a PDF of scanned pages
+#             is refused as before.
 #
 # Pillow itself is a hard dependency: without it the bot does not import, so
 # it is not listed against anything.
@@ -277,6 +286,9 @@ FORMAT_NEEDS = {
     "xml": ("xml",),
     "7z": ("bsdtar",), "rar": ("bsdtar",),
     **{raw: ("rawpy",) for raw in RAW_FORMATS},
+    # A pseudo-target (the searchable PDF; its file is `<name>.pdf`): never a
+    # source, so this is only ever read for the target side.
+    "ocrpdf": ("ocr",),
 }
 
 # The one place a format's requirement depends on which side it is on. Every
@@ -291,6 +303,10 @@ TARGET_NEEDS = {
     # python-docx reads .docx files and does not offer DOCX as a target, which
     # is exactly what this table is for.
     (DOCUMENT, "docx"): ("pydocx", "mupdf"),
+    # The words in a picture come from the text recognition; the words in a
+    # PDF (FORMAT_NEEDS has no "txt" entry) come from the PDF engine alone,
+    # which is why a scanned PDF still converts to TXT where there is no OCR.
+    (IMAGE, "txt"): ("ocr",),
 }
 
 # Formats that are only reachable through ffmpeg, and the encoder each one
@@ -381,6 +397,18 @@ def _ffmpeg_encoders() -> set[str]:
     return names
 
 
+def _ocr_available() -> bool:
+    """Whether text can be recognised here: PyMuPDF with Tesseract in it, and the
+    language data on disk (ocr_convert.available). Imported here, not above:
+    ocr_convert imports convert_utils, which imports this module."""
+    try:
+        import ocr_convert
+        return bool(ocr_convert.available())
+    except Exception:
+        logger.debug("Text recognition is not available", exc_info=True)
+        return False
+
+
 def probe() -> set[str]:
     """Work out what this host can do. Idempotent; called once from main()."""
     global _PROBED, _MET, _ENCODERS_PRESENT
@@ -400,6 +428,8 @@ def probe() -> set[str]:
             found.add(requirement)
     if bsdtar_path():
         found.add("bsdtar")
+    if _ocr_available():
+        found.add("ocr")
     _ENCODERS_PRESENT = _ffmpeg_encoders()
     if _ENCODERS_PRESENT:
         found.add("ffmpeg")
@@ -410,7 +440,7 @@ def probe() -> set[str]:
         ", ".join(sorted(found)) or "Pillow only", len(_ENCODERS_PRESENT),
     )
     absent = [name for name in ("mupdf", "heif", "openpyxl", "yaml", "markdown", "mammoth",
-                                "pydocx", "bsdtar", "rawpy")
+                                "pydocx", "bsdtar", "rawpy", "ocr")
               if name not in found]
     if absent:
         logger.warning(
