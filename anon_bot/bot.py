@@ -94,7 +94,6 @@ from telegram.ext import (
     filters,
 )
 
-import db
 import family_link
 import i18n
 import lifecycle
