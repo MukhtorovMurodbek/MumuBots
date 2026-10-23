@@ -105,7 +105,7 @@ print("\n== who gets woken up ==")
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(HERE / ".mirror" / "anon_bot"))
 for name in ("problems", "bot", "db", "i18n", "family_link", "shared_features",
-             "lifecycle", "live_message", "transcript"):
+             "lifecycle", "live_message"):
     sys.modules.pop(name, None)
 os.environ.setdefault("ABOT_TOKEN", "1:AA")
 os.environ.setdefault("ABOT_USERNAME", "x")

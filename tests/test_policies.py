@@ -122,9 +122,14 @@ def main() -> int:
         # they are what somebody asking "what do you know about me" means.
         for table in ("donation_prompts", "activity_events"):
             check(f"erase_user clears {table}", f'"{table}"' in body)
-        # The ledger is the deliberate exception: kept, minus the username.
+        # The ledger is the deliberate exception: kept, minus the sealed username.
+        # AnonBot's username is sealed since 2.1.1; the other three bots' is
+        # still a plain column until their own sealing lands (the plain form
+        # is accepted for them only, never for AnonBot).
+        cleared = "star_transactions SET username_sealed = NULL" in body or (
+            BOT != "anon_bot" and "star_transactions SET username = NULL" in body)
         check("erase_user keeps the payment ledger and clears the username on it",
-              "star_transactions SET username = NULL" in body,
+              cleared,
               "the privacy notice says those rows stay, without a username")
 
     # The command menu has to offer them, or nobody finds them.

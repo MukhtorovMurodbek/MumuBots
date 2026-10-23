@@ -54,7 +54,7 @@ PROBLEMS = {
         EVERY_PUBLIC_BOT, "Too many updates from one person",
         "One person sent more than FLOOD_UPDATES_PER_MINUTE updates (40 by default) inside a minute; the rest "
         "were ignored until the window cleared.",
-        "Tapping buttons very fast, a client resending, forwarding a big selection outside /export, or a script.",
+        "Tapping buttons very fast, a client resending, forwarding a big selection, or a script.",
         "Usually nothing. If ordinary use trips it, raise FLOOD_UPDATES_PER_MINUTE on that bot."),
     "FM-DONATE-CURRENCY": Problem(
         EVERY_PUBLIC_BOT, "Unknown currency in /donate or /recharge",
@@ -653,23 +653,6 @@ PROBLEMS = {
         "A guest tried to archive a conversation.",
         "A guest using the owner's command.",
         "Nothing."),
-    "AN-EXPORT-FAILED": Problem(
-        "AnonBot", "Building the document failed",
-        "Reading the conversation or rendering the page failed; nothing was sent and nothing was kept.",
-        "A bug, the database failing during the relay lookup, or Telegram refusing every forward.",
-        "The traceback beside 'Could not build a transcript' in the log."),
-    "AN-EXPORT-GONE": Problem(
-        "AnonBot", "That conversation is no longer on record",
-        "A conversation chosen for export had no relay rows left by the time the button was tapped.",
-        "prune_old_data clearing a long-silent conversation, or /cancel removing it, between the "
-        "menu being drawn and the button being tapped.",
-        "Nothing. RELAY_RETENTION_DAYS is what decides how long a conversation stays exportable."),
-    "AN-EXPORT-NOTHING": Problem(
-        "AnonBot", "Nothing to export",
-        "/export was sent by somebody with no conversation on record in this chat.",
-        "Never having used an inbox link in either direction, or every conversation being older "
-        "than RELAY_RETENTION_DAYS.",
-        "Nothing."),
     "AN-UNADDRESSED": Problem(
         "AnonBot", "Message with nowhere to go",
         "A message from somebody with no inbox and no open conversation.",
@@ -794,9 +777,6 @@ KEYS = {
         "jump_no_anchor": "AN-NO-ANCHOR",
         "which_unknown": "AN-WHICH-UNKNOWN",
         "archive_not_owner": "AN-ARCHIVE-OWNER-ONLY",
-        "export_failed": "AN-EXPORT-FAILED",
-        "export_gone": "AN-EXPORT-GONE",
-        "export_nothing_to_export": "AN-EXPORT-NOTHING",
         "generic_nudge": "AN-UNADDRESSED",
         # Two notes, one code: what was not passed on is the same fact.
         "reaction_not_passed": "AN-REACTION-NOT-PASSED",
@@ -824,7 +804,7 @@ ALERT_KEYS = {
                     "job_not_running", "unknown_order"},
     "downloader_bot": {"redeliver_expired"},
     "sticker_bot": {"not_your_pack", "only_owner_coedit", "only_owner_rename", "only_owner_delete"},
-    "anon_bot": {"conv_gone", "not_your_conversation", "export_ended", "export_nothing_yet"},
+    "anon_bot": {"conv_gone", "not_your_conversation"},
 }
 
 
@@ -853,8 +833,8 @@ SIMPLE = frozenset({
     "AN-LINK-INVALID", "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",
     "AN-NOT-STARTED", "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-BLOCKED",
     "AN-REPLY-STALE", "AN-TOO-FAST", "AN-EDIT-NOT-RELAYED", "AN-CONV-GONE", "AN-NOT-YOURS",
-    "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-GONE",
-    "AN-EXPORT-NOTHING", "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
+    "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY",
+    "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
 })
 
 
@@ -961,7 +941,7 @@ KINDS = {
         "ST-WHOMADE-UNKNOWN", "ST-TITLE-EMPTY", "ST-IMPORT-SOURCE", "ST-UNRECOGNIZED",
         "ST-NOTHING-ADDED", "ST-NO-STICKER",
         "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-STALE",
-        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-NOTHING",
+        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY",
         "AN-UNADDRESSED",
     }),
     LIMIT: frozenset({
@@ -978,7 +958,7 @@ KINDS = {
     GONE: frozenset({
         "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED", "DL-MERGE-NO-PHOTOS",
         "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
-        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
+        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR",
     }),
     OTHER_SIDE: frozenset({
         "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import os
 import re
 from typing import Any
 
@@ -710,6 +711,12 @@ async def build(module, tele: FakeTelegram):
 
     ApplicationBuilder.token = fake_token
     Application.run_polling = fake_run_polling
+    # main() ends in family_link.attach(), whose key guard refuses a database
+    # that is not stamped as sealed: this scratch one is shared and carries
+    # rows from other suites, so it is stamped the way the conversion script
+    # leaves a real one (seal_stamp.py).
+    import seal_stamp
+    seal_stamp.stamp_database(os.environ["DATABASE_URL"])
     try:
         module.main()
     finally:

@@ -68,9 +68,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
+from psycopg import sql as pgsql
 
 import db
 import lifecycle
+import vault
 
 logger = logging.getLogger(__name__)
 
@@ -534,6 +536,385 @@ def init_family_schema() -> None:
             f"ON {FAMILY_SCHEMA}.feedback (delivered_at, id)"
         )
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# The data key (2.1.2CHL)
+# ---------------------------------------------------------------------------
+# Personal data in the database is sealed or pseudonymised with a key that
+# lives in a file of its own (shared/vault.py). Two mistakes would be silent
+# and bad: a bot started with the wrong key file would seal new rows under a
+# key nothing else can open, and a bot started on a database nobody has
+# converted would read plain ids as if they were pseudonyms. So every bot
+# checks, before it polls, that the key it holds is the one this database was
+# stamped with -- and that what the database holds is sealed, not just
+# stamped.
+#
+# Two kinds of stamp, in family.settings:
+#   data_key:v1      the key's fingerprint (16 hex digits that name the key
+#                    without revealing it): which key this database is sealed
+#                    with. One for the whole database.
+#   sealed:<stage>:v1  "1" once that stage's tables are converted. A stage is
+#                    a group of tables converted together; the owner's
+#                    releases seal them one group at a time (AnonBot first),
+#                    and a bot refuses to start while a stage its release
+#                    needs is not stamped. Written by
+#                    scripts/encrypt_personal_data.py after it has verified
+#                    the stage, in the transaction that converted it.
+# A database that holds none of a stage's tables' rows (a new one) is stamped
+# by whichever bot starts first.
+
+DATA_KEY_SETTING = "data_key:v1"
+
+# The stages this release's bots require, in the order the releases add them.
+# A later release appends "convert", "downloader", "sticker", "family-reports"
+# here and in STAGE_TABLES; nothing else in the guard changes.
+SEAL_STAGES = ("anon",)
+
+
+def sealed_setting(stage: str) -> str:
+    return f"sealed:{stage}:v1"
+
+
+# Per stage: the table that marks a schema as that bot's, and the tables the
+# stage's conversion changes in such a schema. (An AnonBot schema is any with
+# anon_conversations: the real one, and TestBot's.)
+STAGE_MARK = {"anon": "anon_conversations"}
+STAGE_TABLES = {
+    "anon": frozenset((
+        "anon_links", "anon_conversations", "anon_follower_state", "anon_relay", "anon_blocks",
+        "user_settings", "donation_prompts", "promo_seen", "activity_events", "star_transactions")),
+}
+# Saved state is sealed in every schema, whatever the stage: the family's
+# conversion clears what is not sealed (it lives hours).
+STATE_TABLES = (lifecycle.STATE_TABLE, lifecycle.WAITLIST_TABLE)
+
+# TestBot (testbot/) keeps its own family in `testbot_family` and its bots'
+# tables in `testbot_*`, on the same database as the real family. Each family
+# is stamped, and judged, on its own schemas only: the test bot must not be
+# refused because the real tables are full, nor the real bots because of a
+# test schema.
+_TEST_PREFIX = "testbot_"
+
+
+def belongs_to_family(schema: str, family_schema: "str | None" = None) -> bool:
+    """Is `schema` one of the schemas of the family kept in `family_schema`
+    (default: this process's)? `family` owns every schema but TestBot's; a
+    family named `<prefix>family` owns the schemas that start with <prefix>."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    prefix = family_schema[:-len("family")] if family_schema.endswith("family") else ""
+    return schema.startswith(prefix) if prefix else not schema.startswith(_TEST_PREFIX)
+
+
+def _tables_of_family(conn, family_schema: str) -> dict:
+    """{schema: {tables}} for this family's schemas, whatever the connection's
+    role may read (pg_tables lists all of them)."""
+    found: dict = {}
+    for schema, table in conn.execute(
+        "SELECT schemaname, tablename FROM pg_catalog.pg_tables "
+        "WHERE schemaname <> 'information_schema' AND schemaname NOT LIKE 'pg\\_%'"
+    ).fetchall():
+        if belongs_to_family(schema, family_schema):
+            found.setdefault(schema, set()).add(table)
+    return found
+
+
+def stage_schemas(conn, stage: str, family_schema: "str | None" = None) -> "list[str]":
+    """The schemas of this family that belong to `stage`'s bot."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    return sorted(schema for schema, tables in _tables_of_family(conn, family_schema).items()
+                  if STAGE_MARK[stage] in tables)
+
+
+def personal_data_tables(conn, stages=SEAL_STAGES, family_schema: "str | None" = None) -> "list[tuple[str, str]]":
+    """(schema, table) of every table that exists in this family's schemas and
+    that the conversion of `stages` touches: each stage's tables in its bot's
+    schemas, and the saved-state tables everywhere."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    out: set = set()
+    for schema, tables in _tables_of_family(conn, family_schema).items():
+        for stage in stages:
+            if STAGE_MARK[stage] in tables:
+                out |= {(schema, table) for table in tables & STAGE_TABLES[stage]}
+        out |= {(schema, table) for table in tables & set(STATE_TABLES)}
+    return sorted(out)
+
+
+def _has_rows(conn, schema: str, table: str) -> bool:
+    return bool(conn.execute(
+        pgsql.SQL("SELECT EXISTS (SELECT 1 FROM {}.{})").format(
+            pgsql.Identifier(schema), pgsql.Identifier(table))
+    ).fetchone()[0])
+
+
+def read_stamp(conn, key: str, family_schema: "str | None" = None) -> "str | None":
+    """One of the stamps above, or None when it is not there (or the settings
+    table is not)."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.settings",)).fetchone()[0] is None:
+        return None
+    row = conn.execute(
+        pgsql.SQL("SELECT value FROM {}.settings WHERE key = %s").format(pgsql.Identifier(family_schema)),
+        (key,)).fetchone()
+    return row[0] if row else None
+
+
+def ensure_settings_table(conn, family_schema: str) -> bool:
+    """Make family.settings if the family has none (a family that never ran a
+    bot: TestBot's on a database that has only its bots' schemas). The same
+    table init_family_schema() makes. True when it had to be made."""
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.settings",)).fetchone()[0] is not None:
+        return False
+    conn.execute(pgsql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(pgsql.Identifier(family_schema)))
+    conn.execute(pgsql.SQL("CREATE TABLE IF NOT EXISTS {}.settings (key TEXT PRIMARY KEY, value TEXT)")
+                 .format(pgsql.Identifier(family_schema)))
+    return True
+
+
+def write_stamps(conn, fingerprint: str, stages=SEAL_STAGES, family_schema: "str | None" = None) -> None:
+    """Stamp the family with the key and with every one of `stages`. The key's
+    stamp never overwrites another (the caller compares afterwards); a
+    stage's stamp is set to "1", because the caller has just converted it or
+    found nothing to convert."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    ensure_settings_table(conn, family_schema)
+    insert = pgsql.SQL("INSERT INTO {}.settings (key, value) VALUES (%s, %s) "
+                       "ON CONFLICT (key) DO NOTHING").format(pgsql.Identifier(family_schema))
+    conn.execute(insert, (DATA_KEY_SETTING, fingerprint))
+    for stage in stages:
+        conn.execute(insert, (sealed_setting(stage), "1"))
+
+
+def fresh_heartbeats(conn, within_seconds: int = 180, family_schema: "str | None" = None) -> "list[str]":
+    """The bot ids whose heartbeat in this family is younger than
+    `within_seconds`: a bot that is, or may still be, running."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.heartbeats",)).fetchone()[0] is None:
+        return []
+    rows = conn.execute(
+        pgsql.SQL("SELECT bot_id FROM {}.heartbeats "
+                  "WHERE last_seen > now() - make_interval(secs => %s) ORDER BY bot_id")
+        .format(pgsql.Identifier(family_schema)), (within_seconds,)).fetchall()
+    return [row[0] for row in rows]
+
+
+_NOT_SEALED = ("Personal data in this database is not sealed yet: stop the bots and run "
+               "scripts/encrypt_personal_data.py")
+_WRONG_KEY = "The data key file is not the key this database was sealed with"
+
+
+class DataKeyRefused(SystemExit):
+    """The data key guard ended this bot: the key is missing, unusable or not
+    the one this database was sealed with, the data is not sealed, or the
+    check could not be made. A SystemExit, so it passes through every
+    `except Exception` and ends a bot that runs alone. A process that runs
+    every bot (the C edition's main.py) catches SystemExit per bot, and reads
+    `data_key` to tell this apart from a bot that merely quit: with the key
+    unchecked nothing may run beside it."""
+    data_key = True
+
+
+def _refuse(message: str):
+    """Say it at CRITICAL and end the process. The message goes into the
+    exception as well: a process that runs every bot (the C edition's main.py)
+    catches it per bot and reports it as the reason that bot is not running."""
+    logger.critical("%s", message)
+    raise DataKeyRefused(message)
+
+
+def ensure_data_key(conn) -> None:
+    """Refuse to go on unless the key file in use is the key this database was
+    sealed with, and the database is sealed. Every bot runs this from
+    attach(), before it polls.
+
+    - the key is missing or unusable: log CRITICAL and raise SystemExit;
+    - `data_key:v1` is there and differs from this key's fingerprint: CRITICAL
+      "The data key file is not the key this database was sealed with",
+      SystemExit;
+    - `data_key:v1` is not there: if every table the conversion touches is
+      empty (a new database), stamp the key and every stage with
+      INSERT ... ON CONFLICT DO NOTHING and compare what is stored; else
+      CRITICAL "Personal data in this database is not sealed yet ...",
+      SystemExit;
+    - the key matches but a stage this release needs has no `sealed:<stage>:v1`
+      stamp: the same "not sealed yet" CRITICAL and SystemExit;
+    - otherwise log INFO and go on.
+
+    Needs family.settings to exist (init_family_schema()). Reads the family
+    this process belongs to (FAMILY_SCHEMA) and its schemas only.
+    """
+    try:
+        fingerprint = vault.require()
+    except vault.VaultError as exc:
+        _refuse(f"The data key is not usable: {exc}")
+    if vault.init_note:
+        logger.warning("%s", vault.init_note)
+
+    stamped = read_stamp(conn, DATA_KEY_SETTING)
+    if stamped is None:
+        holding = [f"{schema}.{table}" for schema, table in personal_data_tables(conn)
+                   if _has_rows(conn, schema, table)]
+        if holding:
+            # Not a new database -- unless another bot, starting at the same
+            # moment on a new one, has stamped it and written its first row
+            # since this one looked.
+            stamped = read_stamp(conn, DATA_KEY_SETTING)
+            if stamped is None:
+                logger.warning("Rows that are not sealed may be in: %s", ", ".join(holding))
+                _refuse(_NOT_SEALED)
+        else:
+            write_stamps(conn, fingerprint)
+            conn.commit()
+            stamped = read_stamp(conn, DATA_KEY_SETTING)
+    if stamped != fingerprint:
+        _refuse(_WRONG_KEY)
+    unsealed = [stage for stage in SEAL_STAGES if read_stamp(conn, sealed_setting(stage)) != "1"]
+    if unsealed:
+        logger.warning("Not sealed yet, by stage: %s", ", ".join(unsealed))
+        _refuse(_NOT_SEALED)
+    logger.info("Data key checked: it is the key this database is sealed with.")
+
+
+# --- converting a database sealed under 2.1.1 or earlier -----------------------
+# scripts/encrypt_personal_data.py runs these, with the bots' own, in one
+# transaction. Both take the caller's connection, never commit, and use only
+# what they are given.
+
+def _require_transaction(conn) -> None:
+    if getattr(conn, "autocommit", False):
+        raise ValueError("The conversion has to run in one transaction: give it a connection "
+                         "with autocommit off")
+
+
+def _schemas_with(conn, table: str, family_schema: str) -> "list[str]":
+    return sorted(schema for schema, tables in _tables_of_family(conn, family_schema).items()
+                  if table in tables)
+
+
+def _column_exists(conn, schema: str, table: str, column: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+        (schema, table, column)).fetchone() is not None
+
+
+def _waitlist_row_opens(user_id, chat_id, sealed) -> bool:
+    """Is this update_waitlist row in the sealed layout, and does its seal
+    open to the very ids its pseudonyms stand for?"""
+    if sealed is None or not (vault.is_pseudonym(user_id) and vault.is_pseudonym(chat_id)):
+        return False
+    try:
+        who = vault.open_json(sealed, lifecycle.WAITLIST_PURPOSE)
+        return (vault.pseudonym(int(who["user"])) == int(user_id)
+                and vault.pseudonym(int(who["chat"])) == int(chat_id))
+    except (vault.VaultError, KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
+def convert_personal_data_v1(conn, family_schema: "str | None" = None) -> dict:
+    """Clear the saved state that is not sealed. `family_schema` is the real
+    family's (the default) or TestBot's.
+
+    Both tables live hours at most -- the persistence drops a runtime_state
+    row after STATE_TTL_HOURS, and an update_waitlist row is someone told to
+    come back after an update -- so, rather than sealing 2.1.1's rows in
+    place, the rows that are not in the sealed layout are deleted:
+      - runtime_state, in every schema of the family;
+      - update_waitlist, wherever the family has one (the column who_sealed is
+        added first if the table is older than that).
+    A row that is already sealed and opens is left alone, so a second run
+    changes nothing. Nothing is committed; nothing but `conn` and
+    `family_schema` is used.
+
+    Returns {"changed": {"schema.table": rows deleted}, "skipped": [...]}."""
+    _require_transaction(conn)
+    family_schema = family_schema or FAMILY_SCHEMA
+    changed: dict = {}
+    skipped: list = []
+
+    for schema in _schemas_with(conn, lifecycle.WAITLIST_TABLE, family_schema):
+        label = f"{schema}.{lifecycle.WAITLIST_TABLE}"
+        if not _column_exists(conn, schema, lifecycle.WAITLIST_TABLE, "who_sealed"):
+            conn.execute(pgsql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS who_sealed BYTEA").format(
+                pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE)))
+        rows = conn.execute(pgsql.SQL("SELECT bot_id, user_id, chat_id, who_sealed FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE))).fetchall()
+        gone = 0
+        for bot_id, user_id, chat_id, sealed in rows:
+            if _waitlist_row_opens(user_id, chat_id, sealed):
+                continue
+            gone += conn.execute(
+                pgsql.SQL("DELETE FROM {}.{} WHERE bot_id = %s AND user_id = %s").format(
+                    pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE)),
+                (bot_id, user_id)).rowcount or 0
+        changed[label] = gone
+    if not changed:
+        skipped.append(f"{family_schema}: no {lifecycle.WAITLIST_TABLE} table")
+
+    states = _schemas_with(conn, lifecycle.STATE_TABLE, family_schema)
+    for schema in states:
+        rows = conn.execute(pgsql.SQL("SELECT kind, key, value FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE))).fetchall()
+        gone = 0
+        for kind, key, value in rows:
+            try:
+                lifecycle.unseal_state(kind, key, value)
+                continue
+            except vault.VaultError:
+                pass
+            gone += conn.execute(
+                pgsql.SQL("DELETE FROM {}.{} WHERE kind = %s AND key = %s").format(
+                    pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE)),
+                (kind, key)).rowcount or 0
+        changed[f"{schema}.{lifecycle.STATE_TABLE}"] = gone
+    if not states:
+        skipped.append(f"{family_schema}: no {lifecycle.STATE_TABLE} table in any schema")
+    return {"changed": changed, "skipped": skipped}
+
+
+def verify_personal_data_v1(conn, family_schema: "str | None" = None) -> dict:
+    """Check that the family's saved state is all sealed: every runtime_state
+    row opens and belongs to its key, every update_waitlist row has
+    pseudonyms and a seal that opens to them. Raises RuntimeError naming the
+    tables and the position of the rows (never a value) when not. Returns
+    {"checked": {"schema.table": rows}, "skipped": [...]}."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    checked: dict = {}
+    skipped: list = []
+    problems: list = []
+
+    for schema in _schemas_with(conn, lifecycle.WAITLIST_TABLE, family_schema):
+        label = f"{schema}.{lifecycle.WAITLIST_TABLE}"
+        if not _column_exists(conn, schema, lifecycle.WAITLIST_TABLE, "who_sealed"):
+            problems.append(f"{label} has no who_sealed column")
+            continue
+        rows = conn.execute(pgsql.SQL("SELECT bot_id, user_id, chat_id, who_sealed FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE))).fetchall()
+        for index, (bot_id, user_id, chat_id, sealed) in enumerate(rows, 1):
+            if not _waitlist_row_opens(user_id, chat_id, sealed):
+                problems.append(f"{label} row {index} ({bot_id}): not sealed, or does not open")
+        checked[label] = len(rows)
+    if not checked:
+        skipped.append(f"{family_schema}: no {lifecycle.WAITLIST_TABLE} table")
+
+    states = _schemas_with(conn, lifecycle.STATE_TABLE, family_schema)
+    for schema in states:
+        label = f"{schema}.{lifecycle.STATE_TABLE}"
+        rows = conn.execute(pgsql.SQL("SELECT kind, key, value FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE))).fetchall()
+        for index, (kind, key, value) in enumerate(rows, 1):
+            try:
+                lifecycle.unseal_state(kind, key, value)
+            except vault.VaultError:
+                problems.append(f"{label} row {index} ({kind}): not sealed, or does not open")
+        checked[label] = len(rows)
+    if not states:
+        skipped.append(f"{family_schema}: no {lifecycle.STATE_TABLE} table in any schema")
+
+    if problems:
+        raise RuntimeError("Saved state in the family is not sealed: " + "; ".join(problems[:20])
+                           + (f" (and {len(problems) - 20} more)" if len(problems) > 20 else ""))
+    return {"checked": checked, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------
@@ -2875,11 +3256,60 @@ async def _housekeeping(context) -> None:
 # Wiring
 # ---------------------------------------------------------------------------
 
+# Seconds to wait before each new try when the database does not answer the
+# check; one more try than there are entries. Module-level so tests can
+# shorten them.
+_GUARD_RETRY_SLEEPS = (2, 4, 8, 16, 30, 30)
+_sleep = time.sleep
+
+
+def guard_data_key() -> None:
+    """The start-of-day check every bot makes: ensure_data_key() on the shared
+    database, creating the family tables it reads first. Unlike the rest of
+    attach() this does not carry on when the database cannot be asked -- a bot
+    that cannot tell whether it holds the right key, or whether its data is
+    sealed, must not start.
+
+    A database that is slow or briefly unreachable is waited for: a
+    psycopg.OperationalError (a pool timeout is one) while initialising or
+    checking is retried after 2, 4, 8, 16, 30 and 30 seconds, a WARNING each
+    time, and only the last failure ends the bot. (The bots' init_db() ran
+    before this and proves the database answered a moment ago, but in the
+    combined edition one bot's guard can run while the database is restarting,
+    and a start that fails for that reason should not be a refusal.) A wrong
+    key, unsealed data, a missing or unusable key file, or any other error is
+    final at once.
+
+    Every way out is a DataKeyRefused (a SystemExit), which passes through
+    every `except Exception` on the way up and ends the process."""
+    attempts = len(_GUARD_RETRY_SLEEPS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            init_family_schema()
+            with _connect() as conn:
+                ensure_data_key(conn)
+            return
+        except psycopg.OperationalError as exc:
+            if attempt == attempts:
+                _refuse("The data key could not be checked: the database is not answering")
+            wait = _GUARD_RETRY_SLEEPS[attempt - 1]
+            logger.warning("The data key could not be checked yet (%s); trying again in %ss "
+                           "(attempt %s of %s).", type(exc).__name__, wait, attempt, attempts)
+            _sleep(wait)
+        except Exception as exc:
+            _refuse(f"The data key could not be checked against the database ({type(exc).__name__}): "
+                    "the bot does not start without that check.")
+
+
 def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
     """One line in each bot's main(), just before run_polling().
 
-    Never raises: a bot whose shared database is unreachable logs a warning
-    and carries on serving its users with no family bus at all.
+    Never raises, with one deliberate exception: guard_data_key() ends the
+    process (DataKeyRefused, a SystemExit) when the data key file is not the
+    key this database was sealed with, the database is not sealed, or the
+    check could not be made. Otherwise a bot whose
+    shared database is unreachable logs a warning and carries on serving its
+    users with no family bus at all.
 
     FAMILY_BOT_ID and FAMILY_LABEL override what this process calls itself on
     the bus. They exist for the test bot (see `testbot/`), which runs one of
@@ -2893,6 +3323,10 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
 
     keep_recent_log_lines()
 
+    # Before anything else, and whether or not the bus is wanted: the data
+    # key is about this bot's own tables, not the bus.
+    guard_data_key()
+
     if os.environ.get("FAMILY_BUS", "on").lower() in ("off", "0", "false", "no"):
         logger.info("Family bus disabled (FAMILY_BUS=off) -- running standalone.")
         return
@@ -2902,7 +3336,6 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
     _bot_id, _display_name, _start_time = bot_id, display_name, start_time
 
     try:
-        init_family_schema()
         write_heartbeat()
     except Exception as exc:
         logger.warning(

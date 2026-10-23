@@ -25,10 +25,11 @@ _Last reviewed: 3 October 2026._
   conversation number, when it started, when it was last spoken in, and
   whether the inbox owner has filed it away. This is what makes a reply
   reach the right thread.
-- **A message-id map** — which message belongs to which conversation, when
-  each was relayed, and whether the bot or the person wrote it. This is what
-  lets a reply be matched to what it answers, and a transcript be sorted into
-  conversations.
+- **A message-id map** — which chat message belongs to which conversation:
+  message numbers, no words. This is what lets a reply be matched to what it
+  answers. A row is kept only while a reply to it can still be routed: **30
+  days** after the conversation's last message, the conversation is closed and
+  its rows are deleted.
 - **A block list** — who an inbox owner has blocked.
 - **A timestamp per use** — one row saying this id used the bot at this
   minute, so the operator can tell whether anybody is using it.
@@ -92,43 +93,6 @@ _Last reviewed: 3 October 2026._
   the reaction and not who made it. Nothing about it is written down.
 - Names, usernames or profile photos of the people writing anonymously.
 
-## Getting a conversation back (`/export`)
-
-`/export` hands you one conversation, or all of them. It works from the
-message-id map above — which message in this chat belonged to which
-conversation — so you do not forward anything and the bot does not read a
-chat's history, which no bot can do.
-
-You choose between two ways, and the bot says which is which before either
-runs:
-
-- **Copied back here.** The bot gives Telegram a list of message numbers and
-  Telegram makes the copies. **The bot does not see what is in them.**
-  Everything arrives exactly as it was — stickers, photos, voice messages,
-  files — and the copies stay in the chat until you delete them.
-- **Written into a document.** To put words on a page the bot has to read
-  them. It forwards each message to itself, reads it, and **deletes what it
-  read straight away**, one at a time. You will see messages appear and
-  vanish while it works.
-
-For the document:
-
-- **What it reads:** the text or caption, what kind of media it is, and when
-  it was sent. Photos, voice messages, videos and files are not downloaded;
-  the document names them by kind. Shared contacts and locations are named the
-  same way, and what is in them is not copied into the document.
-- **What it keeps:** nothing. The page is assembled in the bot's memory, sent
-  to you, and dropped. It is never written to the database.
-- **Who is named:** nobody. The inbox holder is "Owner" and the person writing
-  to them is "Anon", whichever of the two is doing the exporting. No name, no
-  username and no id appears in it. The other person is not told.
-
-A conversation stops being exportable when its message-id rows are cleared —
-see the retention section below.
-
-A document holds what somebody else wrote to you. Sharing it is your
-responsibility; treat it like a screenshot.
-
 ## What "anonymous" means here
 
 Anonymity is towards the person being written to. They are never shown a
@@ -173,13 +137,13 @@ Nothing is collected speculatively, and nothing is collected to be sold later.
 |---|---|
 | user id, language, link, block list | until erased, or indefinitely while the bot is in use |
 | conversation pairings | until erased, or the conversation is |
-| message-id map | pruned once a conversation has gone quiet |
+| message-id map | 30 days after the conversation's last message (`RELAY_RETENTION_DAYS`) |
 | timestamp per use | about 90 days (`ACTIVITY_RETENTION_DAYS`) |
 | button tap counts | 45 days (`FAMILY_USAGE_RETENTION_DAYS`) |
 | donation records | kept, for accounts and payment disputes |
 | ⚡ credit balance and its ledger | kept, like the donation records |
 | gifts given (which gift was given to your id, and when) | kept, like the ledger |
-| announcements shown (which one, and when) | until /deletemydata |
+| announcements shown (which one) | until /deletemydata |
 | feedback sent with `/feedback` | 30 days (`FEEDBACK_RETENTION_DAYS`) |
 
 ## Erasing it
@@ -207,8 +171,8 @@ Blocking the bot in Telegram stops it from sending anything, but erases
 nothing — the two are separate actions, and `/deletemydata` is the one that
 removes data.
 
-There is no separate export command. Everything held is listed above, and
-`/deletemydata` reports how many records it removed.
+Everything held is listed above, and `/deletemydata` reports how many
+records it removed.
 
 ## Age
 

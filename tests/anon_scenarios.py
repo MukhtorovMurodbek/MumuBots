@@ -83,6 +83,8 @@ import shared_features  # noqa: E402
 import bot as ab  # noqa: E402
 import family_link  # noqa: E402
 import problems  # noqa: E402
+import vault  # noqa: E402  -- identity columns hold vault.pseudonym(id), not the id
+import sealed_check  # noqa: E402
 from telegram.error import BadRequest  # noqa: E402
 
 # Every unhandled exception in a handler ends up here, because that is where
@@ -1381,7 +1383,7 @@ async def group_o():
     with db.pooled_read() as conn:
         conv_id = conn.execute(
             "SELECT id FROM anon_conversations WHERE owner_user_id = %s "
-            "AND archived_at IS NULL ORDER BY id LIMIT 1", (OWNER,)
+            "AND archived_at IS NULL ORDER BY id LIMIT 1", (vault.pseudonym(OWNER),)
         ).fetchone()[0]
 
     other = s.person(OTHER_OWNER, "OtherOwner")
@@ -1613,7 +1615,7 @@ async def group_p():
             "SELECT chat_id, count(*) FROM anon_relay GROUP BY chat_id"
         ).fetchall())
     check("and the conversation is a different number of bubbles in each chat",
-          sides.get(OWNER) != sides.get(GUEST_A), str(sides))
+          sides.get(vault.pseudonym(OWNER)) != sides.get(vault.pseudonym(GUEST_A)), str(sides))
 
     wrong = []
     for kind in reversed(sim.MEDIA_FIELDS):
@@ -1648,7 +1650,8 @@ async def group_p():
     voice_mine, voice_theirs = sent["voice"]
     with db.pooled() as conn:
         conn.execute("UPDATE anon_relay SET peer_message_id = NULL "
-                     "WHERE chat_id = %s AND message_id = %s", (OWNER, voice_theirs))
+                     "WHERE chat_id = %s AND message_id = %s",
+                     (vault.pseudonym(OWNER), voice_theirs))
         conn.commit()
     await owner.send("answering an unpaired row", reply_to=voice_theirs)
     check("a relay row from before the pairing existed still delivers",
@@ -1956,7 +1959,7 @@ async def group_r():
 def _knows(user_id: int):
     with db.pooled() as conn:
         row = conn.execute("SELECT knows_reactions FROM user_settings WHERE user_id = %s",
-                           (user_id,)).fetchone()
+                           (vault.pseudonym(user_id),)).fetchone()
     return row[0] if row else "no row"
 
 
@@ -1964,7 +1967,8 @@ def _as_if_here_before(s, user_id: int) -> None:
     """A user from before 2.1.0: the column NULL, as the migration leaves it,
     and the process's cache of the answer gone, as a restart leaves it."""
     with db.pooled() as conn:
-        conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s", (user_id,))
+        conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s",
+                     (vault.pseudonym(user_id),))
         conn.commit()
     s.app.user_data[user_id].pop(ab.KNOWS_REACTIONS_KEY, None)
 
@@ -2166,20 +2170,136 @@ async def group_t():
         conn.commit()
 
 
+
+# ---------------------------------------------------------------------------
+# U -- /export is gone, and so is what only /export needed
+# ---------------------------------------------------------------------------
+
+def _row_counts() -> dict:
+    """Rows in every table of the bot's own schema and of the family schema."""
+    counts = {}
+    with db.pooled_read() as conn:
+        tables = conn.execute(
+            "SELECT table_schema, table_name FROM information_schema.tables "
+            "WHERE table_type = 'BASE TABLE' AND table_schema IN (current_schema(), 'family')"
+        ).fetchall()
+        for schema, table in tables:
+            counts[f"{schema}.{table}"] = conn.execute(
+                f'SELECT count(*) FROM "{schema}"."{table}"').fetchone()[0]
+    return counts
+
+
+async def group_u():
+    section("U. /export only says it was removed; relay rows keep no times and sides")
+    s, tele = await fresh()
+    owner, guest = s.person(OWNER, "Owner"), s.person(GUEST_A, "GuestA")
+    guest_b = s.person(GUEST_B, "GuestB")
+    await onboard(owner)
+    await onboard(guest)
+    await onboard(guest_b)
+    token = await token_for(OWNER)
+    await open_link(guest, token)
+    await guest.send("first from A")
+    await open_link(guest_b, token)
+    await guest_b.send("first from B")
+    await driver_flush(s)
+
+    # --- /export answers one line, in the person's language, and nothing else
+    check("the command is not in the menu", "export" not in [c.command for c in ab.BOT_COMMANDS],
+          str([c.command for c in ab.BOT_COMMANDS]))
+    for code, switch in (("en", "/en"), ("uz", "/uz"), ("ru", "/rus")):
+        await owner.send(switch)
+        await driver_flush(s)
+        before_rows, before_chat = _row_counts(), len(owner.chat)
+        await owner.send("/export")
+        await driver_flush(s)
+        added = [m for m in owner.chat[before_chat:] if m.get("text") != "/export"]
+        check(f"{code}: /export answers with the removal notice and nothing else",
+              len(added) == 1 and added[0].get("text") == i18n.t(code, "export_removed"),
+              owner.transcript())
+        check(f"{code}: the notice has no buttons", not added[0].get("reply_markup") if added else False)
+        check(f"{code}: and it writes no row anywhere", _row_counts() == before_rows,
+              str({k: (before_rows.get(k), v) for k, v in _row_counts().items()
+                   if before_rows.get(k) != v}))
+    await owner.send("/en")
+    check("the three notices are the agreed texts",
+          i18n.t("en", "export_removed").startswith("📦 /export has been removed")
+          and i18n.t("uz", "export_removed").startswith("📦 /export olib tashlandi")
+          and i18n.t("ru", "export_removed").startswith("📦 Команда /export удалена"))
+    check("and no other export_ text is left in any language",
+          all(not k.startswith("export_") or k == "export_removed"
+              for lang in i18n.SUPPORTED_LANGUAGES for k in i18n.STRINGS[lang]),
+          str([k for k in i18n.STRINGS["en"] if k.startswith("export_")]))
+
+    # --- relay rows carry no time and no side; replies still route
+    with db.pooled() as conn:
+        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
+        conn.commit()
+    await owner.send("answer for B", reply_to=owner_bubble(owner, 2))
+    await guest_b.send("and a follow-up from B", reply_to=delivered(guest_b, "answer for B")["message_id"])
+    with db.pooled_read() as conn:
+        total, with_time, with_side = conn.execute(
+            "SELECT count(*), count(sent_at), count(from_bot) FROM anon_relay").fetchone()
+    check("relay rows exist for both sides of both conversations", total >= 8, str(total))
+    check("none of them has sent_at or from_bot set", (with_time, with_side) == (0, 0),
+          f"{with_time} with sent_at, {with_side} with from_bot")
+    check("the answer reached guest B and only guest B",
+          delivered(guest_b, "answer for B") is not None and delivered(guest, "answer for B") is None,
+          guest_b.transcript() + guest.transcript())
+    followed = delivered(owner, "and a follow-up from B") or {}
+    check("and B's follow-up landed in conversation #2, not #1",
+          "#2" in (followed.get("text") or "") and "#1" not in (followed.get("text") or "")
+          and not any("follow-up from B" in (m.get("text") or "") for m in guest.chat),
+          owner.transcript())
+
+    # --- 30 days of silence closes a conversation and clears its relay rows
+    check("the default retention is 30 days", db.RELAY_RETENTION_DAYS == 30,
+          str(db.RELAY_RETENTION_DAYS))
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    def _idle(conversation: int, days: int) -> None:
+        stamp = (_dt.now(_tz.utc) - _td(days=days)).isoformat()
+        with db.pooled() as conn:
+            conn.execute("UPDATE anon_conversations SET last_activity_at = %s WHERE conv_number = %s",
+                         (stamp, conversation))
+            conn.commit()
+    def _relay_rows(conversation: int) -> int:
+        with db.pooled_read() as conn:
+            return conn.execute(
+                "SELECT count(*) FROM anon_relay r JOIN anon_conversations c ON c.id = r.conversation_id "
+                "WHERE c.conv_number = %s", (conversation,)).fetchone()[0]
+    check("both conversations have relay rows before the prune",
+          _relay_rows(1) > 0 and _relay_rows(2) > 0, f"{_relay_rows(1)} / {_relay_rows(2)}")
+    _idle(1, 31)
+    _idle(2, 29)
+    db.prune_old_data()
+    check("idle 31 days: its relay rows are gone", _relay_rows(1) == 0, str(_relay_rows(1)))
+    check("idle 29 days: its relay rows stay", _relay_rows(2) > 0, str(_relay_rows(2)))
+
 # ---------------------------------------------------------------------------
 
 GROUPS = [group_a, group_b, group_c, group_d, group_e,
           group_f, group_g, group_h, group_i, group_j, group_k, group_l,
-          group_m, group_n, group_o, group_p, group_q, group_r, group_s, group_t]
+          group_m, group_n, group_o, group_p, group_q, group_r, group_s, group_t, group_u]
 
 
 async def main() -> int:
     db.init_db()
     only = sys.argv[1:]
+    scanned = 0
     for group in GROUPS:
         if only and group.__name__[-1] not in only:
             continue
         await group()
+        # 2.1.1: whatever the group just did, no column that names a person or
+        # a chat holds a real Telegram id. Asked of the database itself, for
+        # every such column it has, so a table added later is covered too.
+        with db.pooled_read() as conn:
+            leaks, columns, rows = sealed_check.real_ids_left(conn, os.environ["DB_SCHEMA"])
+        scanned += rows
+        check(f"{group.__name__}: no identity column holds a real Telegram id ({columns} columns)",
+              not leaks and columns >= 10, "; ".join(leaks) or f"only {columns} columns found")
+    check("and those scans looked at real data, not empty tables", scanned > 0, str(scanned))
     section("nothing crashed")
     check("no handler raised anything the error handler had to report",
           not crashes, " | ".join(f"{k}: {m}" for k, m in crashes))

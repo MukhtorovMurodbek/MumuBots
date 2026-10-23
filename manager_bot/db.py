@@ -615,20 +615,35 @@ def unique_people(schemas: list[str]) -> int:
     however many bots they used: the distinct user_id over every schema's
     activity_events and whichever of user_settings and settings it has, leaving
     out ids that are not people (zero and below, and family_link's
-    _GIFT_NOT_PEOPLE: Telegram, anonymous admins, channels). One connection, one
-    counting query. The 220 gift's count (family_link.PROMO_USERS).
+    _GIFT_NOT_PEOPLE: Telegram, anonymous admins, channels). One connection. The
+    220 gift's count (family_link.PROMO_USERS).
 
     It is built from tables that exist and not from a list of its own, so it can
     only under-count: an activity_events row older than ACTIVITY_RETENTION_DAYS is
     pruned, and somebody with no settings row then drops out. It can never
     over-count, which is what "the bots have passed 220 users" needs to stay
     true. Schema and table names come from the registry and the catalog, never
-    from a person."""
+    from a person.
+
+    AnonBot stores its people as pseudonyms (negative numbers, which the
+    `user_id > 0` test below leaves out) and keeps each real id sealed beside
+    its pseudonym in user_settings.user_sealed. So the count is made in two
+    steps: the ids the other tables hold in the clear, and the ids opened from
+    those sealed values (shared/vault.py, purpose "anon.user", checked against
+    the row's pseudonym), joined in memory. A row that does not open is skipped
+    and counted in one warning that names the table only. Since 2.1.2 an
+    AnonBot user_settings row exists for everyone with activity, so its
+    activity_events need not be opened. Before the conversion nothing is
+    sealed, the plain ids are all there is, and the answer is the same as it
+    always was. Nothing is stored and no id is logged."""
     if not schemas:
         return 0
     # Inside the function: family_link imports `db` (this module) at its top, so
     # importing it at the top here would be circular.
     import family_link
+    import vault
+    from psycopg import sql as pgsql
+    not_people = set(family_link._GIFT_NOT_PEOPLE)
     with pooled_read() as conn:
         found = []
         for table in PEOPLE_TABLES:
@@ -644,15 +659,47 @@ def unique_people(schemas: list[str]) -> int:
         ).fetchall()}
         parts = [f'SELECT user_id FROM "{schema}".{table}'
                  for schema, table in found if (schema, table) in with_user_id]
-        if not parts:
-            return 0
-        # UNION, not UNION ALL: that is what counts a person in two bots once.
-        row = conn.execute(
-            "SELECT COUNT(*) FROM (" + " UNION ".join(parts) + ") AS everyone "
-            "WHERE user_id > 0 AND user_id <> ALL(%s)",
-            (sorted(family_link._GIFT_NOT_PEOPLE),),
-        ).fetchone()
-        return row[0]
+        people: set = set()
+        if parts:
+            # UNION, not UNION ALL: a person in two bots comes back once (and
+            # the set below would hold them once anyway).
+            people = {row[0] for row in conn.execute(
+                "SELECT user_id FROM (" + " UNION ".join(parts) + ") AS everyone "
+                "WHERE user_id > 0 AND user_id <> ALL(%s)",
+                (sorted(not_people),),
+            ).fetchall()}
+        # AnonBot's people: any schema with anon_conversations is AnonBot's
+        # (the same mark the key guard uses), and its settings hold the sealed ids.
+        for schema in sorted(_existing_tables(conn, schemas, "anon_conversations")):
+            if conn.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = %s "
+                "AND table_name = 'user_settings' AND column_name = 'user_sealed'",
+                (schema,),
+            ).fetchone() is None:
+                continue
+            # Only the rows that hold a pseudonym: a plain id (unconverted data)
+            # was counted above, and has nothing to open.
+            rows = conn.execute(
+                pgsql.SQL("SELECT user_id, user_sealed FROM {}.user_settings "
+                          "WHERE user_id < %s").format(pgsql.Identifier(schema)),
+                (vault.PSEUDONYM_CEILING,),
+            ).fetchall()
+            skipped = 0
+            for pseudonym, sealed in rows:
+                try:
+                    if sealed is None:
+                        raise ValueError("no sealed id")
+                    real = vault.open_id(sealed, "anon.user", expected=pseudonym)
+                except (vault.VaultError, TypeError, ValueError):
+                    skipped += 1
+                    continue
+                if real > 0 and real not in not_people:
+                    people.add(real)
+            if skipped:
+                logging.getLogger(__name__).warning(
+                    "%d sealed value(s) in %s.user_settings did not open and were not counted",
+                    skipped, schema)
+        return len(people)
 
 
 def promo_seen_count(schema: str, promo: str) -> "int | None":

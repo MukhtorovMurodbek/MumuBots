@@ -28,6 +28,12 @@ HOW IT LOOKS
     searched for that nonce -- asked of information_schema rather than from a
     list, so a column added next year is covered on the day it is added.
 
+    Since 2.1.2CHL `runtime_state` holds its rows sealed, so a search of the
+    raw column can no longer see what the bot saved there -- it would pass for
+    the wrong reason. So the search covers the table twice: the raw columns
+    (which must hold nothing readable) and the rows opened the way the bot
+    reads them back (which must not hold the nonce either).
+
     python tests/no_storage_scenarios.py
 
 Needs a Postgres (TEST_DATABASE_URL, or the local default). No network.
@@ -35,6 +41,7 @@ Needs a Postgres (TEST_DATABASE_URL, or the local default). No network.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -111,9 +118,10 @@ def searchable_columns() -> list:
         ).fetchall()
 
 
-def where_is(needle: str) -> list:
-    """Every column in the schema holding this text. Empty is the answer we
-    want, and the reason the columns are asked for rather than listed."""
+def where_is_raw(needle: str) -> list:
+    """Every column in the schema holding this text as the database has it.
+    Empty is the answer we want, and the reason the columns are asked for
+    rather than listed."""
     hits = []
     with db.pooled() as conn:
         for table, column in searchable_columns():
@@ -123,6 +131,27 @@ def where_is(needle: str) -> list:
             ).fetchone()
             if found:
                 hits.append(f"{table}.{column}")
+    return hits
+
+
+def opened_state() -> str:
+    """What runtime_state holds, opened the way the bot reads it back after a
+    restart: every saved key and value, as text. The table keeps them sealed,
+    so this is the only way to see whether the bot saved something it should
+    not have."""
+    parts = []
+    for kind in ("user", "conversation"):
+        for key, value in lifecycle._read_state(kind):
+            parts.append(json.dumps([key, value], ensure_ascii=False))
+    return "\n".join(parts)
+
+
+def where_is(needle: str) -> list:
+    """Every place holding this text: the raw columns, and runtime_state's
+    rows once opened."""
+    hits = where_is_raw(needle)
+    if needle in opened_state():
+        hits.append("runtime_state (opened)")
     return hits
 
 
@@ -191,8 +220,16 @@ async def main() -> int:
     # A language choice DOES persist, which is what makes "not found" below
     # mean something rather than meaning the writer never ran.
     check("something the bot does keep is in the database",
-          bool(where_is('"lang"')) or bool(where_is("lang")),
+          '"lang"' in opened_state(),
           "runtime_state holds no user_data at all -- the search proves nothing")
+    with db.pooled() as conn:
+        saved_rows = conn.execute("SELECT count(*) FROM runtime_state").fetchone()[0]
+        plain_keys = conn.execute(
+            "SELECT count(*) FROM runtime_state WHERE key IN (%s, %s, %s)",
+            (str(OWNER), str(OTHER_OWNER), str(GUEST))).fetchone()[0]
+    check("and it is sealed there: the table itself holds nothing readable of it",
+          saved_rows > 0 and plain_keys == 0 and not where_is_raw("lang"),
+          f"{saved_rows} row(s), {plain_keys} under a plain id; raw hits: {where_is_raw('lang')}")
 
     # ---- the traffic ----
     section("nothing anybody writes is written down")

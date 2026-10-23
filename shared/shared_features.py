@@ -33,6 +33,7 @@ import os
 import re
 import socket
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -407,8 +408,8 @@ def attach_flood_gate(app, admin_ids=(), group: int = -3, exempt=None) -> None:
     wrong failure.
 
     `exempt`, if given, is asked about each update first, and True lets it
-    through uncounted. AnonBot's /export uses it for the forwards it asked
-    for, which arrive a hundred at a time.
+    through uncounted: for updates a bot asked for itself, such as forwards
+    that arrive a hundred at a time.
     """
     admins = set(admin_ids)
 
@@ -1768,10 +1769,20 @@ async def delete_my_data_chosen(update, context):
     # make the answer above it untrue -- and saying "couldn't erase that"
     # after the data is already gone is the one answer this command must
     # never give.
+    #
+    # First, though: the tap that brought us here was buffered as activity,
+    # and the next flush would write a fresh row for the person straight back
+    # (a settings row, an activity row) after the erase. Note_erased drops
+    # them from the buffer and makes the flush skip them for a while; it also
+    # waits out a flush already in flight, so none lands after the erase.
+    try:
+        await asyncio.to_thread(note_erased, user_id)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not keep an erased user out of the activity flush")
     try:
         rows = await asyncio.to_thread(db.erase_user, user_id)
     except Exception:
-        logging.getLogger(__name__).exception("Erasing user %s failed", user_id)
+        logging.getLogger(__name__).exception("Erasing a user's data failed")
         await live_message.edit_in_place(
             query.message, context.bot, body(i18n.t(lang, "delete_data_failed")), parse_mode=ParseMode.HTML
         )
@@ -1780,7 +1791,7 @@ async def delete_my_data_chosen(update, context):
         rows += await asyncio.to_thread(lifecycle.forget_user, user_id)
     except Exception:
         logging.getLogger(__name__).exception(
-            "Cleared %s's data but could not clear their saved state", user_id
+            "Cleared a user's data but could not clear their saved state"
         )
     # The family table, which is not this bot's own and so is not in
     # db.erase_user. Only the part that is about them: a problem they reported
@@ -1791,7 +1802,7 @@ async def delete_my_data_chosen(update, context):
         rows += await asyncio.to_thread(family_link.forget_problem_reporter, user_id)
     except Exception:
         logging.getLogger(__name__).exception(
-            "Cleared %s's data but could not take them off their problem reports", user_id
+            "Cleared a user's data but could not take them off their problem reports"
         )
 
     # Rendered before the cache is dropped, because the chosen language is
@@ -1802,7 +1813,7 @@ async def delete_my_data_chosen(update, context):
     try:
         context.application.drop_user_data(user_id)
     except Exception:
-        logging.getLogger(__name__).debug("Nothing cached for %s to drop", user_id)
+        logging.getLogger(__name__).debug("Nothing cached to drop for the erased user")
     await live_message.edit_in_place(
         query.message, context.bot, done, parse_mode=ParseMode.HTML
     )
@@ -3041,24 +3052,65 @@ ACTIVITY_FLUSH_SECONDS = int(os.environ.get("ACTIVITY_FLUSH_SECONDS", "60"))
 
 _activity_buffer: set[int] = set()
 
+# People who have just used /deletemydata, and when (time.monotonic()). The
+# confirming tap is itself an update, buffered above before the handler ran,
+# and the flush would otherwise write the person straight back: an activity
+# row and a settings row the erase had just removed. For
+# ERASED_SKIP_SECONDS after an erase the flush leaves them out. (Ten minutes is
+# far past one flush window; somebody who comes back after that is recorded
+# again, as anybody new would be.) Bounded like the flood tables.
+ERASED_SKIP_SECONDS = 600
+_recently_erased: "OrderedDict[int, float]" = OrderedDict()
+# Held by a flush while it writes, and by note_erased while it records an erase:
+# so a flush that began before the erase has finished before the erase runs.
+_activity_lock = threading.Lock()
+
+
+def note_erased(user_id: int) -> None:
+    """Blocking; call through asyncio.to_thread, BEFORE the erase. Takes the
+    person out of the activity buffer and has the flush skip them for
+    ERASED_SKIP_SECONDS. Waits for a flush already writing, so that none can
+    land after the erase that follows."""
+    with _activity_lock:
+        _activity_buffer.discard(user_id)
+        _recently_erased[user_id] = time.monotonic()
+        _recently_erased.move_to_end(user_id)
+        _flood_trim(_recently_erased)
+
+
+def _erased_recently(user_id: int, now: float) -> bool:
+    when = _recently_erased.get(user_id)
+    if when is None:
+        return False
+    if now - when > ERASED_SKIP_SECONDS:
+        _recently_erased.pop(user_id, None)
+        return False
+    return True
+
 
 def _flush_activity_now() -> int:
     """Blocking; call through asyncio.to_thread. Takes the whole buffer in one
     swap so an update arriving mid-flush lands in the next window rather than
-    being lost."""
+    being lost. People erased within ERASED_SKIP_SECONDS are dropped from the
+    batch, not carried to the next one."""
     global _activity_buffer
-    if not _activity_buffer:
-        return 0
-    batch, _activity_buffer = _activity_buffer, set()
-    try:
-        db.record_activity_batch(batch)
-    except Exception:
-        # Put them back: a database blip should cost a delayed count, not a
-        # wrong one. Union rather than assignment, so ids that arrived while
-        # this was in flight survive too.
-        _activity_buffer |= batch
-        raise
-    return len(batch)
+    with _activity_lock:
+        if not _activity_buffer:
+            return 0
+        batch, _activity_buffer = _activity_buffer, set()
+        now = time.monotonic()
+        batch = {user_id for user_id in batch if not _erased_recently(user_id, now)}
+        if not batch:
+            return 0
+        try:
+            db.record_activity_batch(batch)
+        except Exception:
+            # Put them back: a database blip should cost a delayed count, not a
+            # wrong one. Union rather than assignment, so ids that arrived while
+            # this was in flight survive too.
+            _activity_buffer |= batch
+            raise
+        return len(batch)
 
 
 async def _flush_activity_job(context) -> None:

@@ -273,8 +273,13 @@ if BOT == "anon_bot":
     # two people already in it, then init_db again.
     with db.pooled() as _conn:
         _conn.execute("ALTER TABLE user_settings DROP COLUMN IF EXISTS knows_reactions")
-        _conn.execute("DELETE FROM user_settings WHERE user_id IN (801, 802, 803)")
-        _conn.execute("INSERT INTO user_settings (user_id, language) VALUES (801, 'en'), (802, 'ru')")
+        # user_id holds vault.pseudonym(id) since 2.1.1; a row from before the
+        # note has no user_sealed either, which claim_reactions_note never reads.
+        import vault
+        _p = vault.pseudonym
+        _conn.execute("DELETE FROM user_settings WHERE user_id IN (%s, %s, %s)", (_p(801), _p(802), _p(803)))
+        _conn.execute("INSERT INTO user_settings (user_id, language) VALUES (%s, 'en'), (%s, 'ru')",
+                      (_p(801), _p(802)))
         _conn.commit()
     db.init_db()
     assert db.claim_reactions_note(801) is True, "somebody already here is owed the note"

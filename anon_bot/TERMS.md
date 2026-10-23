@@ -29,10 +29,10 @@ operator.
 An inbox owner is responsible for the inbox they open. Inviting people to send
 things that should not be sent is the owner's doing, not the bot's.
 
-A transcript made with `/export` holds what other people wrote to you, and what
-happens to it after the bot sends it is yours to answer for. Publishing what
-somebody wrote to you anonymously can still harm them, and it is subject to the
-same law as sharing any other private correspondence where you are.
+What other people write to you is yours to keep or share, and yours to answer
+for. Publishing what somebody wrote to you anonymously can still harm them, and
+it is subject to the same law as sharing any other private correspondence where
+you are.
 
 Every inbox owner can block a sender permanently, pause new conversations, or
 issue a new link that invalidates the old one. Those three are the tools this

@@ -50,7 +50,7 @@ BOT = os.environ["HELP_BOT"]
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, os.getcwd())
 sys.path.insert(1, str(ROOT / "shared"))
-import sim, db, i18n, shared_features, family_link
+import sim, db, i18n, shared_features, family_link, vault
 import bot as subject
 
 failures, checks = [], 0
@@ -350,16 +350,10 @@ COMPUTED["sticker_bot"] = computed_sticker
 
 
 async def computed_anon(pages, person):
-    import transcript
     page = lambda name, lang="en": pages[name](lang)
 
-    with patched((transcript, "MAX_MESSAGES", 77), (db, "RELAY_RETENTION_DAYS", 33)):
-        text = page("export")
-        check("the export page: the most messages one export holds (transcript.MAX_MESSAGES)",
-              "Up to 77 messages each time." in text, text)
-        check("... and how long a conversation is remembered (db.RELAY_RETENTION_DAYS)",
-              "forgotten 33 days after it last moved" in text, text)
-        check("... in Russian and Uzbek too", all("77" in page("export", l) and "33" in page("export", l) for l in ("ru", "uz")))
+    check("/export is no help page, in any language (the command was removed in 2.1.2)",
+          "export" not in pages and not any("helppage_export" in i18n.STRINGS[l] for l in ("en", "uz", "ru")))
 
     # The example on the which page is the bot's own answer, not a copy of it.
     real = i18n.STRINGS["en"]["which_owner"]
@@ -371,14 +365,9 @@ async def computed_anon(pages, person):
         i18n.STRINGS["en"]["which_owner"] = real
     for lang in ("en", "uz", "ru"):
         check(f"... {lang}: the real answer, for conversation 4", i18n.t(lang, "which_owner", conv_number=4) in page("which", lang))
-    check("the pages use the document's own words for the two sides, in every language",
-          all(i18n.t(l, "export_doc_owner") in page("export", l) and i18n.t(l, "export_doc_anon") in page("export", l)
-              for l in ("en", "uz", "ru")))
-    check("... and the buttons the bot really has, in every language",
-          all(i18n.t(l, key).split(" \u00b7")[0] in page("export", l)
-              for l in ("en", "uz", "ru") for key in ("export_button_copy", "export_button_doc", "export_pick_all"))
-          and all(i18n.t(l, key) in page("link", l) for l in ("en", "uz", "ru")
-                  for key in ("link_button_pause", "link_button_newlink")), page("export", "uz"))
+    check("the link page names the buttons the bot really has, in every language",
+          all(i18n.t(l, key) in page("link", l) for l in ("en", "uz", "ru")
+              for key in ("link_button_pause", "link_button_newlink")), page("link", "uz"))
 
     # Somebody who was here before reactions travelled is owed a one-time note, after whatever they do next;
     # the full guide lists every reaction, so reading it -- either way -- is being told. A page is not.
@@ -388,7 +377,8 @@ async def computed_anon(pages, person):
     async def owed_note_after(action):
         """What was done is a typed command, or a tap: (callback_data, message id)."""
         with db.pooled() as conn:
-            conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s", (person.id,))
+            conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s",
+                         (vault.pseudonym(person.id),))      # AnonBot stores the pseudonym (2.1.1)
             conn.commit()
         user_data.pop(subject.KNOWS_REACTIONS_KEY, None)
         before = sum(note in text for text in person.texts())
@@ -418,7 +408,9 @@ async def main():
     with db.pooled() as conn:
         table = conn.execute("SELECT CASE WHEN to_regclass('user_settings') IS NULL "
                              "THEN 'settings' ELSE 'user_settings' END").fetchone()[0]
-        conn.execute(f"DELETE FROM {table} WHERE user_id = 7001")
+        # AnonBot stores a pseudonym where the others keep the id (2.1.1).
+        conn.execute(f"DELETE FROM {table} WHERE user_id = ANY(%s)",
+                     ([7001, vault.pseudonym(7001)],))
         conn.commit()
     tele = sim.FakeTelegram(bot_username="helptest_bot")
     # Every call the bot makes to Telegram, as it was made: the sim keeps what

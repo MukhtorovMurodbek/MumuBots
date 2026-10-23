@@ -11,18 +11,38 @@ donation-reminder cooldown for this bot's own /donate flow.
 
 Postgres was chosen (over SQLite) so this survives an ephemeral cloud
 container redeploy -- see DEPLOY.md.
+
+Who talks to whom is not stored in the clear (2.1.1). Every column below that
+used to hold a Telegram id holds `vault.pseudonym(id)` instead, so queries
+keep their shape -- equality, joins, ORDER BY, ON CONFLICT, COUNT(DISTINCT) --
+while a copy of this database cannot say which accounts are in a conversation.
+The few ids this bot has to send TO are also kept sealed beside their
+pseudonym (owner_sealed, follower_sealed, user_sealed) and opened here with
+`expected=` that pseudonym, so a sealed id moved onto another row is refused.
+Every public function still takes and returns real Telegram ids: the
+translation happens in this file and nowhere else. See shared/vault.py.
 """
 import logging
 import os
+import sys as _sys
 import time
 import uuid
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+from pathlib import Path as _Path
 
 from urllib.parse import urlsplit
 
 import psycopg
 from psycopg_pool import ConnectionPool
+
+# The modules the bots share live once, in ../shared (since 2.0.0).
+_SHARED_DIR = str(_Path(__file__).resolve().parent.parent / "shared")
+if _SHARED_DIR not in _sys.path:
+    _sys.path.insert(1, _SHARED_DIR)
+import vault  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/anonbot"
@@ -39,6 +59,14 @@ DATABASE_URL = os.environ.get(
 # Leaving DB_SCHEMA unset keeps the old behaviour -- "public" in a database
 # this bot has entirely to itself.
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "public")
+
+# The payer in star_transactions is stored as vault.pseudonym_in(uid, PAYER_DOMAIN),
+# not as pseudonym(uid): the family's star_ledger holds the same payment (real
+# id, bot, stars, time), and a row that matched it would hand over a payer's
+# pseudonym and so the conversations filed under it. Nothing reads the real id
+# back from this column -- the one reader asks "has this person paid", by
+# equality -- so there is no sealed copy of it.
+PAYER_DOMAIN = "anon.payer"
 
 # ---------------------------------------------------------------------------
 # Connection-string sanity check
@@ -297,6 +325,21 @@ def _column(conn, table: str, column: str):
     ).fetchone()
 
 
+def _open_id(table: str, row, blob, purpose: str, expected: int) -> "int | None":
+    """The real Telegram id sealed in `blob`, or None.
+
+    `expected` is the pseudonym the same row stores: a sealed id moved onto
+    another row does not match it and is refused, exactly as one that does not
+    open at all. Either way the row is skipped by the caller and the warning
+    names the table and the row, never the value."""
+    try:
+        return vault.open_id(blob, purpose, expected=expected)
+    except (vault.VaultError, TypeError, ValueError):
+        _log.warning("Skipping a row of %s: its sealed id did not open or does not belong "
+                     "to the row (row %s)", table, row)
+        return None
+
+
 def init_db(dsn: str = DATABASE_URL) -> None:
     for _problem in check_database_url(dsn):
         logging.getLogger(__name__).warning("%s", _problem)
@@ -307,12 +350,16 @@ def init_db(dsn: str = DATABASE_URL) -> None:
     # is bound to DATABASE_URL. It runs once, so there is nothing to save.
     ensure_schema(dsn)
     with closing(connect(dsn)) as conn:
+        # user_id is vault.pseudonym(id) and the username is sealed
+        # (purpose stars.username); a database made before 2.1.1 still has a
+        # plain `username` column until convert_personal_data_v1 drops it, and
+        # nothing here ever drops or rewrites it (see below).
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS star_transactions (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL,
-                username TEXT,
+                username_sealed BYTEA,
                 amount_stars BIGINT NOT NULL,
                 item TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -334,6 +381,11 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             conn.execute("ALTER TABLE star_transactions ALTER COLUMN amount_stars TYPE BIGINT")
         if _column(conn, "star_transactions", "currency") is None:
             conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR'")
+        # 2.1.1: the sealed username (purpose stars.username). Added, never
+        # backfilled here: a table made before 2.1.1 still has its plain
+        # `username` until convert_personal_data_v1 seals and drops it.
+        if _column(conn, "star_transactions", "username_sealed") is None:
+            conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS username_sealed BYTEA")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS donation_prompts (
@@ -360,10 +412,27 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             """
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id BIGINT PRIMARY KEY,
-                language TEXT
+                language TEXT,
+                user_sealed BYTEA,
+                from_activity BOOLEAN NOT NULL DEFAULT FALSE
             )
             """
         )
+        # 2.1.1: user_id is a pseudonym, and the real id is sealed beside it
+        # (purpose anon.user) because list_all_users / active_user_ids_since
+        # have to hand real ids back -- the family's broadcast sends to them.
+        if _column(conn, "user_settings", "user_sealed") is None:
+            conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS user_sealed BYTEA")
+        # 2.1.2: whether the row exists only because the person was active
+        # (record_activity_batch, or the conversion's backfill), as against
+        # one they made by choosing a language. prune_old_data removes the
+        # first kind once their activity has aged out, so the broadcast
+        # reaches the same people as in 2.1.0 (settings UNION activity, the
+        # activity pruned at ACTIVITY_RETENTION_DAYS). Every row that exists
+        # before this column does gets FALSE, which is never pruned.
+        if _column(conn, "user_settings", "from_activity") is None:
+            conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS "
+                         "from_activity BOOLEAN NOT NULL DEFAULT FALSE")
         # Whether this person has been told that reactions now reach the other
         # side of a conversation (2.1.0). The owner asked for "a check box in
         # the database so each current user sees this update note only once".
@@ -387,10 +456,16 @@ def init_db(dsn: str = DATABASE_URL) -> None:
                 owner_user_id BIGINT PRIMARY KEY,
                 token TEXT NOT NULL UNIQUE,
                 is_paused INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                owner_sealed BYTEA
             )
             """
         )
+        # 2.1.1: owner_user_id is a pseudonym; the real id is sealed
+        # (purpose anon.link.owner) because get_link_view must say whom to
+        # deliver to.
+        if _column(conn, "anon_links", "owner_sealed") is None:
+            conn.execute("ALTER TABLE anon_links ADD COLUMN IF NOT EXISTS owner_sealed BYTEA")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS anon_conversations (
@@ -401,10 +476,20 @@ def init_db(dsn: str = DATABASE_URL) -> None:
                 started_at TEXT NOT NULL,
                 last_activity_at TEXT NOT NULL,
                 last_owner_msg_id BIGINT,
-                last_follower_msg_id BIGINT
+                last_follower_msg_id BIGINT,
+                owner_sealed BYTEA,
+                follower_sealed BYTEA
             )
             """
         )
+        # 2.1.1: both identity columns are pseudonyms and the real ids are
+        # sealed beside them (purposes anon.conversation.owner / .follower):
+        # bot.py sends to them. Added only; never backfilled here -- that is
+        # convert_personal_data_v1, which has the plain ids to seal.
+        if _column(conn, "anon_conversations", "owner_sealed") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS owner_sealed BYTEA")
+        if _column(conn, "anon_conversations", "follower_sealed") is None:
+            conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_sealed BYTEA")
         # Set when the guest sends their FIRST message in a conversation.
         # That one message is the only one either side may send without
         # saying what it answers -- it is the one that opens the thread, and
@@ -497,23 +582,6 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # this column falls back to the old behaviour rather than guessing.
         if _column(conn, "anon_relay", "peer_message_id") is None:
             conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS peer_message_id BIGINT")
-        # When each bubble was written, and who wrote it: TRUE for a copy the
-        # bot delivered, FALSE for the person's own message, NULL for the
-        # bot's own words -- a header, a bookmark, a link's opening line.
-        #
-        # /export needs both. It builds a transcript from messages forwarded
-        # back to the bot, and a forward carries its original date and who
-        # wrote it, but not its message id -- so the time and the side are
-        # the only way to say which conversation a forwarded message was in.
-        # Times, not words: this is still nothing anybody wrote.
-        #
-        # NULL for every row from before these columns. They cannot be
-        # backfilled, for the reason peer_message_id cannot, and a forward of
-        # such a message is listed in the transcript as unmatched.
-        if _column(conn, "anon_relay", "sent_at") is None:
-            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ")
-        if _column(conn, "anon_relay", "from_bot") is None:
-            conn.execute("ALTER TABLE anon_relay ADD COLUMN IF NOT EXISTS from_bot BOOLEAN")
         # "The first / newest message of THIS conversation in THIS chat" --
         # asked by get_routing_context on every un-replied message, and by
         # the bookmark /conversations and /which send. The primary key is
@@ -548,13 +616,14 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # Which one-time announcements this person has been shown (2.2.0: the
         # 220 gift's ad, see bot.py's promo_ad_note). A row is written before
         # the announcement is sent, so a person gets one chance at it and never
-        # a second. /deletemydata removes the rows.
+        # a second. /deletemydata removes the rows. user_id holds the person's
+        # pseudonym, like every identity column here, and there is no time: a
+        # database made by 2.2.0 had a seen_at, which the conversion drops.
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS promo_seen (
                 user_id BIGINT NOT NULL,
                 promo TEXT NOT NULL,
-                seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 PRIMARY KEY (user_id, promo)
             )
             """
@@ -568,20 +637,48 @@ def record_activity_batch(user_ids) -> None:
     """One row per user per flush window -- see shared_features.py's
     track_activity, which buffers them. Sent as a single statement whatever
     the batch size: both readers of this table are COUNT(DISTINCT user_id)
-    over a time window, so nothing depends on a row per update."""
-    ids = list(user_ids)
-    if not ids:
+    over a time window, so nothing depends on a row per update.
+
+    The column holds each person's pseudonym. Nothing in this table can be
+    turned back into an id: active_user_ids_since finds the real ones through
+    user_settings.
+
+    So that they can be found, every person recorded here also gets a
+    user_settings row carrying user_sealed (ON CONFLICT DO NOTHING; a row
+    that somehow lacks the seal is filled in). Someone who used the bot
+    without ever picking a setting is thereby still reachable by a
+    broadcast, exactly as the activity table made them in 2.1.0. The row
+    has no language, which get_user_language reads the same as no row, and is
+    marked from_activity: prune_old_data takes it away again once the
+    person's activity has aged out, as 2.1.0's reach ended with it."""
+    people = sorted({int(u) for u in user_ids})
+    if not people:
         return
+    ids = [vault.pseudonym(u) for u in people]
+    sealed = [vault.seal_id(u, "anon.user") for u in people]
     with pooled() as conn:
         conn.execute(
             "INSERT INTO activity_events (user_id, occurred_at) "
             "SELECT unnest(%s::bigint[]), now()",
             (ids,),
         )
+        conn.execute(
+            "INSERT INTO user_settings (user_id, user_sealed, from_activity) "
+            "SELECT m.pseudo, m.sealed, TRUE FROM unnest(%s::bigint[], %s::bytea[]) AS m(pseudo, sealed) "
+            "ON CONFLICT (user_id) DO NOTHING",
+            (ids, sealed),
+        )
+        conn.execute(
+            "UPDATE user_settings s SET user_sealed = m.sealed "
+            "FROM unnest(%s::bigint[], %s::bytea[]) AS m(pseudo, sealed) "
+            "WHERE s.user_id = m.pseudo AND s.user_sealed IS NULL",
+            (ids, sealed),
+        )
         conn.commit()
 
 
 def count_active_users_since(since) -> int:
+    # Distinct pseudonyms are distinct people, so the count is the same.
     with pooled_read() as conn:
         cur = conn.execute(
             "SELECT COUNT(DISTINCT user_id) FROM activity_events WHERE occurred_at >= %s",
@@ -592,51 +689,85 @@ def count_active_users_since(since) -> int:
 
 
 def active_user_ids_since(since) -> list[int]:
-    """Everyone with activity since `since`. Used by the family bus for an
-    aimed broadcast -- see BROADCAST_ACTIVE_DAYS in family_link.py."""
+    """Everyone with activity since `since`, as real Telegram ids. Used by the
+    family bus for an aimed broadcast -- see BROADCAST_ACTIVE_DAYS in
+    family_link.py, which sends to every id returned.
+
+    activity_events only knows pseudonyms, so the ids come out of
+    user_settings.user_sealed. record_activity_batch gives everyone it records
+    a settings row, and the conversion gave one to everyone already in the
+    table, so nobody is left out; a row without a seal (not expected) cannot
+    be turned back into an id, is counted in a log line and skipped."""
     with pooled_read() as conn:
         cur = conn.execute(
-            "SELECT DISTINCT user_id FROM activity_events WHERE occurred_at >= %s",
+            "SELECT DISTINCT a.user_id, s.user_sealed FROM activity_events a "
+            "LEFT JOIN user_settings s ON s.user_id = a.user_id "
+            "WHERE a.occurred_at >= %s",
             (since,),
         )
-        return [row[0] for row in cur.fetchall()]
+        rows = cur.fetchall()
+    out, unresolved = [], 0
+    for pseudonym, sealed in rows:
+        if sealed is None:
+            unresolved += 1
+            continue
+        real = _open_id("user_settings", pseudonym, sealed, "anon.user", pseudonym)
+        if real is not None:
+            out.append(real)
+    if unresolved:
+        _log.warning("%s recently active people have no sealed id, so an aimed broadcast "
+                     "cannot reach them", unresolved)
+    return out
 
 def list_all_users() -> list[int]:
-    """Everyone this bot could send an unprompted message to.
+    """Everyone this bot could send an unprompted message to, as real ids.
 
-    The union of two tables because neither is the whole answer on its own:
-    user_settings has a row per person who has ever picked a setting and is never
-    pruned, while activity_events reaches people who only ever used the bot
-    without changing anything -- but is pruned at ACTIVITY_RETENTION_DAYS.
-    Together they are "everyone we still know about", which is the honest
-    scope of a broadcast.
-    """
+    In 2.1.0 this was user_settings UNION activity_events. A pseudonym in
+    activity_events cannot be turned back into an id, so the settings table
+    must hold everyone: record_activity_batch adds a row for every person it
+    records, and the conversion added one for every person who had activity
+    but no row. Rows added that way (from_activity) go again, in
+    prune_old_data, once the person's activity is past ACTIVITY_RETENTION_DAYS,
+    which is when 2.1.0's table union stopped reaching them as well. So the
+    settings table alone returns the same set of people.
+    The family's broadcast sends to every id returned, so each comes from
+    user_sealed, opened against its row's pseudonym; a row that does not open
+    is skipped with a warning."""
     with pooled_read() as conn:
-        cur = conn.execute(
-            "SELECT user_id FROM user_settings "
-            "UNION "
-            "SELECT DISTINCT user_id FROM activity_events"
-        )
-        return [int(r[0]) for r in cur.fetchall()]
+        cur = conn.execute("SELECT user_id, user_sealed FROM user_settings")
+        rows = cur.fetchall()
+    out = []
+    for pseudonym, sealed in rows:
+        real = _open_id("user_settings", pseudonym, sealed, "anon.user", pseudonym)
+        if real is not None:
+            out.append(real)
+    return out
 
 
 def get_user_language(user_id: int) -> str | None:
     """None means the user hasn't picked a language yet (no row, or a row
     with no language set)."""
     with pooled_read() as conn:
-        cur = conn.execute("SELECT language FROM user_settings WHERE user_id = %s", (user_id,))
+        cur = conn.execute(
+            "SELECT language FROM user_settings WHERE user_id = %s", (vault.pseudonym(user_id),)
+        )
         row = cur.fetchone()
         return row[0] if row else None
 
 
 def set_user_language(user_id: int, language: str) -> None:
+    # user_sealed is written on every upsert, so a row is never left without
+    # the means to turn it back into an id (list_all_users needs it). An
+    # explicit choice also ends the row's life as an activity-only one: it is
+    # never pruned (see from_activity).
     with pooled() as conn:
         conn.execute(
             """
-            INSERT INTO user_settings (user_id, language) VALUES (%s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET language = excluded.language
+            INSERT INTO user_settings (user_id, language, user_sealed, from_activity) VALUES (%s, %s, %s, FALSE)
+            ON CONFLICT (user_id) DO UPDATE SET
+                language = excluded.language, user_sealed = excluded.user_sealed, from_activity = FALSE
             """,
-            (user_id, language),
+            (vault.pseudonym(user_id), language, vault.seal_id(user_id, "anon.user")),
         )
         conn.commit()
 
@@ -650,7 +781,7 @@ def claim_reactions_note(user_id: int) -> bool:
         row = conn.execute(
             "UPDATE user_settings SET knows_reactions = TRUE "
             "WHERE user_id = %s AND knows_reactions IS NOT TRUE RETURNING user_id",
-            (user_id,),
+            (vault.pseudonym(user_id),),
         ).fetchone()
         conn.commit()
     return row is not None
@@ -664,7 +795,7 @@ def claim_promo_seen(user_id: int, promo: str) -> bool:
         row = conn.execute(
             "INSERT INTO promo_seen (user_id, promo) VALUES (%s, %s) "
             "ON CONFLICT DO NOTHING RETURNING user_id",
-            (user_id, promo),
+            (vault.pseudonym(user_id), promo),
         ).fetchone()
         conn.commit()
     return row is not None
@@ -678,24 +809,31 @@ def get_reaction_route(chat_id: int, message_id: int) -> "dict | None":
 
     None for a message that is in no conversation (the bot's own notices, a
     bookmark) and for a row from before twins were recorded
-    (peer_message_id NULL), neither of which has anywhere to send a reaction."""
+    (peer_message_id NULL), neither of which has anywhere to send a reaction.
+    Also None when the conversation's sealed ids do not open or do not belong
+    to the row -- there is then nobody safe to send it to."""
     with pooled_read() as conn:
         row = conn.execute(
             """
             SELECT r.peer_message_id, c.id, c.owner_user_id, c.follower_user_id,
                    EXISTS (SELECT 1 FROM anon_blocks b
                            WHERE b.owner_user_id = c.owner_user_id
-                             AND b.follower_user_id = c.follower_user_id)
+                             AND b.follower_user_id = c.follower_user_id),
+                   c.owner_sealed, c.follower_sealed
             FROM anon_relay r
             JOIN anon_conversations c ON c.id = r.conversation_id
             WHERE r.chat_id = %s AND r.message_id = %s
             """,
-            (chat_id, message_id),
+            (vault.pseudonym(chat_id), message_id),
         ).fetchone()
     if row is None or row[0] is None:
         return None
+    owner = _open_id("anon_conversations", row[1], row[5], "anon.conversation.owner", row[2])
+    follower = _open_id("anon_conversations", row[1], row[6], "anon.conversation.follower", row[3])
+    if owner is None or follower is None:
+        return None
     return {"peer_message_id": int(row[0]), "conversation_id": int(row[1]),
-            "owner_user_id": int(row[2]), "follower_user_id": int(row[3]),
+            "owner_user_id": owner, "follower_user_id": follower,
             "blocked": bool(row[4])}
 
 
@@ -712,16 +850,24 @@ def record_star_invoice(
 ) -> None:
     """amount_stars is in the currency's smallest unit for fiat currencies
     (see shared_features.py's FIAT_CURRENCIES), or a plain Stars count for
-    the default currency="XTR"."""
+    the default currency="XTR".
+
+    The payer is stored under their own stand-in for this table
+    (vault.pseudonym_in(uid, PAYER_DOMAIN)), never under pseudonym(): the
+    family's star_ledger keeps the real id beside the same amount and time, so
+    a plain pseudonym here could be lined up with it and name the payer's
+    pairings. The username is sealed (stars.username): a copy of this table
+    says neither who paid nor under what name."""
     now = datetime.now(timezone.utc).isoformat()
     with pooled() as conn:
         conn.execute(
             """
             INSERT INTO star_transactions
-                (user_id, username, amount_stars, item, status, payload, currency, created_at, updated_at)
+                (user_id, username_sealed, amount_stars, item, status, payload, currency, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (user_id, username, amount_stars, item, status, payload, currency, now, now),
+            (vault.pseudonym_in(user_id, PAYER_DOMAIN), vault.seal_text(username, "stars.username"),
+             amount_stars, item, status, payload, currency, now, now),
         )
         conn.commit()
 
@@ -765,10 +911,10 @@ def bump_donation_action(user_id: int) -> tuple[int, str | None, int, bool]:
             )
             SELECT b.action_count, b.last_shown_at, b.times_shown,
                    EXISTS (SELECT 1 FROM star_transactions t
-                            WHERE t.user_id = %(uid)s AND t.status = 'paid')
+                            WHERE t.user_id = %(payer)s AND t.status = 'paid')
             FROM bumped b
             """,
-            {"uid": user_id},
+            {"uid": vault.pseudonym(user_id), "payer": vault.pseudonym_in(user_id, PAYER_DOMAIN)},
         )
         row = cur.fetchone()
         conn.commit()
@@ -790,7 +936,7 @@ def reset_donation_prompt(user_id: int) -> None:
                 last_shown_at = excluded.last_shown_at,
                 times_shown = donation_prompts.times_shown + 1
             """,
-            (user_id, now),
+            (vault.pseudonym(user_id), now),
         )
         conn.commit()
 
@@ -799,7 +945,8 @@ def get_pinned_donation_message(user_id: int) -> int | None:
     """The id of the nudge this bot pinned in that person's chat, if any."""
     with pooled_read() as conn:
         cur = conn.execute(
-            "SELECT pinned_message_id FROM donation_prompts WHERE user_id = %s", (user_id,)
+            "SELECT pinned_message_id FROM donation_prompts WHERE user_id = %s",
+            (vault.pseudonym(user_id),),
         )
         row = cur.fetchone()
         return row[0] if row else None
@@ -813,7 +960,7 @@ def set_pinned_donation_message(user_id: int, message_id: int | None) -> None:
             VALUES (%s, 0, %s)
             ON CONFLICT (user_id) DO UPDATE SET pinned_message_id = excluded.pinned_message_id
             """,
-            (user_id, message_id),
+            (vault.pseudonym(user_id), message_id),
         )
         conn.commit()
 
@@ -828,18 +975,20 @@ def get_or_create_anon_link(owner_user_id: int) -> tuple[str, bool]:
     nothing, so the read comes first and the insert only runs for a genuinely
     new owner. /link used to call this and then get_anon_link_state, which
     was two round trips for two columns of the same row."""
+    owner = vault.pseudonym(owner_user_id)
     with pooled() as conn:
         cur = conn.execute(
-            "SELECT token, is_paused FROM anon_links WHERE owner_user_id = %s", (owner_user_id,)
+            "SELECT token, is_paused FROM anon_links WHERE owner_user_id = %s", (owner,)
         )
         row = cur.fetchone()
         if row:
             return row[0], bool(row[1])
         token = uuid.uuid4().hex
         conn.execute(
-            "INSERT INTO anon_links (owner_user_id, token, is_paused, created_at) "
-            "VALUES (%s, %s, 0, %s) ON CONFLICT (owner_user_id) DO NOTHING",
-            (owner_user_id, token, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO anon_links (owner_user_id, owner_sealed, token, is_paused, created_at) "
+            "VALUES (%s, %s, %s, 0, %s) ON CONFLICT (owner_user_id) DO NOTHING",
+            (owner, vault.seal_id(owner_user_id, "anon.link.owner"), token,
+             datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
         return token, False
@@ -857,11 +1006,14 @@ def regenerate_anon_link(owner_user_id: int) -> tuple[str, bool]:
     with pooled() as conn:
         cur = conn.execute(
             """
-            INSERT INTO anon_links (owner_user_id, token, is_paused, created_at) VALUES (%s, %s, 0, %s)
-            ON CONFLICT (owner_user_id) DO UPDATE SET token = excluded.token
+            INSERT INTO anon_links (owner_user_id, owner_sealed, token, is_paused, created_at)
+            VALUES (%s, %s, %s, 0, %s)
+            ON CONFLICT (owner_user_id) DO UPDATE SET
+                token = excluded.token, owner_sealed = excluded.owner_sealed
             RETURNING token, is_paused
             """,
-            (owner_user_id, token, datetime.now(timezone.utc).isoformat()),
+            (vault.pseudonym(owner_user_id), vault.seal_id(owner_user_id, "anon.link.owner"),
+             token, datetime.now(timezone.utc).isoformat()),
         )
         row = cur.fetchone()
         conn.commit()
@@ -872,22 +1024,30 @@ def get_link_view(token: str, follower_user_id: int) -> tuple[int | None, bool, 
     """Everything the "someone tapped a link" path needs to decide what to
     do: (owner id or None, is the inbox paused, has this follower been
     blocked). One query where there used to be three, on a path that runs
-    every time anyone opens anyone's inbox link."""
+    every time anyone opens anyone's inbox link.
+
+    The owner comes out of owner_sealed, opened against the row's own
+    pseudonym. A link whose sealed owner does not open, or belongs to another
+    row, is treated as no link at all: nobody is sent to an id the row does
+    not vouch for."""
     with pooled_read() as conn:
         cur = conn.execute(
             """
-            SELECT l.owner_user_id, l.is_paused,
+            SELECT l.owner_user_id, l.owner_sealed, l.is_paused,
                    EXISTS (SELECT 1 FROM anon_blocks b
                            WHERE b.owner_user_id = l.owner_user_id
                              AND b.follower_user_id = %s)
             FROM anon_links l WHERE l.token = %s
             """,
-            (follower_user_id, token),
+            (vault.pseudonym(follower_user_id), token),
         )
         row = cur.fetchone()
         if not row:
             return None, False, False
-        return row[0], bool(row[1]), bool(row[2])
+        owner = _open_id("anon_links", row[0], row[1], "anon.link.owner", expected=row[0])
+        if owner is None:
+            return None, False, False
+        return owner, bool(row[2]), bool(row[3])
 
 
 def get_delivery_context(owner_user_id: int, follower_user_id: int) -> tuple[bool, bool, str | None]:
@@ -903,7 +1063,8 @@ def get_delivery_context(owner_user_id: int, follower_user_id: int) -> tuple[boo
                    EXISTS (SELECT 1 FROM anon_links WHERE owner_user_id = %s),
                    (SELECT language FROM user_settings WHERE user_id = %s)
             """,
-            (owner_user_id, follower_user_id, owner_user_id, owner_user_id),
+            (vault.pseudonym(owner_user_id), vault.pseudonym(follower_user_id),
+             vault.pseudonym(owner_user_id), vault.pseudonym(owner_user_id)),
         )
         blocked, inbox_exists, language = cur.fetchone()
         return bool(blocked), bool(inbox_exists), language
@@ -913,7 +1074,8 @@ def get_delivery_context(owner_user_id: int, follower_user_id: int) -> tuple[boo
 def set_anon_link_paused(owner_user_id: int, paused: bool) -> None:
     with pooled() as conn:
         conn.execute(
-            "UPDATE anon_links SET is_paused = %s WHERE owner_user_id = %s", (int(paused), owner_user_id)
+            "UPDATE anon_links SET is_paused = %s WHERE owner_user_id = %s",
+            (int(paused), vault.pseudonym(owner_user_id)),
         )
         conn.commit()
 
@@ -921,7 +1083,8 @@ def set_anon_link_paused(owner_user_id: int, paused: bool) -> None:
 def get_anon_link_state(owner_user_id: int) -> dict | None:
     with pooled_read() as conn:
         cur = conn.execute(
-            "SELECT token, is_paused, created_at FROM anon_links WHERE owner_user_id = %s", (owner_user_id,)
+            "SELECT token, is_paused, created_at FROM anon_links WHERE owner_user_id = %s",
+            (vault.pseudonym(owner_user_id),),
         )
         row = cur.fetchone()
         if not row:
@@ -933,7 +1096,13 @@ def start_new_anon_conversation(owner_user_id: int, follower_user_id: int) -> di
     """Always creates a brand-new conversation row -- this is what makes
     tapping the link again 'the start of a new conversation' -- and points
     the follower's active-routing state at it, so their very next un-replied
-    message lands here instead of wherever they left off before."""
+    message lands here instead of wherever they left off before.
+
+    Both people are stored as pseudonyms, with their real ids sealed beside
+    them on the conversation row -- the only place the bot can read them
+    back from (anon_follower_state keeps pseudonyms alone)."""
+    owner = vault.pseudonym(owner_user_id)
+    follower = vault.pseudonym(follower_user_id)
     with pooled() as conn:
         # Numbered per OWNER, not per (owner, follower) pair. The number is
         # the only thing either side is ever told about a thread, and per-pair
@@ -948,19 +1117,23 @@ def start_new_anon_conversation(owner_user_id: int, follower_user_id: int) -> di
         cur = conn.execute(
             "SELECT COALESCE(MAX(conv_number), 0) FROM anon_conversations "
             "WHERE owner_user_id = %s",
-            (owner_user_id,),
+            (owner,),
         )
         conv_number = cur.fetchone()[0] + 1
         now = datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
             """
             INSERT INTO anon_conversations
-                (owner_user_id, follower_user_id, conv_number, started_at, last_activity_at,
+                (owner_user_id, follower_user_id, owner_sealed, follower_sealed,
+                 conv_number, started_at, last_activity_at,
                  last_owner_msg_id, last_follower_msg_id)
-            VALUES (%s, %s, %s, %s, %s, NULL, NULL)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, NULL)
             RETURNING id
             """,
-            (owner_user_id, follower_user_id, conv_number, now, now),
+            (owner, follower,
+             vault.seal_id(owner_user_id, "anon.conversation.owner"),
+             vault.seal_id(follower_user_id, "anon.conversation.follower"),
+             conv_number, now, now),
         )
         conversation_id = cur.fetchone()[0]
         conn.execute(
@@ -970,7 +1143,7 @@ def start_new_anon_conversation(owner_user_id: int, follower_user_id: int) -> di
             ON CONFLICT (follower_user_id) DO UPDATE SET
                 owner_user_id = excluded.owner_user_id, conversation_id = excluded.conversation_id
             """,
-            (follower_user_id, owner_user_id, conversation_id),
+            (follower, owner, conversation_id),
         )
         conn.commit()
         return {
@@ -987,19 +1160,25 @@ def get_active_conversation_for_follower(follower_user_id: int) -> dict | None:
     with pooled_read() as conn:
         cur = conn.execute(
             "SELECT owner_user_id, conversation_id FROM anon_follower_state WHERE follower_user_id = %s",
-            (follower_user_id,),
+            (vault.pseudonym(follower_user_id),),
         )
         row = cur.fetchone()
         if not row:
             return None
-        owner_user_id, conversation_id = row
+        owner_pseudonym, conversation_id = row
         cur = conn.execute(
-            "SELECT conv_number, last_owner_msg_id, last_follower_msg_id, follower_first_msg_at "
-            "FROM anon_conversations WHERE id = %s",
-            (conversation_id,),
+            "SELECT conv_number, last_owner_msg_id, last_follower_msg_id, follower_first_msg_at, "
+            "owner_sealed FROM anon_conversations WHERE id = %s AND owner_user_id = %s",
+            (conversation_id, owner_pseudonym),
         )
         conv_row = cur.fetchone()
         if not conv_row:
+            return None
+        # The state row keeps only a pseudonym; the real owner is the one the
+        # conversation sealed, and it must be the owner this state row names.
+        owner_user_id = _open_id("anon_conversations", conversation_id, conv_row[4],
+                                 "anon.conversation.owner", expected=owner_pseudonym)
+        if owner_user_id is None:
             return None
         return {
             "id": conversation_id, "owner_user_id": owner_user_id, "follower_user_id": follower_user_id,
@@ -1008,12 +1187,17 @@ def get_active_conversation_for_follower(follower_user_id: int) -> dict | None:
 
 
 def get_conversation(conversation_id: int) -> dict | None:
+    """The conversation, with the REAL owner and follower ids -- bot.py sends
+    to them and compares them with the sender. Both come out of their sealed
+    columns, each opened against its own pseudonym on this row; a row whose
+    seals do not open (or were moved here from another row) is None, as if
+    the conversation did not exist."""
     with pooled_read() as conn:
         cur = conn.execute(
             """
             SELECT owner_user_id, follower_user_id, conv_number, last_owner_msg_id,
                    last_follower_msg_id, follower_first_msg_at, started_at,
-                   last_activity_at, archived_at
+                   last_activity_at, archived_at, owner_sealed, follower_sealed
             FROM anon_conversations WHERE id = %s
             """,
             (conversation_id,),
@@ -1021,8 +1205,14 @@ def get_conversation(conversation_id: int) -> dict | None:
         row = cur.fetchone()
         if not row:
             return None
+        owner = _open_id("anon_conversations", conversation_id, row[9],
+                         "anon.conversation.owner", expected=row[0])
+        follower = _open_id("anon_conversations", conversation_id, row[10],
+                            "anon.conversation.follower", expected=row[1])
+        if owner is None or follower is None:
+            return None
         return {
-            "id": conversation_id, "owner_user_id": row[0], "follower_user_id": row[1],
+            "id": conversation_id, "owner_user_id": owner, "follower_user_id": follower,
             "conv_number": row[2], "last_owner_msg_id": row[3], "last_follower_msg_id": row[4],
             "follower_first_msg_at": row[5], "started_at": row[6],
             "last_activity_at": row[7], "archived_at": row[8],
@@ -1049,31 +1239,13 @@ def record_anon_relays(chat_id: int, message_ids, conversation_id: int) -> None:
         return
     with pooled() as conn:
         conn.execute(
-            # The bot's own words, so from_bot stays NULL: /export leaves a
-            # forwarded header or bookmark out of a transcript rather than
-            # attributing it to anybody in the conversation.
-            "INSERT INTO anon_relay (chat_id, message_id, conversation_id, sent_at) "
-            "SELECT %s, unnest(%s::bigint[]), %s, now() "
+            "INSERT INTO anon_relay (chat_id, message_id, conversation_id) "
+            "SELECT %s, unnest(%s::bigint[]), %s "
             "ON CONFLICT (chat_id, message_id) DO UPDATE SET "
-            "conversation_id = excluded.conversation_id, sent_at = excluded.sent_at, "
-            "from_bot = NULL",
-            (chat_id, ids, conversation_id),
+            "conversation_id = excluded.conversation_id",
+            (vault.pseudonym(chat_id), ids, conversation_id),
         )
         conn.commit()
-
-
-def relay_rows_between(chat_id: int, since, until) -> list[dict]:
-    """One chat's relay rows written between two times: which conversation,
-    when, and whether the bot wrote the bubble. What /export places a
-    forwarded message by -- rows only, since there is no content here to
-    return."""
-    with pooled_read() as conn:
-        rows = conn.execute(
-            "SELECT conversation_id, sent_at, from_bot FROM anon_relay "
-            "WHERE chat_id = %s AND sent_at BETWEEN %s AND %s",
-            (chat_id, since, until),
-        ).fetchall()
-    return [{"conversation_id": row[0], "sent_at": row[1], "from_bot": row[2]} for row in rows]
 
 
 def forget_anon_relay(chat_id: int, message_id: int) -> None:
@@ -1082,7 +1254,7 @@ def forget_anon_relay(chat_id: int, message_id: int) -> None:
     with pooled() as conn:
         conn.execute(
             "DELETE FROM anon_relay WHERE chat_id = %s AND message_id = %s",
-            (chat_id, message_id),
+            (vault.pseudonym(chat_id), message_id),
         )
         conn.commit()
 
@@ -1092,13 +1264,8 @@ def record_relay_and_touch(
     owner_chat_id: int, owner_message_ids,
     follower_chat_id: int, follower_message_ids,
     last_owner_msg_id: int, last_follower_msg_id: int,
-    owner_sent_at=None, follower_sent_at=None, delivered_to: "str | None" = None,
 ) -> None:
     """Everything one relayed message leaves behind, in one statement.
-
-    `delivered_to` is "owner" or "follower": the side whose bubbles the bot
-    wrote, as copies of the other side's message. With the two times, it is
-    what /export places a forwarded message by (see transcript.place).
 
     Both chats get rows, and they get them together. Which conversation a
     reply belongs to is read out of anon_relay, so a message with no row is
@@ -1144,21 +1311,16 @@ def record_relay_and_touch(
         conn.execute(
             """
             WITH written AS (
-                INSERT INTO anon_relay (chat_id, message_id, conversation_id, peer_message_id,
-                                        sent_at, from_bot)
-                SELECT chat_id, message_id, %(conv)s, peer, sent_at, from_bot FROM (
+                INSERT INTO anon_relay (chat_id, message_id, conversation_id, peer_message_id)
+                SELECT chat_id, message_id, %(conv)s, peer FROM (
                     SELECT %(ochat)s::bigint AS chat_id, unnest(%(oids)s::bigint[]) AS message_id,
-                           %(fmsg)s::bigint AS peer, %(osent)s::timestamptz AS sent_at,
-                           %(obot)s::boolean AS from_bot
+                           %(fmsg)s::bigint AS peer
                     UNION ALL
-                    SELECT %(fchat)s::bigint, unnest(%(fids)s::bigint[]), %(omsg)s::bigint,
-                           %(fsent)s::timestamptz, %(fbot)s::boolean
+                    SELECT %(fchat)s::bigint, unnest(%(fids)s::bigint[]), %(omsg)s::bigint
                 ) s
                 ON CONFLICT (chat_id, message_id) DO UPDATE
                    SET conversation_id = excluded.conversation_id,
-                       peer_message_id = excluded.peer_message_id,
-                       sent_at = excluded.sent_at,
-                       from_bot = excluded.from_bot
+                       peer_message_id = excluded.peer_message_id
             )
             UPDATE anon_conversations
                SET last_owner_msg_id = %(omsg)s, last_follower_msg_id = %(fmsg)s,
@@ -1167,12 +1329,9 @@ def record_relay_and_touch(
             """,
             {
                 "conv": conversation_id,
-                "ochat": owner_chat_id, "oids": list(owner_message_ids),
-                "fchat": follower_chat_id, "fids": list(follower_message_ids),
+                "ochat": vault.pseudonym(owner_chat_id), "oids": list(owner_message_ids),
+                "fchat": vault.pseudonym(follower_chat_id), "fids": list(follower_message_ids),
                 "omsg": last_owner_msg_id, "fmsg": last_follower_msg_id,
-                "osent": owner_sent_at, "fsent": follower_sent_at,
-                "obot": {"owner": True, "follower": False}.get(delivered_to),
-                "fbot": {"owner": False, "follower": True}.get(delivered_to),
                 "now": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -1205,7 +1364,7 @@ def count_owner_conversations(owner_user_id: int) -> int:
         cur = conn.execute(
             "SELECT count(*) FROM anon_conversations WHERE owner_user_id = %s "
             "AND (follower_first_msg_at IS NOT NULL OR last_owner_msg_id IS NOT NULL)",
-            (owner_user_id,),
+            (vault.pseudonym(owner_user_id),),
         )
         return cur.fetchone()[0]
 
@@ -1263,22 +1422,29 @@ def get_routing_context(user_id: int, chat_id: int) -> dict:
               -- rule; sending it as a reply to this id makes it visible.
               (SELECT r.message_id FROM anon_relay r
                 WHERE r.chat_id = %(chat)s AND r.conversation_id = s.conversation_id
-                ORDER BY r.message_id DESC LIMIT 1)
+                ORDER BY r.message_id DESC LIMIT 1),
+              c.owner_sealed
             FROM (SELECT 1) AS one
             LEFT JOIN state s ON TRUE
-            LEFT JOIN anon_conversations c ON c.id = s.conversation_id
+            LEFT JOIN anon_conversations c
+                   ON c.id = s.conversation_id AND c.owner_user_id = s.owner_user_id
             """,
-            {"uid": user_id, "chat": chat_id},
+            {"uid": vault.pseudonym(user_id), "chat": vault.pseudonym(chat_id)},
         )
         row = cur.fetchone()
-        owner_id, conversation_id = row[0], row[1]
+        owner_pseudonym, conversation_id = row[0], row[1]
         active = None
         if conversation_id is not None and row[2] is not None:
-            active = {
-                "id": conversation_id, "owner_user_id": owner_id, "follower_user_id": user_id,
-                "conv_number": row[2], "last_owner_msg_id": row[3],
-                "last_follower_msg_id": row[4], "follower_first_msg_at": row[5],
-            }
+            # The state row holds the owner's pseudonym only; the real id is
+            # the one the conversation sealed, opened against that pseudonym.
+            owner_id = _open_id("anon_conversations", conversation_id, row[9],
+                                "anon.conversation.owner", expected=owner_pseudonym)
+            if owner_id is not None:
+                active = {
+                    "id": conversation_id, "owner_user_id": owner_id, "follower_user_id": user_id,
+                    "conv_number": row[2], "last_owner_msg_id": row[3],
+                    "last_follower_msg_id": row[4], "follower_first_msg_at": row[5],
+                }
         newest = row[7]
         # No relay rows at all means nothing has been said in this chat, so
         # there is nothing the message could be answering either.
@@ -1309,7 +1475,7 @@ def get_relay_row(chat_id: int, message_id: int) -> "dict | None":
         cur = conn.execute(
             "SELECT conversation_id, peer_message_id FROM anon_relay "
             "WHERE chat_id = %s AND message_id = %s",
-            (chat_id, message_id),
+            (vault.pseudonym(chat_id), message_id),
         )
         row = cur.fetchone()
         if row is None:
@@ -1340,24 +1506,26 @@ def clear_follower_state(follower_user_id: int) -> bool:
     with pooled() as conn:
         cur = conn.execute(
             "DELETE FROM anon_follower_state WHERE follower_user_id = %s",
-            (follower_user_id,),
+            (vault.pseudonym(follower_user_id),),
         )
         conn.commit()
         return cur.rowcount > 0
 
 
 def set_anon_blocked(owner_user_id: int, follower_user_id: int, blocked: bool) -> None:
+    owner = vault.pseudonym(owner_user_id)
+    follower = vault.pseudonym(follower_user_id)
     with pooled() as conn:
         if blocked:
             conn.execute(
                 "INSERT INTO anon_blocks (owner_user_id, follower_user_id, blocked_at) VALUES (%s, %s, %s) "
                 "ON CONFLICT (owner_user_id, follower_user_id) DO NOTHING",
-                (owner_user_id, follower_user_id, datetime.now(timezone.utc).isoformat()),
+                (owner, follower, datetime.now(timezone.utc).isoformat()),
             )
         else:
             conn.execute(
                 "DELETE FROM anon_blocks WHERE owner_user_id = %s AND follower_user_id = %s",
-                (owner_user_id, follower_user_id),
+                (owner, follower),
             )
         conn.commit()
 
@@ -1393,7 +1561,7 @@ def list_anon_blocks_with_conversations(owner_user_id: int) -> list[tuple[int | 
             GROUP BY b.follower_user_id, b.blocked_at
             ORDER BY b.blocked_at DESC
             """,
-            (owner_user_id,),
+            (vault.pseudonym(owner_user_id),),
         )
         return [(row[0], list(row[1])) for row in cur.fetchall()]
 
@@ -1435,7 +1603,7 @@ def count_owner_conversation_states(owner_user_id: int) -> dict:
               count(*) FILTER (WHERE b.follower_user_id IS NOT NULL)
             """
             + _LIVE_CONVERSATIONS,
-            {"owner": owner_user_id},
+            {"owner": vault.pseudonym(owner_user_id)},
         )
         row = cur.fetchone()
         return {"open": row[0] or 0, "archived": row[1] or 0, "blocked": row[2] or 0}
@@ -1461,7 +1629,7 @@ def list_owner_conversations(owner_user_id: int, archived: bool = False,
    ORDER BY c.last_activity_at DESC, c.conv_number DESC
    LIMIT %(limit)s OFFSET %(offset)s
             """,
-            {"owner": owner_user_id, "archived": archived,
+            {"owner": vault.pseudonym(owner_user_id), "archived": archived,
              "limit": limit, "offset": max(0, offset)},
         )
         return [
@@ -1483,85 +1651,11 @@ def set_conversation_archived(conversation_id: int, owner_user_id: int, archived
             "UPDATE anon_conversations SET archived_at = %s "
             "WHERE id = %s AND owner_user_id = %s",
             (datetime.now(timezone.utc).isoformat() if archived else None,
-             conversation_id, owner_user_id),
+             conversation_id, vault.pseudonym(owner_user_id)),
         )
         changed = cur.rowcount > 0
         conn.commit()
         return changed
-
-
-# ---------- /export ----------
-# The bot already knows which message id in which chat belonged to which
-# conversation: anon_relay has held exactly that since v1.1, because a
-# swipe-reply on an old message has to resolve to a thread. Until 1.7.0
-# /export ignored it and asked people to forward their own chat back at
-# itself, which is a strange thing to ask when the index is right here.
-#
-# Neither of these functions reads a word anybody wrote. They answer "which
-# messages, in which order" and nothing else -- which is all anon_relay has
-# ever held.
-
-
-def list_exportable_conversations(user_id: int, chat_id: int) -> list[dict]:
-    """Every conversation this person is in, from either side, with how many
-    of its messages are still on record in their own chat.
-
-    `from_bot IS NOT NULL` is the filter that matters. NULL means one of two
-    things -- a line the bot wrote in its own voice (a header, a bookmark), or
-    a row from before v1.6.0, when the column did not exist -- and neither is
-    a message in the conversation that can be attributed to a side.
-    """
-    with pooled_read() as conn:
-        cur = conn.execute(
-            """
-            SELECT c.id, c.conv_number, c.started_at, c.last_activity_at,
-                   (c.owner_user_id = %(me)s) AS is_owner,
-                   count(r.message_id) FILTER (WHERE r.from_bot IS NOT NULL) AS messages
-              FROM anon_conversations c
-              LEFT JOIN anon_relay r
-                     ON r.conversation_id = c.id AND r.chat_id = %(chat)s
-             WHERE c.owner_user_id = %(me)s OR c.follower_user_id = %(me)s
-             GROUP BY c.id, c.conv_number, c.started_at, c.last_activity_at, c.owner_user_id
-            HAVING count(r.message_id) FILTER (WHERE r.from_bot IS NOT NULL) > 0
-             ORDER BY c.last_activity_at DESC
-            """,
-            {"me": user_id, "chat": chat_id},
-        )
-        return [{"id": r[0], "conv_number": r[1], "started_at": r[2],
-                 "last_activity_at": r[3], "is_owner": bool(r[4]), "messages": int(r[5])}
-                for r in cur.fetchall()]
-
-
-def conversation_messages(chat_id: int, conversation_id: int, limit: int) -> tuple:
-    """(rows, how many were left out). One row per message of this
-    conversation still in this chat, oldest first.
-
-    Message ids climb within a chat, so id order is time order and does not
-    depend on `sent_at`, which older rows do not have.
-
-    The chat id is the whole of the access check. A relay row belongs to one
-    chat, and a private chat's id is the person in it -- so asking for another
-    person's conversation with this person's chat id returns nothing rather
-    than returning theirs.
-    """
-    with pooled_read() as conn:
-        cur = conn.execute(
-            """
-            SELECT message_id, from_bot, sent_at FROM anon_relay
-             WHERE chat_id = %s AND conversation_id = %s AND from_bot IS NOT NULL
-             ORDER BY message_id LIMIT %s
-            """,
-            (chat_id, conversation_id, max(1, limit) + 1),
-        )
-        rows = [{"message_id": r[0], "from_bot": bool(r[1]), "sent_at": r[2]}
-                for r in cur.fetchall()]
-        left_out = conn.execute(
-            "SELECT count(*) FROM anon_relay WHERE chat_id = %s AND conversation_id = %s "
-            "AND from_bot IS NULL AND peer_message_id IS NOT NULL",
-            (chat_id, conversation_id),
-        ).fetchone()[0]
-    over = max(0, len(rows) - limit)
-    return rows[:limit], int(left_out) + over
 
 
 def first_relay_message(chat_id: int, conversation_id: int) -> int | None:
@@ -1577,7 +1671,7 @@ def first_relay_message(chat_id: int, conversation_id: int) -> int | None:
         cur = conn.execute(
             "SELECT min(message_id) FROM anon_relay "
             "WHERE chat_id = %s AND conversation_id = %s",
-            (chat_id, conversation_id),
+            (vault.pseudonym(chat_id), conversation_id),
         )
         row = cur.fetchone()
         return row[0] if row else None
@@ -1591,7 +1685,7 @@ def get_anon_stats(owner_user_id: int) -> dict:
             "SELECT COUNT(DISTINCT follower_user_id), COUNT(*) FROM anon_conversations "
             "WHERE owner_user_id = %s "
             "AND (follower_first_msg_at IS NOT NULL OR last_owner_msg_id IS NOT NULL)",
-            (owner_user_id,),
+            (vault.pseudonym(owner_user_id),),
         )
         distinct_followers, conversations = cur.fetchone()
         return {"distinct_followers": distinct_followers or 0, "conversations": conversations or 0}
@@ -1604,8 +1698,12 @@ def get_anon_stats(owner_user_id: int) -> dict:
 # message still resolve, so it is pruned on conversation activity rather than
 # on the row's own age -- a long-running conversation keeps all of its
 # anchors, a conversation nobody has touched in months keeps none.
+#
+# Relay rows (which chat message belongs to which conversation) are kept only
+# while a reply to them can still be routed: a conversation idle for
+# RELAY_RETENTION_DAYS (30) is closed, and its rows go with it.
 ACTIVITY_RETENTION_DAYS = int(os.environ.get("ACTIVITY_RETENTION_DAYS", "90"))
-RELAY_RETENTION_DAYS = int(os.environ.get("RELAY_RETENTION_DAYS", "180"))
+RELAY_RETENTION_DAYS = int(os.environ.get("RELAY_RETENTION_DAYS", "30"))
 
 
 def prune_old_data() -> int:
@@ -1620,6 +1718,15 @@ def prune_old_data() -> int:
             (ACTIVITY_RETENTION_DAYS,),
         )
         removed = cur.rowcount
+        # A settings row that exists only because its person was active
+        # (from_activity) goes with the last of that activity; one they made
+        # by choosing a language never does. In the same pass as the events
+        # above, so a person whose last event has just aged out is caught now.
+        cur = conn.execute(
+            "DELETE FROM user_settings s WHERE s.from_activity "
+            "AND NOT EXISTS (SELECT 1 FROM activity_events a WHERE a.user_id = s.user_id)"
+        )
+        removed += cur.rowcount
         cur = conn.execute(
             """
             DELETE FROM anon_relay WHERE conversation_id IN (
@@ -1669,10 +1776,11 @@ def prune_old_data() -> int:
 #
 # The Stars ledger keeps its rows. A donation is a payment, and a payment
 # record has to outlive the payer asking to be forgotten: it is what a refund
-# is issued against and what the totals are counted from. The username is
-# cleared, since it is the one free-text identifier on the row; the numeric
-# id stays, because without it a refund cannot be sent to anybody. The
-# privacy notice says so rather than implying the erase is total.
+# is issued against and what the totals are counted from. The sealed username
+# is cleared, since it is the one free-text identifier on the row; the payer
+# stays under its payer stand-in only (the family's own ledger keeps the numeric id a
+# refund is sent to). The privacy notice says so rather than implying the
+# erase is total.
 
 def erase_user(user_id: int) -> int:
     """Returns how many rows were removed. Blocking; call through
@@ -1689,12 +1797,16 @@ def erase_user(user_id: int) -> int:
     has posted stops working, which is the point of asking rather than the
     cost of it, but it is not something to find out afterwards -- the
     confirmation says so before the button is tapped.
+
+    Every table here is found by the person's pseudonym, which is what the
+    identity columns hold; the sealed copies of the id go with their rows.
     """
     removed = 0
+    person = vault.pseudonym(user_id)
     with pooled() as conn:
         cur = conn.execute(
             "SELECT id FROM anon_conversations WHERE owner_user_id = %s OR follower_user_id = %s",
-            (user_id, user_id),
+            (person, person),
         )
         conversations = [row[0] for row in cur.fetchall()]
         if conversations:
@@ -1710,23 +1822,534 @@ def erase_user(user_id: int) -> int:
         # SQL string in this file is visible in this file.
         for statement, params in (
             ("DELETE FROM anon_follower_state WHERE follower_user_id = %s OR owner_user_id = %s",
-             (user_id, user_id)),
+             (person, person)),
             ("DELETE FROM anon_blocks WHERE owner_user_id = %s OR follower_user_id = %s",
-             (user_id, user_id)),
-            ("DELETE FROM anon_links WHERE owner_user_id = %s", (user_id,)),
+             (person, person)),
+            ("DELETE FROM anon_links WHERE owner_user_id = %s", (person,)),
         ):
             cur = conn.execute(statement, params)
             removed += cur.rowcount or 0
         for table in ("user_settings", "donation_prompts", "activity_events", "promo_seen"):
-            cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
+            cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (person,))
             removed += cur.rowcount or 0
         conn.execute(
-            "UPDATE star_transactions SET username = NULL "
-            "WHERE user_id = %s AND username IS NOT NULL",
-            (user_id,),
+            "UPDATE star_transactions SET username_sealed = NULL "
+            "WHERE user_id = %s AND username_sealed IS NOT NULL",
+            (vault.pseudonym_in(user_id, PAYER_DOMAIN),),
         )
         conn.commit()
     return removed
+
+
+# ---------- converting a database made before 2.1.1 ----------
+# The one-time step scripts/encrypt_personal_data.py runs, with the bots
+# stopped, on a database whose tables still hold plain Telegram ids and
+# usernames. Both functions below take the caller's connection and the schema
+# to work on and nothing else -- no module global, no pool -- run inside the
+# caller's transaction and never commit, so the script can convert every
+# schema, verify them all and stamp the key in ONE transaction, and roll the
+# whole lot back on any failure.
+#
+# The statements are literals, written out one per table, because
+# tests/test_sql_safety.py allows no SQL built from names. The schema is not
+# interpolated either: it is quoted with psycopg.sql.Identifier and set as the
+# transaction's search_path, which every statement then resolves bare table
+# names through (exactly how the bot itself reaches its tables). The path is
+# the schema ALONE -- no `public` after it -- so a table missing from an old
+# schema is reported as missing instead of being found, and rewritten, in
+# another one. It is put back before returning.
+
+class PersonalDataError(RuntimeError):
+    """verify_personal_data_v1 found an id still in the clear, or a sealed
+    value that does not open or does not belong to its row. The message holds
+    table and column names and counts, never a value."""
+
+
+@contextmanager
+def _in_schema(conn, schema: str):
+    from psycopg import sql
+
+    if conn.autocommit:
+        raise RuntimeError("personal-data conversion runs inside the caller's transaction; "
+                           "this connection is in autocommit mode")
+    previous = conn.execute("SELECT current_setting('search_path')").fetchone()[0]
+    conn.execute("SELECT set_config('search_path', %s, true)",
+                 (sql.Identifier(schema).as_string(conn),))
+    try:
+        yield
+    finally:
+        try:
+            conn.execute("SELECT set_config('search_path', %s, true)", (previous,))
+        except Exception:
+            # The transaction is already aborted (and the caller will roll it
+            # back, which discards the setting with it); do not hide why.
+            pass
+
+
+def _has_table(conn, schema: str, table: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+        (schema, table),
+    ).fetchone() is not None
+
+
+def _has_column(conn, schema: str, table: str, column: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+        (schema, table, column),
+    ).fetchone() is not None
+
+
+def _ready(conn, schema: str, counts: dict, table: str, *columns: str) -> bool:
+    """True when the table and every one of `columns` exist. A schema made by
+    an older version (testbot's) may lack either; what is missing is noted in
+    `counts` as 'skipped:<table>[.<column>]' = 0 and logged, and the table is
+    left alone."""
+    if not _has_table(conn, schema, table):
+        counts[f"skipped:{table}"] = 0
+        _log.info("Personal-data step skipped: no table %s in schema %s", table, schema)
+        return False
+    for column in columns:
+        if not _has_column(conn, schema, table, column):
+            counts[f"skipped:{table}.{column}"] = 0
+            _log.info("Personal-data step skipped: no column %s.%s in schema %s", table, column, schema)
+            return False
+    return True
+
+
+def _changed_one(cur, what: str) -> None:
+    if cur.rowcount != 1:
+        raise RuntimeError(f"personal-data conversion expected to change one row of {what}, "
+                           f"changed {cur.rowcount}")
+
+
+def _plain(value) -> bool:
+    """A real Telegram id: not NULL and not already a pseudonym."""
+    return value is not None and not vault.is_pseudonym(value)
+
+
+def _pseudonyms_of(ids, domain: "str | None" = None) -> "tuple[list[int], list[int]]":
+    """(plain ids, their pseudonyms), two lists in the same order. With
+    `domain`, each is that domain's stand-in (vault.pseudonym_in) instead."""
+    plain = sorted({int(i) for i in ids if _plain(i)})
+    if domain is None:
+        return plain, [vault.pseudonym(i) for i in plain]
+    return plain, [vault.pseudonym_in(i, domain) for i in plain]
+
+
+def convert_personal_data_v1(conn, schema: str) -> dict:
+    """Replaces every Telegram id in `schema`'s AnonBot tables with its
+    pseudonym, seals the ids and usernames the bot must read back, and drops
+    star_transactions.username -- all on `conn`, inside its transaction.
+
+    Per row, the pseudonym and the sealed copy of the id are written by ONE
+    UPDATE keyed by the row's primary key, so no row can be left with one and
+    not the other. A value that is NULL or already a pseudonym is skipped, so
+    a second run changes nothing and reports 0 everywhere. Columns the new
+    layout adds (the sealed ones) are added here if init_db has not yet.
+    A table or column the schema lacks is skipped and named in the result.
+
+    Returns {table: rows changed}, plus 'star_transactions.username_sealed'
+    (usernames sealed), 'star_transactions.username_dropped' (1 when the plain
+    column was removed) and 'skipped:<what>' = 0 for each thing missing."""
+    counts: dict = {}
+    ceiling = vault.PSEUDONYM_CEILING
+    with _in_schema(conn, schema):
+        if _ready(conn, schema, counts, "anon_links", "owner_user_id"):
+            if not _has_column(conn, schema, "anon_links", "owner_sealed"):
+                conn.execute("ALTER TABLE anon_links ADD COLUMN IF NOT EXISTS owner_sealed BYTEA")
+            rows = conn.execute(
+                "SELECT owner_user_id FROM anon_links WHERE owner_user_id >= %s", (ceiling,)
+            ).fetchall()
+            for (owner,) in rows:
+                _changed_one(conn.execute(
+                    "UPDATE anon_links SET owner_user_id = %s, owner_sealed = %s WHERE owner_user_id = %s",
+                    (vault.pseudonym(owner), vault.seal_id(owner, "anon.link.owner"), owner),
+                ), "anon_links")
+            counts["anon_links"] = len(rows)
+
+        if _ready(conn, schema, counts, "anon_conversations", "id", "owner_user_id", "follower_user_id"):
+            if not _has_column(conn, schema, "anon_conversations", "owner_sealed"):
+                conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS owner_sealed BYTEA")
+            if not _has_column(conn, schema, "anon_conversations", "follower_sealed"):
+                conn.execute("ALTER TABLE anon_conversations ADD COLUMN IF NOT EXISTS follower_sealed BYTEA")
+            rows = conn.execute(
+                "SELECT id, owner_user_id, follower_user_id, owner_sealed, follower_sealed "
+                "FROM anon_conversations WHERE owner_user_id >= %s OR follower_user_id >= %s",
+                (ceiling, ceiling),
+            ).fetchall()
+            for row_id, owner, follower, owner_sealed, follower_sealed in rows:
+                if _plain(owner):
+                    owner, owner_sealed = (vault.pseudonym(owner),
+                                           vault.seal_id(owner, "anon.conversation.owner"))
+                if _plain(follower):
+                    follower, follower_sealed = (vault.pseudonym(follower),
+                                                 vault.seal_id(follower, "anon.conversation.follower"))
+                _changed_one(conn.execute(
+                    "UPDATE anon_conversations SET owner_user_id = %s, follower_user_id = %s, "
+                    "owner_sealed = %s, follower_sealed = %s WHERE id = %s",
+                    (owner, follower, owner_sealed, follower_sealed, row_id),
+                ), "anon_conversations")
+            counts["anon_conversations"] = len(rows)
+
+        if _ready(conn, schema, counts, "anon_follower_state", "follower_user_id", "owner_user_id"):
+            rows = conn.execute(
+                "SELECT follower_user_id, owner_user_id FROM anon_follower_state "
+                "WHERE follower_user_id >= %s OR owner_user_id >= %s",
+                (ceiling, ceiling),
+            ).fetchall()
+            for follower, owner in rows:
+                _changed_one(conn.execute(
+                    "UPDATE anon_follower_state SET follower_user_id = %s, owner_user_id = %s "
+                    "WHERE follower_user_id = %s",
+                    (vault.pseudonym(follower) if _plain(follower) else follower,
+                     vault.pseudonym(owner) if _plain(owner) else owner,
+                     follower),
+                ), "anon_follower_state")
+            counts["anon_follower_state"] = len(rows)
+
+        if _ready(conn, schema, counts, "anon_relay", "chat_id"):
+            # One statement for the whole table: a relay row is one per
+            # message, and most of the table is the same few thousand chats.
+            plain, pseudo = _pseudonyms_of(
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT chat_id FROM anon_relay WHERE chat_id >= %s", (ceiling,)))
+            changed = 0
+            if plain:
+                changed = conn.execute(
+                    "UPDATE anon_relay t SET chat_id = m.pseudo "
+                    "FROM unnest(%s::bigint[], %s::bigint[]) AS m(plain, pseudo) "
+                    "WHERE t.chat_id = m.plain",
+                    (plain, pseudo),
+                ).rowcount
+            counts["anon_relay"] = changed
+            # 2.1.0 kept when each bubble was written and which side wrote it,
+            # for /export. The export is gone; neither column may outlive it.
+            dropped = 0
+            for column in ("sent_at", "from_bot"):
+                if _has_column(conn, schema, "anon_relay", column):
+                    dropped += 1
+            if dropped:
+                conn.execute("ALTER TABLE anon_relay DROP COLUMN IF EXISTS sent_at, "
+                             "DROP COLUMN IF EXISTS from_bot")
+            counts["anon_relay.columns_dropped"] = dropped
+
+        if _ready(conn, schema, counts, "anon_blocks", "owner_user_id", "follower_user_id"):
+            rows = conn.execute(
+                "SELECT owner_user_id, follower_user_id FROM anon_blocks "
+                "WHERE owner_user_id >= %s OR follower_user_id >= %s",
+                (ceiling, ceiling),
+            ).fetchall()
+            for owner, follower in rows:
+                _changed_one(conn.execute(
+                    "UPDATE anon_blocks SET owner_user_id = %s, follower_user_id = %s "
+                    "WHERE owner_user_id = %s AND follower_user_id = %s",
+                    (vault.pseudonym(owner) if _plain(owner) else owner,
+                     vault.pseudonym(follower) if _plain(follower) else follower,
+                     owner, follower),
+                ), "anon_blocks")
+            counts["anon_blocks"] = len(rows)
+
+        if _ready(conn, schema, counts, "user_settings", "user_id"):
+            if not _has_column(conn, schema, "user_settings", "user_sealed"):
+                conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS user_sealed BYTEA")
+            if not _has_column(conn, schema, "user_settings", "from_activity"):
+                conn.execute("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS "
+                             "from_activity BOOLEAN NOT NULL DEFAULT FALSE")
+            rows = conn.execute(
+                "SELECT user_id FROM user_settings WHERE user_id >= %s", (ceiling,)
+            ).fetchall()
+            for (user,) in rows:
+                _changed_one(conn.execute(
+                    "UPDATE user_settings SET user_id = %s, user_sealed = %s WHERE user_id = %s",
+                    (vault.pseudonym(user), vault.seal_id(user, "anon.user"), user),
+                ), "user_settings")
+            counts["user_settings"] = len(rows)
+
+        if _ready(conn, schema, counts, "donation_prompts", "user_id"):
+            rows = conn.execute(
+                "SELECT user_id FROM donation_prompts WHERE user_id >= %s", (ceiling,)
+            ).fetchall()
+            for (user,) in rows:
+                _changed_one(conn.execute(
+                    "UPDATE donation_prompts SET user_id = %s WHERE user_id = %s",
+                    (vault.pseudonym(user), user),
+                ), "donation_prompts")
+            counts["donation_prompts"] = len(rows)
+
+        if _ready(conn, schema, counts, "promo_seen", "user_id"):
+            # A few rows per person (one per announcement): one statement for
+            # the whole table, like anon_relay. 2.2.0 also kept when each
+            # announcement was shown; nothing reads it, so the column goes.
+            plain, pseudo = _pseudonyms_of(
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT user_id FROM promo_seen WHERE user_id >= %s", (ceiling,)))
+            changed = 0
+            if plain:
+                changed = conn.execute(
+                    "UPDATE promo_seen t SET user_id = m.pseudo "
+                    "FROM unnest(%s::bigint[], %s::bigint[]) AS m(plain, pseudo) "
+                    "WHERE t.user_id = m.plain",
+                    (plain, pseudo),
+                ).rowcount
+            counts["promo_seen"] = changed
+            dropped = 0
+            if _has_column(conn, schema, "promo_seen", "seen_at"):
+                conn.execute("ALTER TABLE promo_seen DROP COLUMN IF EXISTS seen_at")
+                dropped = 1
+            counts["promo_seen.columns_dropped"] = dropped
+
+        if _ready(conn, schema, counts, "activity_events", "user_id"):
+            # Many rows per person and no index on the column: one pass that
+            # joins on the list of people, not one pass per person.
+            plain, pseudo = _pseudonyms_of(
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT user_id FROM activity_events WHERE user_id >= %s", (ceiling,)))
+            changed = 0
+            added = 0
+            if plain and _ready(conn, schema, counts, "user_settings", "user_id", "user_sealed",
+                                "from_activity"):
+                # Everyone with activity must stay reachable by a broadcast,
+                # which now reads only user_settings: give each person who
+                # has activity but no settings row one (the table's defaults
+                # for the other columns), while their id is still in the clear.
+                # Marked from_activity: they go again with their activity.
+                added = conn.execute(
+                    "INSERT INTO user_settings (user_id, user_sealed, from_activity) "
+                    "SELECT m.pseudo, m.sealed, TRUE FROM unnest(%s::bigint[], %s::bytea[]) AS m(pseudo, sealed) "
+                    "ON CONFLICT (user_id) DO NOTHING",
+                    (pseudo, [vault.seal_id(i, "anon.user") for i in plain]),
+                ).rowcount
+            counts["user_settings.added_for_activity"] = added
+            if plain:
+                changed = conn.execute(
+                    "UPDATE activity_events t SET user_id = m.pseudo "
+                    "FROM unnest(%s::bigint[], %s::bigint[]) AS m(plain, pseudo) "
+                    "WHERE t.user_id = m.plain",
+                    (plain, pseudo),
+                ).rowcount
+            counts["activity_events"] = changed
+
+        if _ready(conn, schema, counts, "star_transactions", "id", "user_id"):
+            if not _has_column(conn, schema, "star_transactions", "username_sealed"):
+                conn.execute("ALTER TABLE star_transactions ADD COLUMN IF NOT EXISTS username_sealed BYTEA")
+            # The payer's stand-in is its own (PAYER_DOMAIN), not pseudonym():
+            # see the note at PAYER_DOMAIN. A value already in the pseudonym
+            # range is left as it is.
+            plain, pseudo = _pseudonyms_of(
+                (r[0] for r in conn.execute(
+                    "SELECT DISTINCT user_id FROM star_transactions WHERE user_id >= %s", (ceiling,))),
+                PAYER_DOMAIN)
+            changed = 0
+            if plain:
+                changed = conn.execute(
+                    "UPDATE star_transactions t SET user_id = m.pseudo "
+                    "FROM unnest(%s::bigint[], %s::bigint[]) AS m(plain, pseudo) "
+                    "WHERE t.user_id = m.plain",
+                    (plain, pseudo),
+                ).rowcount
+            counts["star_transactions"] = changed
+            sealed_names, dropped = 0, 0
+            if _has_column(conn, schema, "star_transactions", "username"):
+                rows = conn.execute(
+                    "SELECT id, username FROM star_transactions "
+                    "WHERE username IS NOT NULL AND username_sealed IS NULL"
+                ).fetchall()
+                for row_id, username in rows:
+                    _changed_one(conn.execute(
+                        "UPDATE star_transactions SET username_sealed = %s WHERE id = %s",
+                        (vault.seal_text(username, "stars.username"), row_id),
+                    ), "star_transactions")
+                sealed_names = len(rows)
+                conn.execute("ALTER TABLE star_transactions DROP COLUMN IF EXISTS username")
+                dropped = 1
+            counts["star_transactions.username_sealed"] = sealed_names
+            counts["star_transactions.username_dropped"] = dropped
+    return counts
+
+
+# What verify_personal_data_v1 asks of every identity column: (rows in the
+# table, rows still holding a value that is not a pseudonym). The statements
+# are literals; looping over this constant is the shape tests/test_sql_safety
+# recognises as ours.
+_IDENTITY_CHECKS = (
+    ("anon_links", "owner_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE owner_user_id >= %s) FROM anon_links"),
+    ("anon_conversations", "owner_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE owner_user_id >= %s) FROM anon_conversations"),
+    ("anon_conversations", "follower_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE follower_user_id >= %s) FROM anon_conversations"),
+    ("anon_follower_state", "follower_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE follower_user_id >= %s) FROM anon_follower_state"),
+    ("anon_follower_state", "owner_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE owner_user_id >= %s) FROM anon_follower_state"),
+    ("anon_relay", "chat_id",
+     "SELECT count(*), count(*) FILTER (WHERE chat_id >= %s) FROM anon_relay"),
+    ("anon_blocks", "owner_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE owner_user_id >= %s) FROM anon_blocks"),
+    ("anon_blocks", "follower_user_id",
+     "SELECT count(*), count(*) FILTER (WHERE follower_user_id >= %s) FROM anon_blocks"),
+    ("user_settings", "user_id",
+     "SELECT count(*), count(*) FILTER (WHERE user_id >= %s) FROM user_settings"),
+    ("donation_prompts", "user_id",
+     "SELECT count(*), count(*) FILTER (WHERE user_id >= %s) FROM donation_prompts"),
+    ("promo_seen", "user_id",
+     "SELECT count(*), count(*) FILTER (WHERE user_id >= %s) FROM promo_seen"),
+    ("activity_events", "user_id",
+     "SELECT count(*), count(*) FILTER (WHERE user_id >= %s) FROM activity_events"),
+    ("star_transactions", "user_id",
+     "SELECT count(*), count(*) FILTER (WHERE user_id >= %s) FROM star_transactions"),
+)
+
+
+# What no star_transactions.user_id may equal: a person's pseudonym() as any
+# identity column of the schema holds it. (A payer's row can be lined up with
+# the family's star_ledger; if it held pseudonym(), that match would name the
+# payer's conversations.) One literal statement per column; run for the ones
+# the schema has.
+_PAYER_CLASH_CHECKS = (
+    ("anon_links", "owner_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT owner_user_id FROM anon_links)"),
+    ("anon_conversations", "owner_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT owner_user_id FROM anon_conversations)"),
+    ("anon_conversations", "follower_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT follower_user_id FROM anon_conversations)"),
+    ("anon_follower_state", "follower_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT follower_user_id FROM anon_follower_state)"),
+    ("anon_follower_state", "owner_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT owner_user_id FROM anon_follower_state)"),
+    ("anon_relay", "chat_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT chat_id FROM anon_relay)"),
+    ("anon_blocks", "owner_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT owner_user_id FROM anon_blocks)"),
+    ("anon_blocks", "follower_user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT follower_user_id FROM anon_blocks)"),
+    ("user_settings", "user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT user_id FROM user_settings)"),
+    ("donation_prompts", "user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT user_id FROM donation_prompts)"),
+    ("promo_seen", "user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT user_id FROM promo_seen)"),
+    ("activity_events", "user_id",
+     "SELECT count(*) FROM star_transactions t WHERE t.user_id IN (SELECT user_id FROM activity_events)"),
+)
+
+
+def _opens(opener, *args, **kwargs) -> bool:
+    try:
+        opener(*args, **kwargs)
+        return True
+    except (vault.VaultError, TypeError, ValueError):
+        return False
+
+
+def verify_personal_data_v1(conn, schema: str) -> dict:
+    """Checks `schema` is fully converted, on `conn`, inside its transaction:
+    no identity column holds a non-NULL value that is not a pseudonym; no
+    star_transactions.user_id equals a pseudonym() value held by any identity
+    column of the schema (a payer is stored under their own stand-in, see
+    PAYER_DOMAIN); every sealed value opens under its purpose and, where its
+    row stores the pseudonym, matches it; and star_transactions has no
+    `username` column.
+
+    Returns {table: rows checked, 'table.column': sealed values that opened,
+    'skipped:<what>': 0 for whatever the schema lacks}. Raises
+    PersonalDataError, naming tables, columns and counts only, if anything
+    fails."""
+    counts: dict = {}
+    problems: list = []
+    ceiling = vault.PSEUDONYM_CEILING
+    with _in_schema(conn, schema):
+        for table, column, statement in _IDENTITY_CHECKS:
+            if not _ready(conn, schema, counts, table, column):
+                continue
+            total, plain = conn.execute(statement, (ceiling,)).fetchone()
+            counts[table] = total
+            if plain:
+                problems.append(f"{table}.{column}: {plain} value(s) are not pseudonyms")
+
+        def sealed_column(table: str, column: str) -> bool:
+            """The column is there. One missing from a table that has rows is
+            a failure: those rows have nothing sealed."""
+            if _has_column(conn, schema, table, column):
+                return True
+            if counts.get(table):
+                problems.append(f"{table}.{column}: the column is missing")
+            return False
+
+        def tally(table: str, column: str, opened: int, total: int) -> None:
+            counts[f"{table}.{column}"] = opened
+            if opened != total:
+                problems.append(f"{table}.{column}: {total - opened} of {total} sealed value(s) "
+                                f"are missing, do not open, or do not belong to their row")
+
+        if _ready(conn, schema, counts, "anon_links", "owner_user_id") \
+            and sealed_column("anon_links", "owner_sealed"):
+            rows = conn.execute("SELECT owner_user_id, owner_sealed FROM anon_links").fetchall()
+            tally("anon_links", "owner_sealed",
+                  sum(_opens(vault.open_id, sealed, "anon.link.owner", expected=owner)
+                      for owner, sealed in rows), len(rows))
+
+        if _ready(conn, schema, counts, "anon_conversations", "owner_user_id", "follower_user_id"):
+            if sealed_column("anon_conversations", "owner_sealed") \
+                and sealed_column("anon_conversations", "follower_sealed"):
+                rows = conn.execute(
+                    "SELECT owner_user_id, follower_user_id, owner_sealed, follower_sealed "
+                    "FROM anon_conversations").fetchall()
+                tally("anon_conversations", "owner_sealed",
+                      sum(_opens(vault.open_id, o_sealed, "anon.conversation.owner", expected=owner)
+                          for owner, _f, o_sealed, _fs in rows), len(rows))
+                tally("anon_conversations", "follower_sealed",
+                      sum(_opens(vault.open_id, f_sealed, "anon.conversation.follower", expected=follower)
+                          for _o, follower, _os, f_sealed in rows), len(rows))
+
+        if _ready(conn, schema, counts, "user_settings", "user_id") \
+            and sealed_column("user_settings", "user_sealed"):
+            rows = conn.execute("SELECT user_id, user_sealed FROM user_settings").fetchall()
+            tally("user_settings", "user_sealed",
+                  sum(_opens(vault.open_id, sealed, "anon.user", expected=user)
+                      for user, sealed in rows), len(rows))
+
+        if _ready(conn, schema, counts, "anon_relay", "chat_id"):
+            for column in ("sent_at", "from_bot"):
+                if _has_column(conn, schema, "anon_relay", column):
+                    problems.append(f"anon_relay.{column}: the column is still there")
+        if _has_table(conn, schema, "promo_seen") and _has_column(conn, schema, "promo_seen", "seen_at"):
+            problems.append("promo_seen.seen_at: the column is still there")
+
+        if _ready(conn, schema, counts, "activity_events", "user_id")                 and _ready(conn, schema, counts, "user_settings", "user_id"):
+            (unreachable,) = conn.execute(
+                "SELECT count(*) FROM (SELECT DISTINCT user_id FROM activity_events) a "
+                "WHERE NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id = a.user_id)"
+            ).fetchone()
+            counts["activity_events.without_settings"] = unreachable
+            if unreachable:
+                problems.append(f"activity_events: {unreachable} person(s) have no user_settings "
+                                f"row, so a broadcast cannot reach them")
+
+        if _ready(conn, schema, counts, "star_transactions", "user_id"):
+            clashes = 0
+            for table, column, statement in _PAYER_CLASH_CHECKS:
+                if _has_table(conn, schema, table) and _has_column(conn, schema, table, column):
+                    clashes += conn.execute(statement).fetchone()[0]
+            counts["star_transactions.payer_clashes"] = clashes
+            if clashes:
+                problems.append(f"star_transactions.user_id: {clashes} payment(s) are stored under a "
+                                f"person's pseudonym(), so they can be lined up with that person's rows")
+        if _has_table(conn, schema, "star_transactions"):
+            if _has_column(conn, schema, "star_transactions", "username_sealed"):
+                rows = conn.execute(
+                    "SELECT username_sealed FROM star_transactions WHERE username_sealed IS NOT NULL"
+                ).fetchall()
+                tally("star_transactions", "username_sealed",
+                      sum(_opens(vault.open_text, sealed, "stars.username") for (sealed,) in rows),
+                      len(rows))
+            if _has_column(conn, schema, "star_transactions", "username"):
+                problems.append("star_transactions.username: the plain column is still there")
+    if problems:
+        raise PersonalDataError(f"schema {schema} is not fully sealed: " + "; ".join(problems))
+    return counts
 
 
 # ---------- admin: full database export ----------

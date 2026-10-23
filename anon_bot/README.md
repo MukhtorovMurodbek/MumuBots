@@ -34,7 +34,6 @@ can watch it — `FAMILY_BUS=off` disables that entirely.
 | `/archive` | Sent as a reply to any message: files that conversation away, after one confirmation. The same thing `/conversations` does from a card, without the walk to it. |
 | `/blocked` | Lists blocked senders by conversation number, each with an Undo button. |
 | `/stats` | How many distinct people have written, and how many conversations. |
-| `/export` | Hands back one conversation, or all of them: copied back into the chat exactly as they were, or written into a document that names nobody. [PRIVACY.md](PRIVACY.md) says what each way reads and keeps. |
 | `/cancel` | Asks which of the things the bot is waiting on should stop, one button each, and stops nothing until one is chosen. |
 | `/donate` | Voluntary contribution towards hosting, paid in Telegram Stars. |
 | `/balance` | The ⚡ credit balance — one balance shared by the family's four bots — and everything it was spent on. |
@@ -104,7 +103,7 @@ know it: it cannot be worked out afterwards from ids that count at different
 rates.
 
 **Both sides are held to the same rule.** Either party may answer any
-conversation they are part of, for as long as its rows live — 180 days of
+conversation they are part of, for as long as its rows live — 30 days of
 silence in that conversation.
 
 **One message per conversation is exempt: the one that opens it.** It has

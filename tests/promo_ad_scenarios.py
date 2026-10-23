@@ -73,6 +73,7 @@ import live_message  # noqa: E402
 import shared_features  # noqa: E402
 import bot as ab  # noqa: E402
 import family_link  # noqa: E402
+import vault  # noqa: E402
 from telegram.error import BadRequest  # noqa: E402
 
 crashes: list[tuple[str, str]] = []
@@ -158,10 +159,13 @@ def ads_in(person) -> list[dict]:
 
 
 def seen_rows(user_id: int | None = None) -> int:
+    """Rows of promo_seen: all of them, or one person's -- found by the pseudonym, which is what the table
+    holds in place of the id since 2.2.0 (sealed like every AnonBot table)."""
     with db.pooled() as conn:
         if user_id is None:
             return conn.execute("SELECT count(*) FROM promo_seen").fetchone()[0]
-        return conn.execute("SELECT count(*) FROM promo_seen WHERE user_id = %s", (user_id,)).fetchone()[0]
+        return conn.execute("SELECT count(*) FROM promo_seen WHERE user_id = %s",
+                            (vault.pseudonym(user_id),)).fetchone()[0]
 
 
 def cached(s, person):
@@ -375,7 +379,8 @@ async def group_a_prompt_and_note():
 
     p = newbie(s)
     with db.pooled() as conn:                              # as somebody from before 2.1.0
-        conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s", (p.id,))
+        conn.execute("UPDATE user_settings SET knows_reactions = NULL WHERE user_id = %s",
+                     (vault.pseudonym(p.id),))          # the table holds the pseudonym (2.1.1)
         conn.commit()
     await p.send("/link")
     note = i18n.t("en", "reactions_update_note")
@@ -598,10 +603,8 @@ async def group_d_database():
             "ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
             "WHERE tc.table_schema = %s AND tc.table_name = 'promo_seen' AND tc.constraint_type = 'PRIMARY KEY' "
             "ORDER BY kcu.ordinal_position", (os.environ["DB_SCHEMA"],)).fetchall()
-    check("the table has user_id (bigint), promo (text) and seen_at (timestamptz, default now()), none of them null",
-          [(c[0], c[1], c[2]) for c in columns] == [("user_id", "bigint", "NO"), ("promo", "text", "NO"),
-                                                    ("seen_at", "timestamp with time zone", "NO")]
-          and "now()" in (columns[2][3] or ""), columns)
+    check("the table has user_id (bigint) and promo (text), neither null, and no time column",
+          [(c[0], c[1], c[2]) for c in columns] == [("user_id", "bigint", "NO"), ("promo", "text", "NO")], columns)
     check("... and its key is (user_id, promo)", [k[0] for k in keys] == ["user_id", "promo"], keys)
 
     check("claim_promo_seen is True the first time for a person and an announcement", db.claim_promo_seen(9001, KEY) is True)
@@ -609,6 +612,12 @@ async def group_d_database():
     check("... another announcement is another chance", db.claim_promo_seen(9001, "gift-other") is True)
     check("... another person is another chance", db.claim_promo_seen(9002, KEY) is True)
     check("... and the rows are exactly those three", seen_rows() == 3 and seen_rows(9001) == 2)
+    with db.pooled() as conn:
+        plain = conn.execute("SELECT count(*) FROM promo_seen WHERE user_id >= %s",
+                             (vault.PSEUDONYM_CEILING,)).fetchone()[0]
+        stored = {row[0] for row in conn.execute("SELECT user_id FROM promo_seen").fetchall()}
+    check("... and none of them holds a real id: the table holds each person's pseudonym",
+          plain == 0 and stored == {vault.pseudonym(9001), vault.pseudonym(9002)}, (plain, len(stored)))
 
     barrier = threading.Barrier(8)
 

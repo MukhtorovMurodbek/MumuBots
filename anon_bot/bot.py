@@ -100,7 +100,6 @@ import i18n
 import lifecycle
 import live_message
 import shared_features
-import transcript
 from live_message import LiveMessage, edit_in_place
 from anon_logic import (
     REACTION_NOTE_SECONDS,
@@ -137,8 +136,6 @@ from db import (
     set_user_language,
     init_db,
     record_relay_and_touch,
-    list_exportable_conversations,
-    conversation_messages,
     record_anon_relays,
     mark_follower_opened,
     regenerate_anon_link,
@@ -279,16 +276,12 @@ def _help_page_link(lang: str) -> str:
     return i18n.t(lang, "helppage_link")
 
 
-def _help_page_export(lang: str) -> str:
-    return i18n.t(lang, "helppage_export", max=transcript.MAX_MESSAGES, days=db.RELAY_RETENTION_DAYS)
-
-
 def _help_page_which(lang: str) -> str:
     # The bot's own answer, as the inbox's owner gets it.
     return i18n.t(lang, "helppage_which", example=i18n.t(lang, "which_owner", conv_number=4))
 
 
-HELP_PAGES = {"link": _help_page_link, "export": _help_page_export, "which": _help_page_which}
+HELP_PAGES = {"link": _help_page_link, "which": _help_page_which}
 HELP_ALIASES = {}
 
 
@@ -323,7 +316,6 @@ BOT_COMMANDS = [
     BotCommand("conversations", "Your conversations"),
     BotCommand("which", "Which conversation is this? — reply to a message"),
     BotCommand("blocked", "Who you have blocked"),
-    BotCommand("export", "Get a conversation back"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
     BotCommand("feedback", "Suggest something, or report a problem"),
@@ -1506,18 +1498,11 @@ async def _deliver_follower_message(update: Update, context: ContextTypes.DEFAUL
     # guest's own message is written down on their side for the same reason
     # the owner's is on theirs -- so an edit to it can be answered, and so a
     # guest quoting themselves resolves rather than being refused.
-    # When each side's bubble was written, and which side the bot wrote: what
-    # /export places a forwarded message by. The guest's own message has
-    # Telegram's date for it; the delivered copy is "now", read before the
-    # round trip to the database rather than after it.
-    delivered_at = datetime.now(timezone.utc)
     await asyncio.to_thread(
         record_relay_and_touch, active["id"],
         owner_id, [m.message_id for m in sent],
         message.chat_id, [message.message_id],
         sent[-1].message_id, message.message_id,
-        owner_sent_at=delivered_at, follower_sent_at=getattr(message, "date", None),
-        delivered_to="owner",
     )
 
     if active.get("follower_first_msg_at") is None:
@@ -1585,14 +1570,11 @@ async def _deliver_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     # And the delivered copies on the guest's side, without which a guest
     # who swipe-replies to the answer they just received is told their reply
     # matches no conversation. Both sides, one statement.
-    delivered_at = datetime.now(timezone.utc)
     await asyncio.to_thread(
         record_relay_and_touch, conversation_id,
         owner.id, [message.message_id],
         follower_id, [m.message_id for m in sent],
         message.message_id, sent[-1].message_id,
-        owner_sent_at=getattr(message, "date", None), follower_sent_at=delivered_at,
-        delivered_to="follower",
     )
 
     if not quiet:
@@ -1610,325 +1592,11 @@ async def _deliver_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ---------------------------------------------------------------------------
-# /export -- the conversation itself, either copied or written down
+# /export -- removed. The command only says so; it reads and writes nothing.
 # ---------------------------------------------------------------------------
-# The reasoning is in transcript.py. This is the Telegram half: choosing which
-# conversation, choosing whether the bot reads it, and doing the one that was
-# chosen.
-#
-# The owner, on what it was:
-#
-#   "The export button should be easier. User specifies which conversation to
-#    export, or all, and all of them are either copied without accessing the
-#    contents or with accessing and then deleted immediately after. ... This
-#    should specify before exporting if it does or doesn't access the contents
-#    of the messages."
-#
-# Nobody forwards anything any more. `anon_relay` already knows which message
-# ids in this chat belonged to which conversation, so the bot can work from
-# the index -- which is also why the access question has two real answers
-# rather than one: naming an id to Telegram and reading what comes back are
-# genuinely different things, and only one of them involves the bot seeing
-# what was said.
-
-# How long between edits of the progress line. Telegram rate-limits edits to
-# about one a second per chat, and a line that updates on every message of a
-# four-hundred-message export is the flood rather than the progress.
-EXPORT_PROGRESS_SECONDS = 2.0
-
-
-def _export_selection_keyboard(lang: str, conversations: list) -> InlineKeyboardMarkup:
-    """One button per conversation, plus All when there is more than one."""
-    rows = []
-    buttons = []
-    for conv in conversations:
-        label = (i18n.t(lang, "export_pick_numbered", number=conv["conv_number"],
-                        count=conv["messages"]) if conv["is_owner"]
-                 else i18n.t(lang, "export_pick_yours", count=conv["messages"]))
-        buttons.append(InlineKeyboardButton(label, callback_data=f"aq_export:pick:{conv['id']}"))
-    rows += [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
-    if len(conversations) > 1:
-        total = sum(conv["messages"] for conv in conversations)
-        rows.append([InlineKeyboardButton(i18n.t(lang, "export_pick_all", count=total),
-                                          callback_data="aq_export:pick:all")])
-    rows.append([InlineKeyboardButton(i18n.t(lang, "export_button_cancel"),
-                                      callback_data="aq_export:cancel")])
-    return InlineKeyboardMarkup(rows)
-
-
-def _export_mode_keyboard(lang: str, selection: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(i18n.t(lang, "export_button_copy"),
-                              callback_data=f"aq_export:copy:{selection}")],
-        [InlineKeyboardButton(i18n.t(lang, "export_button_doc"),
-                              callback_data=f"aq_export:doc:{selection}")],
-        [InlineKeyboardButton(i18n.t(lang, "export_button_cancel"),
-                              callback_data="aq_export:cancel")],
-    ])
-
-
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/export: which conversation, and then whether the bot may read it."""
-    user = update.effective_user
-    lang = await i18n.get_lang(user.id, context)
-    chat_id = update.effective_chat.id
-    conversations = await asyncio.to_thread(
-        list_exportable_conversations, user.id, chat_id)
-    if not conversations:
-        await update.message.reply_text(i18n.t(lang, "export_nothing_to_export"))
-        return
-    await update.message.reply_text(
-        i18n.t(lang, "export_pick_intro", count=len(conversations)),
-        reply_markup=_export_selection_keyboard(lang, conversations))
-
-
-async def _export_rows(user_id: int, chat_id: int, selection: str) -> tuple:
-    """(conversations, {conversation id: rows}, how many were left out).
-
-    Read here rather than in the handler so the whole export is one decision
-    about how much to do, taken once, against the cap -- and so a selection of
-    "all" cannot quietly become five separate caps.
-    """
-    conversations = await asyncio.to_thread(
-        list_exportable_conversations, user_id, chat_id)
-    if selection != "all":
-        conversations = [c for c in conversations if str(c["id"]) == selection]
-    # Oldest first: a conversation reads forwards, and so does a set of them.
-    conversations = sorted(conversations, key=lambda c: str(c.get("started_at") or ""))
-    rows, left_out, budget = {}, 0, transcript.MAX_MESSAGES
-    for conv in conversations:
-        got, skipped = await asyncio.to_thread(
-            conversation_messages, chat_id, conv["id"], max(budget, 0))
-        rows[conv["id"]] = got
-        left_out += skipped
-        budget -= len(got)
-    return conversations, rows, left_out
-
-
-async def export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pick a conversation, pick a mode, or cancel."""
-    query = update.callback_query
-    user = update.effective_user
-    lang = await i18n.get_lang(user.id, context)
-    parts = (query.data or "").split(":")
-    action = parts[1] if len(parts) > 1 else ""
-    selection = parts[2] if len(parts) > 2 else ""
-    chat_id = query.message.chat_id
-
-    if action == "cancel":
-        await query.answer()
-        await edit_in_place(query.message, context.bot, i18n.t(lang, "export_cancelled"))
-        return
-
-    if action == "pick":
-        conversations, rows, left_out = await _export_rows(user.id, chat_id, selection)
-        if not conversations:
-            await query.answer(i18n.t(lang, "export_gone"), show_alert=True)
-            return
-        await query.answer()
-        count = sum(len(got) for got in rows.values())
-        what = (i18n.t(lang, "export_what_all", conversations=len(conversations))
-                if selection == "all" or len(conversations) > 1
-                else _export_one_name(lang, conversations[0]))
-        text = i18n.t(lang, "export_modes", what=what, count=count)
-        if left_out:
-            text += "\n\n" + i18n.t(lang, "export_left_out", count=left_out)
-        await edit_in_place(query.message, context.bot, text,
-                            reply_markup=_export_mode_keyboard(lang, selection))
-        return
-
-    if action not in ("copy", "doc"):
-        await query.answer()
-        return
-
-    # Refused before it starts rather than half-way through: an export is
-    # hundreds of Telegram calls, and a container about to go is a container
-    # that would stop somewhere in the middle of somebody's conversation.
-    refusal = await refuse_new_work(lang, user.id, chat_id)
-    if refusal:
-        await query.answer(refusal, show_alert=True)
-        return
-
-    conversations, rows, left_out = await _export_rows(user.id, chat_id, selection)
-    if not conversations or not any(rows.values()):
-        await query.answer(i18n.t(lang, "export_gone"), show_alert=True)
-        return
-    await query.answer()
-    if action == "copy":
-        await _export_by_copying(context, query.message, lang, conversations, rows)
-    else:
-        await _export_as_document(context, query.message, lang, user, conversations, rows,
-                                  left_out)
-
-
-def _export_one_name(lang: str, conv: dict) -> str:
-    # The number is the owner's own index for their inbox, so a guest is never
-    # shown it -- the same rule as every other guest-facing string.
-    return (i18n.t(lang, "export_what_numbered", number=conv["conv_number"]) if conv["is_owner"]
-            else i18n.t(lang, "export_what_yours"))
-
-
-class _Progress:
-    """One line that keeps a count, rewritten at most every couple of
-    seconds."""
-
-    def __init__(self, bot, message, lang: str, total: int, key: str):
-        self.bot, self.message, self.lang = bot, message, lang
-        self.total, self.key, self.done, self.last = total, key, 0, 0.0
-
-    async def step(self, by: int = 1) -> None:
-        self.done += by
-        now = asyncio.get_running_loop().time()
-        if self.done < self.total and now - self.last < EXPORT_PROGRESS_SECONDS:
-            return
-        self.last = now
-        try:
-            await edit_in_place(self.message, self.bot,
-                                i18n.t(self.lang, self.key, done=self.done, total=self.total))
-        except Exception:
-            logger.debug("Could not update the export progress", exc_info=True)
-
-
-async def _export_by_copying(context, message, lang: str, conversations, rows) -> None:
-    """Telegram copies each message into the chat. The bot names an id and
-    never sees what is in it.
-
-    Each conversation gets a line above it saying which it is -- the bot's own
-    words, not anybody's -- so a copy of five threads is readable as five
-    threads rather than as one long one.
-    """
-    chat_id = message.chat_id
-    total = sum(len(got) for got in rows.values())
-    progress = _Progress(context.bot, message, lang, total, "export_copy_progress")
-    await progress.step(0)
-    copied, missing = 0, 0
-    for conv in conversations:
-        if not rows.get(conv["id"]):
-            continue
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id, disable_notification=True,
-                text=i18n.t(lang, "export_copy_header", what=_export_one_name(lang, conv),
-                            count=len(rows[conv["id"]])))
-        except Exception:
-            logger.debug("Could not write an export header", exc_info=True)
-        for row in rows[conv["id"]]:
-            try:
-                await context.bot.copy_message(
-                    chat_id=chat_id, from_chat_id=chat_id,
-                    message_id=row["message_id"], disable_notification=True)
-                copied += 1
-            except Exception:
-                # A message the person has since deleted, or one Telegram will
-                # not copy. Counted and named at the end rather than failing
-                # the whole export over one bubble.
-                missing += 1
-            await progress.step()
-    done = i18n.t(lang, "export_copy_done", count=copied)
-    if missing:
-        done += "\n\n" + i18n.t(lang, "export_copy_missing", count=missing)
-    await context.bot.send_message(chat_id=chat_id, text=done, disable_notification=True)
-    await edit_in_place(message, context.bot, i18n.t(lang, "export_copy_finished", count=copied))
-
-
-async def _read_one(context, chat_id: int, message_id: int):
-    """Forward a message to its own chat, read what Telegram hands back, and
-    take the copy down again.
-
-    This is the whole of "accessing the contents", and it is the only way a
-    bot can: there is no API for reading a message by id. The copy is deleted
-    before the next one is made, so at most one extra message is on screen at
-    any moment, and it is sent silently so nobody's phone lights up for it.
-    """
-    forwarded = await context.bot.forward_message(
-        chat_id=chat_id, from_chat_id=chat_id, message_id=message_id,
-        disable_notification=True)
-    try:
-        return forwarded
-    finally:
-        try:
-            await context.bot.delete_message(
-                chat_id=chat_id, message_id=forwarded.message_id)
-        except Exception:
-            logger.debug("Could not delete a read copy in %s", chat_id, exc_info=True)
-
-
-async def _export_as_document(context, message, lang: str, user, conversations, rows,
-                              left_out: int) -> None:
-    """The transcript, read message by message and kept nowhere."""
-    chat_id = message.chat_id
-    total = sum(len(got) for got in rows.values())
-    progress = _Progress(context.bot, message, lang, total, "export_doc_progress")
-    await progress.step(0)
-
-    def note(item) -> str:
-        if item.kind == "text":
-            return ""
-        label = i18n.t(lang, f"export_kind_{item.kind}")
-        return f"[{label}: {item.detail}]" if item.detail else f"[{label}]"
-
-    owner_label = i18n.t(lang, "export_doc_owner")
-    anon_label = i18n.t(lang, "export_doc_anon")
-    sections, count, unreadable = [], 0, 0
-    for conv in conversations:
-        headers = _header_texts(conv)
-        entries = []
-        for row in rows.get(conv["id"], ()):
-            try:
-                forwarded = await _read_one(context, chat_id, row["message_id"])
-            except Exception:
-                unreadable += 1
-                await progress.step()
-                continue
-            side = transcript.side_of(row["from_bot"], conv["is_owner"])
-            item = transcript.item_for(forwarded, row["message_id"], side, row["sent_at"])
-            text = item.text
-            if row["from_bot"] and text:
-                # The bot's header line above a delivered bubble is the bot
-                # talking, not either side of the conversation.
-                text = transcript.strip_header(text, headers)
-                if text is None and item.kind == "text":
-                    await progress.step()
-                    continue
-            entries.append({"label": owner_label if side == transcript.OWNER else anon_label,
-                            "own": side == transcript.OWNER, "text": text or "",
-                            "note": note(item), "when": item.sent_at})
-            await progress.step()
-        if not entries:
-            continue
-        count += len(entries)
-        sections.append((_export_one_name(lang, conv),
-                         i18n.t(lang, "export_doc_started",
-                                date=str(conv.get("started_at") or "")[:10],
-                                count=len(entries)), entries))
-
-    if not sections:
-        await edit_in_place(message, context.bot, i18n.t(lang, "export_failed"))
-        return
-    now = datetime.now(timezone.utc)
-    page = transcript.render(
-        title=i18n.t(lang, "export_doc_title"),
-        generated=i18n.t(lang, "export_doc_generated", date=f"{now:%Y-%m-%d %H:%M}"),
-        lang=lang, sections=sections, footer=i18n.t(lang, "export_doc_footer"))
-    caption = i18n.t(lang, "export_caption", messages=count, conversations=len(sections))
-    if unreadable:
-        caption += "\n" + i18n.t(lang, "export_doc_unreadable", count=unreadable)
-    if left_out:
-        caption += "\n" + i18n.t(lang, "export_left_out", count=left_out)
-    await context.bot.send_document(
-        chat_id=chat_id, document=BytesIO(page), caption=caption,
-        filename=f"anonbot_transcript_{now:%Y-%m-%d_%H%M}.html")
-    await edit_in_place(message, context.bot, i18n.t(lang, "export_done"))
-
-
-def _header_texts(conv: dict) -> list:
-    """Every header the bot could have put above a delivered bubble of this
-    conversation, in every language, so it comes off a forwarded one."""
-    headers = []
-    for language in i18n.SUPPORTED_LANGUAGES:
-        headers.append(i18n.t(language, "incoming_header", conv_number=conv["conv_number"]))
-        headers.append(i18n.t(language, "incoming_header_follower"))
-    return headers
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    await update.message.reply_text(i18n.t(lang, "export_removed"))
 
 
 async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> list[CancelItem]:
@@ -2122,7 +1790,7 @@ async def _knows_reactions(context, user_id: int) -> bool:
     try:
         owed = await asyncio.to_thread(claim_reactions_note, user_id)
     except Exception:
-        logger.debug("Could not read whether %s knows about reactions", user_id, exc_info=True)
+        logger.debug("Could not read whether a user knows about reactions", exc_info=True)
         return False
     context.user_data[KNOWS_REACTIONS_KEY] = True
     return owed
@@ -2276,10 +1944,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user = update.effective_user
     chat_id = message.chat_id
-
-    # A forward while this person's export is open is for the transcript and
-    # nothing else. It is never relayed, whatever it replies to and whichever
-    # album it came in -- which is why it is asked before anything below.
 
     # 0. A later part of an album goes exactly where the first part went,
     #    before any other question is asked. See _album_route: the parts
@@ -2501,7 +2165,6 @@ def main():
     app.add_handler(CallbackQueryHandler(block_callback, pattern=r"^aq_block:"))
     app.add_handler(CallbackQueryHandler(unblock_from_conversation_callback, pattern=r"^aq_unblockc:"))
     app.add_handler(CallbackQueryHandler(unblock_from_list_callback, pattern=r"^aq_unblockg:"))
-    app.add_handler(CallbackQueryHandler(export_callback, pattern=r"^aq_export:"))
 
     # ---- donations (Telegram Stars) -- this bot's only Stars usage ----
     app.add_handler(CommandHandler("balance", balance_command))

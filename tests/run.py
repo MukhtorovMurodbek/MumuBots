@@ -41,8 +41,6 @@ def main() -> int:
         ("state across restarts", ["test_lifecycle.py"]),
         ("the /ping report", ["test_ping.py"]),
         ("/backup is restorable, and stays pinned", ["test_backup.py"]),
-        ("a transcript is read once and kept nowhere", ["test_transcript.py"]),
-        ("an export copies without reading, or reads once", ["test_export.py"]),
         ("problems are levelled, alerted once, reported nightly", ["test_reporting.py"]),
         ("one Conflict is a warning; three in two minutes is a second copy, said once", ["test_conflict_alert.py"]),
         ("reactions travel, and feedback reaches only the owner", ["test_reactions_feedback.py"]),
@@ -103,6 +101,7 @@ def main() -> int:
         ("a post sent before is sent again by its file ids, and the table knows nobody", ["test_sent_files.py"]),
         ("button taps are counted, and the counts say nothing about who", ["test_button_taps.py"]),
         ("/buttons reports the counts, to the owner only", ["test_button_taps.py", "manager"]),
+        ("the combined runner stops when the key guard refuses a bot, or ManagerBot cannot load", ["test_combined_guard.py"]),
     ]
     runs += [(f"{bot}: the policy commands read as prose", ["test_policies.py", bot])
              for bot in PUBLIC_BOTS]

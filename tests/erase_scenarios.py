@@ -71,6 +71,18 @@ def main(bot: str) -> int:
     sys.path.insert(1, str(ROOT / "shared"))
 
     import db  # noqa: E402  -- after DB_SCHEMA is set, which db reads at import
+    import vault  # noqa: E402
+
+    def stored(user_id: int, table: str = "") -> int:
+        """What an identity column holds for this person. AnonBot (2.1.1)
+        stores vault.pseudonym(id), except that its Stars ledger keeps the
+        payer under their own stand-in (2.1.2, so it can't be lined up with
+        the family's ledger); the other three bots keep their ids."""
+        if bot != "anon_bot":
+            return user_id
+        if table == KEPT_TABLE:
+            return vault.pseudonym_in(user_id, "anon.payer")
+        return vault.pseudonym(user_id)
 
     failures = []
 
@@ -80,6 +92,14 @@ def main(bot: str) -> int:
             failures.append(label)
 
     db.init_db()
+
+    with db.pooled() as conn:
+        # The username is a sealed column since 2.1.1 (username_sealed); a bot
+        # that has not moved yet still has the plain one.
+        name_column = "username_sealed" if conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = %s "
+            "AND table_name = 'star_transactions' AND column_name = 'username_sealed'",
+            (schema,)).fetchone() else "username"
 
     def user_columns() -> list[tuple[str, str]]:
         """(table, column) for every place in this schema that holds a user
@@ -97,7 +117,7 @@ def main(bot: str) -> int:
         with db.pooled() as conn:
             return conn.execute(
                 f'SELECT count(*) FROM "{schema}"."{table}" WHERE "{column}" = %s',
-                (user_id,),
+                (stored(user_id, table),),
             ).fetchone()[0]
 
     def wipe() -> None:
@@ -173,7 +193,7 @@ def main(bot: str) -> int:
             with db.pooled() as conn:
                 names = conn.execute(
                     f'SELECT count(*) FROM "{schema}"."{table}" '
-                    f"WHERE user_id = %s AND username IS NOT NULL", (TARGET,)).fetchone()[0]
+                    f"WHERE user_id = %s AND {name_column} IS NOT NULL", (stored(TARGET, KEPT_TABLE),)).fetchone()[0]
             check(f"{bot}: {table} no longer carries the username", names == 0, str(names))
             continue
         check(f"{bot}: {table}.{column} has nothing left for them", left == 0, f"{left} row(s)")
@@ -197,10 +217,12 @@ def main(bot: str) -> int:
                   for t, column in columns if t == table))
     with db.pooled() as conn:
         kept = conn.execute(
-            f'SELECT username FROM "{schema}"."{KEPT_TABLE}" WHERE user_id = %s',
-            (BYSTANDER,)).fetchone()
+            f'SELECT {name_column} FROM "{schema}"."{KEPT_TABLE}" WHERE user_id = %s',
+            (stored(BYSTANDER, KEPT_TABLE),)).fetchone()
+    if kept is not None and name_column == "username_sealed":
+        kept = (vault.open_text(kept[0], "stars.username"),)       # sealed since 2.1.1
     check(f"{bot}: the bystander's username is untouched",
-          kept is not None and kept[0] == "bystander", str(kept))
+          kept is not None and kept[0] == "bystander", "the row is missing or the name changed")
 
     # Erasing somebody who was never here is a no-op, not an error -- somebody
     # will send /deletemydata as their first ever message.

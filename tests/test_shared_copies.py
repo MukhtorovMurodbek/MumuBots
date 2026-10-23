@@ -43,7 +43,7 @@ PUBLIC = [b for b in BOTS if b != "manager_bot"]
 SHARED = ROOT / "shared"
 # What lives in shared/ and nowhere else.
 SHARED_MODULES = ("family_link.py", "live_message.py", "lifecycle.py", "problems.py", "shared_features.py",
-                  "big_files.py", "envfiles.py", "pricing.py")
+                  "big_files.py", "envfiles.py", "pricing.py", "vault.py")
 
 # monitoring.py functions that differ from shared_features.py on purpose.
 DIFFERENT_ON_PURPOSE = {
@@ -57,6 +57,10 @@ DIFFERENT_ON_PURPOSE = {
     "flush_on_shutdown":
         "its db always has close_pool, so the getattr guard the four public "
         "bots need would be dead code here.",
+    "_flush_activity_now":
+        "ManagerBot has no /deletemydata (its one user is the owner), so its "
+        "flush has no recently-erased people to leave out, and no erase to "
+        "wait for.",
     "record_error":
         'says "ManagerBot itself hit ..." -- it reports on four other bots, so '
         "whose crash it is has to be in the sentence.",

@@ -42,6 +42,8 @@ family_link.py and live_message.py.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import logging
 import os
@@ -52,6 +54,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import db
+import vault
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +226,67 @@ def release_lease() -> None:
 
 STATE_TABLE = "runtime_state"
 
+# What the table's rows are sealed under (shared/vault.py).
+STATE_PURPOSE = "lifecycle.state"
+WAITLIST_PURPOSE = "lifecycle.waitlist"
+
+# Sealed since 2.1.2CHL. user_data holds a person's language, a half-built
+# pack's name, an AnonBot inbox token; a conversation's key says who is in
+# which chat. So a row keeps neither in the clear:
+#   key    the same shape as before, each id replaced by its pseudonym, so the
+#          primary key still finds a person's row and /deletemydata can still
+#          delete it (forget_user);
+#   value  {"sealed": <base64>}, which opens to {"key": <the original key>,
+#          "data": <the original value>}.
+# Reading opens every row and hands back the original key and value, so
+# nothing above this block ever sees a pseudonym. A row that does not open,
+# or whose sealed key is not the one it sits under, is skipped with a warning
+# (the table and the kind, never a key or a value).
+
+
+def _pseudo_key(kind: str, key: str) -> str:
+    """The key a row is stored under. ValueError when `key` is not one this
+    table knows how to hide (a part that is not a number, a part that already
+    is a pseudonym, a kind we do not store) -- never a plain key by default."""
+    if kind == "user":
+        return str(vault.pseudonym(int(key)))
+    if kind == "conversation":
+        name, bar, pair = key.partition("|")
+        if not bar:
+            raise ValueError("a conversation key has the form name|chat:user")
+        return f"{name}|" + ":".join(str(vault.pseudonym(int(part))) for part in pair.split(":"))
+    raise ValueError(f"unknown kind of saved state: {kind!r}")
+
+
+def _seal_state(kind: str, key: str, value) -> "tuple[str, dict]":
+    """(the key to store, the value to store) for one row."""
+    stored_key = _pseudo_key(kind, key)
+    blob = vault.seal_json({"key": key, "data": value}, STATE_PURPOSE)
+    return stored_key, {"sealed": base64.b64encode(blob).decode("ascii")}
+
+
+def unseal_state(kind: str, stored_key: str, stored_value) -> "tuple[str, object]":
+    """(the original key, the original value) of a stored row. VaultError when
+    the row is not sealed, does not open, or has been moved to another key."""
+    if not isinstance(stored_value, dict) or not isinstance(stored_value.get("sealed"), str):
+        raise vault.VaultError("A saved state row is not sealed")
+    try:
+        blob = base64.b64decode(stored_value["sealed"], validate=True)
+    except (ValueError, binascii.Error):
+        raise vault.VaultError("A saved state row is not sealed") from None
+    try:
+        payload = vault.open_json(blob, STATE_PURPOSE)
+    except ValueError:                  # it opened, but is not the JSON we sealed
+        raise vault.VaultError("A saved state row is malformed") from None
+    try:
+        key, data = payload["key"], payload["data"]
+        belongs = _pseudo_key(kind, key) == stored_key
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise vault.VaultError("A saved state row is malformed") from None
+    if not belongs:
+        raise vault.VaultError("A saved state row does not belong to its key")
+    return key, data
+
 
 def init_state_table() -> None:
     with db.pooled() as conn:
@@ -282,6 +346,16 @@ def _write_state(rows: list[tuple[str, str, dict]]) -> None:
         return
     from psycopg.types.json import Jsonb
 
+    sealed = []
+    for kind, key, value in rows:
+        try:
+            stored_key, stored_value = _seal_state(kind, key, value)
+        except ValueError:
+            logger.warning("%s: not saving a %s row whose key cannot be hidden.", STATE_TABLE, kind)
+            continue
+        sealed.append((kind, stored_key, Jsonb(stored_value)))
+    if not sealed:
+        return
     with db.pooled() as conn:
         with conn.cursor() as cur:
             cur.executemany(
@@ -291,24 +365,31 @@ def _write_state(rows: list[tuple[str, str, dict]]) -> None:
                 ON CONFLICT (kind, key) DO UPDATE
                 SET value = excluded.value, updated_at = excluded.updated_at
                 """,
-                [(kind, key, Jsonb(value)) for kind, key, value in rows],
+                sealed,
             )
         conn.commit()
 
 
 def _delete_state(rows: list[tuple[str, str]]) -> None:
-    if not rows:
+    stored = []
+    for kind, key in rows:
+        try:
+            stored.append((kind, _pseudo_key(kind, key)))
+        except ValueError:
+            continue        # never saved under a key we could hide, so there is nothing to delete
+    if not stored:
         return
     with db.pooled() as conn:
         with conn.cursor() as cur:
-            cur.executemany(f"DELETE FROM {STATE_TABLE} WHERE kind = %s AND key = %s", rows)
+            cur.executemany(f"DELETE FROM {STATE_TABLE} WHERE kind = %s AND key = %s", stored)
         conn.commit()
 
 
 def _read_state(kind: str) -> list[tuple[str, dict]]:
     """Everything of one kind that is still young enough to mean something,
     deleting the rest on the way past -- the only pruning this table needs,
-    and it happens once per process start."""
+    and it happens once per process start. (key, value) as they were saved,
+    the ids real again; a row that does not open is skipped."""
     with db.pooled() as conn:
         conn.execute(
             f"DELETE FROM {STATE_TABLE} WHERE updated_at < now() - make_interval(hours => %s)",
@@ -317,7 +398,13 @@ def _read_state(kind: str) -> list[tuple[str, dict]]:
         cur = conn.execute(f"SELECT key, value FROM {STATE_TABLE} WHERE kind = %s", (kind,))
         rows = cur.fetchall()
         conn.commit()
-    return rows
+    opened = []
+    for stored_key, stored_value in rows:
+        try:
+            opened.append(unseal_state(kind, stored_key, stored_value))
+        except vault.VaultError:
+            logger.warning("%s: a saved %s row did not open -- skipping it.", STATE_TABLE, kind)
+    return opened
 
 
 def forget_user(user_id: int) -> int:
@@ -331,7 +418,9 @@ def forget_user(user_id: int) -> int:
 
     Conversation rows are matched on the key's *last* component. A
     ConversationHandler key is (chat, user) by default and (user,) with
-    per_chat=False, and the user id is the trailing part either way.
+    per_chat=False, and the user id is the trailing part either way. The
+    keys are stored with pseudonyms in place of the ids (see above), so the
+    patterns are built from the person's pseudonym.
 
     Returns 0 when the table is not there at all, which is the normal state
     of a bot running with DEPLOY_SAFETY=off: nothing was persisted, so there
@@ -343,10 +432,11 @@ def forget_user(user_id: int) -> int:
     with db.pooled() as conn:
         if conn.execute("SELECT to_regclass(%s)", (STATE_TABLE,)).fetchone()[0] is None:
             return 0
+        who = vault.pseudonym(user_id)
         cur = conn.execute(
             f"DELETE FROM {STATE_TABLE} WHERE (kind = 'user' AND key = %s) "
             f"OR (kind = 'conversation' AND (key LIKE %s OR key LIKE %s))",
-            (str(user_id), f"%:{user_id}", f"%|{user_id}"),
+            (str(who), f"%:{who}", f"%|{who}"),
         )
         removed = cur.rowcount or 0
         conn.commit()
@@ -670,10 +760,19 @@ def init_waitlist_table() -> None:
                 user_id BIGINT NOT NULL,
                 chat_id BIGINT NOT NULL,
                 held_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                who_sealed BYTEA,
                 PRIMARY KEY (bot_id, user_id)
             )
             """
         )
+        # user_id and chat_id hold pseudonyms since 2.1.2CHL; the real ids are
+        # in who_sealed, which is how take_held() knows whom to tell. A table
+        # made by an older version gets the column here and nothing else is
+        # rewritten (scripts/encrypt_personal_data.py empties the old rows).
+        import family_link
+
+        if family_link._column_missing(conn, WAITLIST_TABLE, "who_sealed"):
+            conn.execute(f"ALTER TABLE {schema}.{WAITLIST_TABLE} ADD COLUMN IF NOT EXISTS who_sealed BYTEA")
         conn.commit()
 
 
@@ -789,23 +888,24 @@ def hold_for_update(user_id: int, chat_id: int, bot_id: "str | None" = None) -> 
         return
     schema = _family_schema()
     try:
+        who = vault.seal_json({"user": user_id, "chat": chat_id}, WAITLIST_PURPOSE)
         with db.pooled() as conn:
             conn.execute(
                 f"""
-                INSERT INTO {schema}.{WAITLIST_TABLE} (bot_id, user_id, chat_id)
-                VALUES (%s, %s, %s)
+                INSERT INTO {schema}.{WAITLIST_TABLE} (bot_id, user_id, chat_id, who_sealed)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (bot_id, user_id) DO NOTHING
                 """,
-                (bot_id, user_id, chat_id),
+                (bot_id, vault.pseudonym(user_id), vault.pseudonym(chat_id), who),
             )
             conn.commit()
     except Exception:
-        logger.debug("Could not add %s to the update waitlist", user_id, exc_info=True)
+        logger.debug("Could not add somebody to the update waitlist", exc_info=True)
 
 
 def take_held(bot_id: str) -> "list[tuple[int, int]]":
-    """Everyone waiting on this bot, as (user_id, chat_id), removed as they
-    are handed over. Blocking.
+    """Everyone waiting on this bot, as (user_id, chat_id) -- the real ids,
+    opened from the sealed column -- removed as they are handed over. Blocking.
 
     Deleted in the same statement that returns them, so a second
     /finishupdates -- or two of them racing -- cannot message anybody twice.
@@ -814,12 +914,23 @@ def take_held(bot_id: str) -> "list[tuple[int, int]]":
     with db.pooled() as conn:
         cur = conn.execute(
             f"DELETE FROM {schema}.{WAITLIST_TABLE} WHERE bot_id = %s "
-            f"RETURNING user_id, chat_id",
+            f"RETURNING user_id, chat_id, who_sealed",
             (bot_id,),
         )
         rows = cur.fetchall()
         conn.commit()
-    return [(int(u), int(c)) for u, c in rows]
+    held = []
+    for user_pseudonym, chat_pseudonym, sealed in rows:
+        try:
+            who = vault.open_json(sealed, WAITLIST_PURPOSE)
+            user_id, chat_id = int(who["user"]), int(who["chat"])
+            if vault.pseudonym(user_id) != user_pseudonym or vault.pseudonym(chat_id) != chat_pseudonym:
+                raise vault.VaultError("A sealed waitlist entry does not belong to its row")
+        except (vault.VaultError, KeyError, TypeError, ValueError, AttributeError):
+            logger.warning("family.%s: a held row for %s did not open -- skipping it.", WAITLIST_TABLE, bot_id)
+            continue
+        held.append((user_id, chat_id))
+    return held
 
 
 def in_flight() -> "list[tuple[int, str]]":

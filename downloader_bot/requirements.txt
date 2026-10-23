@@ -12,3 +12,7 @@ psycopg[binary,pool]>=3.2
 # Downloads over 48 MB go over MTProto (shared/big_files.py, large_files.py).
 Telethon>=1.40
 cryptg>=0.5
+
+# shared/vault.py: AES-256-GCM for the personal data the database keeps
+# sealed (2.1.1). Every bot reads or writes some of it.
+cryptography>=43

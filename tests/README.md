@@ -577,6 +577,22 @@ them mentions the erased id afterwards, with `star_transactions` as the one
 documented exception. A table added in a later version is therefore covered on
 the day it is created rather than the day somebody remembers it.
 
+```bash
+python tests/anon_encryption.py       # needs DATA_KEY_FILE; one group: ... anon_encryption.py c
+```
+
+AnonBot's sealed personal data, on a database built the way 2.1.0 built it
+(its own CREATE TABLE statements, with star_transactions.username and
+anon_relay.sent_at / from_bot, plain Telegram ids, an activity-only user, rows
+already part-converted). A: the conversion, a second run that changes nothing,
+verify, and every db function answering with the real ids. B: verify raises for
+a plain id in any identity column and for any seal that does not match its row.
+C: a seal moved onto another row is refused. D: after `erase_user` nothing of the
+person is left, sealed or not. E: `db_merge.py` merges under one key and refuses
+another before writing. F: the log. Works in two schemas of its own and drops
+them. `python tests/sealed_check.py` then looks over every anon_* schema in the
+test database for a real id left in the clear.
+
 `tests/test_release_push.py` is part of `run.py` and needs git. Since 2.0.0
 `scripts/nightly_release.py` releases the base edition by pushing this folder
 to MumuBots, and the C edition by pushing its folder to MumuCombined (or

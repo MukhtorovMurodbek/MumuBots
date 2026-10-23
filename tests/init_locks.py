@@ -59,9 +59,7 @@ EXPECT = {
                   ("anon_conversations", "follower_first_msg_at"): "text",
                   ("anon_conversations", "archived_at"): "text",
                   ("anon_relay", "is_prompt"): "boolean",
-                  ("anon_relay", "peer_message_id"): "bigint",
-                  ("anon_relay", "sent_at"): "timestamp with time zone",
-                  ("anon_relay", "from_bot"): "boolean"},
+                  ("anon_relay", "peer_message_id"): "bigint"},
                  [("anon_conversations", "owner_replied_at")]),
 }
 

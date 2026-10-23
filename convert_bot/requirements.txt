@@ -67,3 +67,7 @@ rawpy>=0.22
 # turns a fourteen-line upload from a stranger into gigabytes of memory or a
 # read of a local file. See data_convert.py.
 defusedxml>=0.7
+
+# shared/vault.py: AES-256-GCM for the personal data the database keeps
+# sealed (2.1.1). Every bot reads or writes some of it.
+cryptography>=43

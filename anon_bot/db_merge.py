@@ -35,6 +35,15 @@ POLICY -- read this before you run it for real
   - Always run with --dry-run first. It runs the exact same logic inside a
     transaction that gets rolled back instead of committed, and prints what
     it *would* do.
+  - Personal data is sealed (2.1.1): every Telegram id in these tables is a
+    pseudonym, and the ids the bot must read back sit beside it in sealed
+    columns. Both databases must have been sealed with the SAME data key --
+    family.settings 'data_key:v1' must exist in both, be equal, and be the key
+    this machine's DATA_KEY_FILE holds -- or nothing is merged. A sealed value
+    is compared by what it opens to (the same person sealed twice gives two
+    different ciphertexts), and a source row whose sealed value does not open,
+    or does not belong to its row, is skipped and counted, never copied.
+    This script never prints an id, a username or a sealed value.
 """
 from __future__ import annotations
 
@@ -46,20 +55,39 @@ from pathlib import Path
 
 
 import db
+import vault
 
+# "ids" are the columns that hold a person or chat as a pseudonym. "sealed" maps
+# a sealed column to (purpose, "id" or "text", the pseudonym column it must
+# match). Two databases sealed with one key hold the same pseudonym for the
+# same person, so the keys compare as stored; the sealed bytes do not (a fresh
+# nonce each time), so rows are compared by what the seals open to.
 PLAIN_TABLES = [
     {"name": "star_transactions", "key": ("payload",),
-     "cols": ["user_id", "username", "amount_stars", "item", "status", "payload",
-              "charge_id", "currency", "created_at", "updated_at"]},
+     "cols": ["user_id", "username_sealed", "amount_stars", "item", "status", "payload",
+              "charge_id", "currency", "created_at", "updated_at"],
+     "ids": ["user_id"],
+     "sealed": {"username_sealed": ("stars.username", "text", None)}},
     {"name": "donation_prompts", "key": ("user_id",),
-     "cols": ["user_id", "action_count", "last_shown_at"]},
+     "cols": ["user_id", "action_count", "last_shown_at"],
+     "ids": ["user_id"], "sealed": {}},
     {"name": "anon_links", "key": ("owner_user_id",),
-     "cols": ["owner_user_id", "token", "is_paused", "created_at"]},
+     "cols": ["owner_user_id", "owner_sealed", "token", "is_paused", "created_at"],
+     "ids": ["owner_user_id"],
+     "sealed": {"owner_sealed": ("anon.link.owner", "id", "owner_user_id")}},
     {"name": "anon_blocks", "key": ("owner_user_id", "follower_user_id"),
-     "cols": ["owner_user_id", "follower_user_id", "blocked_at"]},
+     "cols": ["owner_user_id", "follower_user_id", "blocked_at"],
+     "ids": ["owner_user_id", "follower_user_id"], "sealed": {}},
     {"name": "user_settings", "key": ("user_id",),
-     "cols": ["user_id", "language"]},
+     "cols": ["user_id", "user_sealed", "language"],
+     "ids": ["user_id"],
+     "sealed": {"user_sealed": ("anon.user", "id", "user_id")}},
 ]
+KEY_STAMP = "data_key:v1"
+
+
+class MergeRefused(RuntimeError):
+    """The two databases cannot be merged as they stand. Nothing was written."""
 # activity_events (per-update telemetry backing /status's active-user counts)
 # is deliberately NOT merged here -- it's high-volume, has no real natural
 # key (occurred_at is a timestamp, not an identity), and has zero value
@@ -94,23 +122,82 @@ def fetch_rows(conn, table: str, cols: list[str]) -> list[tuple]:
     return cur.fetchall()
 
 
+def key_stamp(conn) -> "str | None":
+    """The fingerprint of the data key this database was sealed with, or None
+    when it has never been stamped (or has no family.settings at all)."""
+    if conn.execute("SELECT to_regclass('family.settings')").fetchone()[0] is None:
+        return None
+    row = conn.execute("SELECT value FROM family.settings WHERE key = %s", (KEY_STAMP,)).fetchone()
+    return row[0] if row else None
+
+
+def require_same_key(src_conn, dst_conn) -> None:
+    """Raises MergeRefused unless both databases carry the same data-key stamp
+    AND it is the key this machine holds -- a pseudonym or a seal made under
+    another key means nothing here, and merging them would plant rows no bot
+    could ever read."""
+    src, dst = key_stamp(src_conn), key_stamp(dst_conn)
+    if src is None or dst is None:
+        raise MergeRefused(
+            ("The source" if src is None else "The target") + " database has no data-key stamp "
+            "(family.settings 'data_key:v1'): its personal data is not sealed yet. Run "
+            "scripts/encrypt_personal_data.py on it first. Nothing was merged.")
+    if src != dst:
+        raise MergeRefused("The two databases were sealed with different data keys, so their "
+                           "pseudonyms and sealed values cannot be combined. Nothing was merged.")
+    if src != vault.fingerprint():
+        raise MergeRefused("DATA_KEY_FILE is not the key these databases were sealed with. "
+                           "Nothing was merged.")
+
+
+def _opened(row: tuple, cols: list[str], sealed: dict) -> "list | None":
+    """`row` with every sealed value replaced by what it opens to, or None
+    when one does not open, or does not belong to the pseudonym beside it."""
+    out = list(row)
+    for column, (purpose, kind, ties_to) in sealed.items():
+        i = cols.index(column)
+        try:
+            if kind == "id":
+                out[i] = vault.open_id(row[i], purpose, expected=row[cols.index(ties_to)])
+            else:
+                out[i] = vault.open_text(row[i], purpose)
+        except (vault.VaultError, TypeError, ValueError):
+            return None
+    return out
+
+
+def _described(row: tuple, cols: list[str], sealed: dict) -> dict:
+    """A row for the report: its pseudonyms and plain columns, with each sealed
+    column elided -- the report never carries a ciphertext or what it hides."""
+    return {c: ("<sealed>" if c in sealed else v) for c, v in zip(cols, row)}
+
+
+def _all_pseudonyms(row: tuple, cols: list[str], id_cols: list[str]) -> bool:
+    return all(row[cols.index(c)] is None or vault.is_pseudonym(row[cols.index(c)]) for c in id_cols)
+
+
 def merge_plain_table(src_conn, dst_conn, spec: dict, report: list[str]) -> None:
     name, key_cols, cols = spec["name"], spec["key"], spec["cols"]
+    sealed, id_cols = spec["sealed"], spec["ids"]
     key_idx = [cols.index(k) for k in key_cols]
 
     src_rows = fetch_rows(src_conn, name, cols)
     dst_rows = fetch_rows(dst_conn, name, cols)
     dst_by_key = {tuple(row[i] for i in key_idx): row for row in dst_rows}
 
-    added, identical, conflicts = 0, 0, []
+    added, identical, conflicts, refused = 0, 0, [], 0
     placeholders = ", ".join(["%s"] * len(cols))
     for row in src_rows:
         key = tuple(row[i] for i in key_idx)
+        logical = _opened(row, cols, sealed)
+        if logical is None or not _all_pseudonyms(row, cols, id_cols):
+            refused += 1
+            continue
         existing = dst_by_key.get(key)
         if existing is None:
             dst_conn.execute(f"INSERT INTO {name} ({', '.join(cols)}) VALUES ({placeholders})", row)
             added += 1
-        elif existing == row:
+        elif _opened(existing, cols, sealed) == logical:
             identical += 1
         else:
             conflicts.append((key, existing, row))
@@ -119,10 +206,14 @@ def merge_plain_table(src_conn, dst_conn, spec: dict, report: list[str]) -> None
         report.append(f"{name}: +{added} added, {identical} already identical, {len(conflicts)} conflicts (skipped)")
     else:
         report.append(f"{name}: nothing to add ({identical} already identical)")
+    if refused:
+        report.append(f"    {name}: {refused} source row(s) NOT copied -- a sealed value did not open, "
+                      f"did not belong to its row, or an id was not a pseudonym")
     for key, existing, row in conflicts:
         report.append(
             f"    conflict on {name} {key_cols}={key}: "
-            f"target has {dict(zip(cols, existing))}, source has {dict(zip(cols, row))} -- kept target's, review by hand"
+            f"target has {_described(existing, cols, sealed)}, source has {_described(row, cols, sealed)} "
+            f"-- kept target's, review by hand"
         )
 
 
@@ -134,7 +225,7 @@ def merge_anon_conversations(src_conn, dst_conn, report: list[str]) -> dict[int,
     identity match."""
     cols = ["id", "owner_user_id", "follower_user_id", "conv_number",
             "started_at", "last_activity_at", "last_owner_msg_id", "last_follower_msg_id",
-            "follower_first_msg_at", "archived_at"]
+            "follower_first_msg_at", "archived_at", "owner_sealed", "follower_sealed"]
     src_rows = fetch_rows(src_conn, "anon_conversations", cols)
     dst_rows = fetch_rows(dst_conn, "anon_conversations", cols)
 
@@ -144,12 +235,21 @@ def merge_anon_conversations(src_conn, dst_conn, report: list[str]) -> dict[int,
         used_conv_numbers.setdefault((r[1], r[2]), set()).add(r[3])
 
     id_map: dict[int, int] = {}
-    added, matched, renumbered = 0, 0, 0
+    added, matched, renumbered, refused = 0, 0, 0, 0
 
     for row in src_rows:
         (src_id, owner, follower, conv_number, started_at,
          last_activity_at, last_owner_msg_id, last_follower_msg_id,
-         follower_first_msg_at, archived_at) = row
+         follower_first_msg_at, archived_at, owner_sealed, follower_sealed) = row
+        # Both people are pseudonyms, and each sealed id must open to the person
+        # its pseudonym stands for. A row that fails is left behind, and what
+        # pointed at it is reported as orphaned below.
+        try:
+            vault.open_id(owner_sealed, "anon.conversation.owner", expected=owner)
+            vault.open_id(follower_sealed, "anon.conversation.follower", expected=follower)
+        except (vault.VaultError, TypeError, ValueError):
+            refused += 1
+            continue
         pair = (owner, follower)
         identity_key = (owner, follower, started_at)
         existing = dst_by_identity.get(identity_key)
@@ -169,12 +269,14 @@ def merge_anon_conversations(src_conn, dst_conn, report: list[str]) -> dict[int,
             """
             INSERT INTO anon_conversations
                 (owner_user_id, follower_user_id, conv_number, started_at, last_activity_at,
-                 last_owner_msg_id, last_follower_msg_id, follower_first_msg_at, archived_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 last_owner_msg_id, last_follower_msg_id, follower_first_msg_at, archived_at,
+                 owner_sealed, follower_sealed)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (owner, follower, target_conv_number, started_at, last_activity_at,
-             last_owner_msg_id, last_follower_msg_id, follower_first_msg_at, archived_at),
+             last_owner_msg_id, last_follower_msg_id, follower_first_msg_at, archived_at,
+             owner_sealed, follower_sealed),
         )
         new_id = cur.fetchone()[0]
         id_map[src_id] = new_id
@@ -182,7 +284,7 @@ def merge_anon_conversations(src_conn, dst_conn, report: list[str]) -> dict[int,
         dst_by_identity[identity_key] = (
             new_id, owner, follower, target_conv_number, started_at,
             last_activity_at, last_owner_msg_id, last_follower_msg_id,
-            follower_first_msg_at, archived_at,
+            follower_first_msg_at, archived_at, owner_sealed, follower_sealed,
         )
         added += 1
 
@@ -190,6 +292,7 @@ def merge_anon_conversations(src_conn, dst_conn, report: list[str]) -> dict[int,
         f"anon_conversations: +{added} added"
         + (f" ({renumbered} renumbered to avoid a coincidental conv_number collision)" if renumbered else "")
         + f", {matched} already identical"
+        + (f", {refused} NOT copied (a sealed id did not open or did not belong to its row)" if refused else "")
     )
     return id_map
 
@@ -200,8 +303,11 @@ def merge_anon_follower_state(src_conn, dst_conn, id_map: dict[int, int], report
     dst_rows = fetch_rows(dst_conn, "anon_follower_state", cols)
     dst_by_key = {row[0]: row for row in dst_rows}
 
-    added, identical, conflicts, orphaned = 0, 0, [], 0
+    added, identical, conflicts, orphaned, unsealed = 0, 0, [], 0, 0
     for follower_user_id, owner_user_id, conversation_id in src_rows:
+        if not (vault.is_pseudonym(follower_user_id) and vault.is_pseudonym(owner_user_id)):
+            unsealed += 1
+            continue
         new_conv_id = id_map.get(conversation_id)
         if new_conv_id is None:
             orphaned += 1
@@ -223,6 +329,8 @@ def merge_anon_follower_state(src_conn, dst_conn, id_map: dict[int, int], report
     msg = f"anon_follower_state: +{added} added, {identical} already identical, {len(conflicts)} conflicts (skipped)"
     if orphaned:
         msg += f", {orphaned} skipped (pointed at a conversation that wasn't found)"
+    if unsealed:
+        msg += f", {unsealed} NOT copied (an id was not a pseudonym)"
     report.append(msg)
     for follower_user_id, existing, remapped in conflicts:
         report.append(
@@ -237,8 +345,11 @@ def merge_anon_relay(src_conn, dst_conn, id_map: dict[int, int], report: list[st
     dst_rows = fetch_rows(dst_conn, "anon_relay", cols)
     dst_by_key = {(row[0], row[1]): row for row in dst_rows}
 
-    added, identical, conflicts, orphaned = 0, 0, [], 0
+    added, identical, conflicts, orphaned, unsealed = 0, 0, [], 0, 0
     for chat_id, message_id, conversation_id in src_rows:
+        if not vault.is_pseudonym(chat_id):
+            unsealed += 1
+            continue
         new_conv_id = id_map.get(conversation_id)
         if new_conv_id is None:
             orphaned += 1
@@ -260,11 +371,17 @@ def merge_anon_relay(src_conn, dst_conn, id_map: dict[int, int], report: list[st
     msg = f"anon_relay: +{added} added, {identical} already identical, {len(conflicts)} conflicts (skipped)"
     if orphaned:
         msg += f", {orphaned} skipped (pointed at a conversation that wasn't found)"
+    if unsealed:
+        msg += f", {unsealed} NOT copied (a chat id was not a pseudonym)"
     report.append(msg)
 
 
 def run_merge(src_dsn: str, dst_dsn: str, dry_run: bool) -> list[str]:
     report: list[str] = []
+    # Before anything is written, even by init_db: two databases that were not
+    # sealed with one key have nothing in common to merge on.
+    with closing(db.connect(src_dsn)) as src_conn, closing(db.connect(dst_dsn)) as dst_conn:
+        require_same_key(src_conn, dst_conn)
     if not dry_run:
         # The family shares one database with a schema per bot, so the target
         # side may be a brand-new empty schema (a freshly deployed Railway
@@ -306,7 +423,10 @@ def main() -> None:
             print("Cancelled -- nothing was touched.")
             return
 
-    report = run_merge(src_dsn, dst_dsn, dry_run=args.dry_run)
+    try:
+        report = run_merge(src_dsn, dst_dsn, dry_run=args.dry_run)
+    except MergeRefused as exc:
+        sys.exit(str(exc))
 
     print(f"\n{'DRY RUN -- nothing was saved' if args.dry_run else 'Merge complete'} "
           f"({args.src} -> {args.dst}):\n")

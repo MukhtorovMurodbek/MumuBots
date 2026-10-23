@@ -54,6 +54,7 @@ import sim  # noqa: E402
 import db  # noqa: E402
 import anon_logic  # noqa: E402
 import lifecycle  # noqa: E402
+import vault  # noqa: E402
 import live_message  # noqa: E402
 import shared_features  # noqa: E402
 from shared_features import ERASE_PREFIX  # noqa: E402
@@ -100,6 +101,16 @@ def reset_tables() -> None:
         conn.commit()
 
 
+def P(telegram_id: int) -> int:
+    """The pseudonym a table stores in place of this person's id (shared/vault.py)."""
+    return vault.pseudonym(telegram_id)
+
+
+def PAYER(telegram_id: int) -> int:
+    """What the Stars ledger stores for a payer: their own stand-in, never P() (anon_bot/db.py PAYER_DOMAIN)."""
+    return vault.pseudonym_in(telegram_id, "anon.payer")
+
+
 def one(sql: str, params=()):
     with db.pooled() as conn:
         row = conn.execute(sql, params).fetchone()
@@ -112,6 +123,8 @@ async def fresh():
     anon_logic._recent_opens.clear()
     shared_features._flood_window.clear()
     shared_features._flood_told.clear()
+    shared_features._recently_erased.clear()
+    shared_features._activity_buffer.clear()
     ab._albums.clear()
     # A new FakeTelegram restarts message ids at 1, but live_message's
     # watermark is module state and would still hold the previous group's
@@ -212,7 +225,7 @@ async def group_b() -> None:
 
     await owner.tap("Keep my data")
     check("saying no erases nothing",
-          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (OWNER,)) == 1)
+          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (P(OWNER),)) == 1)
     check("and says so", "Nothing was erased" in owner.last()[0], owner.last()[0])
     check("the confirmation's own buttons are gone afterwards",
           not owner.buttons(confirmation), str(owner.buttons(confirmation)))
@@ -243,38 +256,73 @@ async def group_c() -> None:
     await guest.send("hello, this is anonymous")
     await owner.send("/blocked")          # touches nothing, just realistic use
 
-    before = one("SELECT count(*) FROM anon_conversations WHERE owner_user_id = %s", (OWNER,))
+    before = one("SELECT count(*) FROM anon_conversations WHERE owner_user_id = %s", (P(OWNER),))
     check("the world is set up: a conversation exists", before == 1, str(before))
 
     await owner.send("/deletemydata")
     await owner.tap("Erase it")
 
     check("the link is gone",
-          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (OWNER,)) == 0)
+          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (P(OWNER),)) == 0)
     check("the conversation is gone",
-          one("SELECT count(*) FROM anon_conversations WHERE owner_user_id = %s", (OWNER,)) == 0)
+          one("SELECT count(*) FROM anon_conversations WHERE owner_user_id = %s", (P(OWNER),)) == 0)
     check("the relay rows went with it",
           one("SELECT count(*) FROM anon_relay") == 0)
     check("the language setting is gone",
-          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (OWNER,)) == 0)
+          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (P(OWNER),)) == 0)
     check("the activity rows are gone",
-          one("SELECT count(*) FROM activity_events WHERE user_id = %s", (OWNER,)) == 0)
+          one("SELECT count(*) FROM activity_events WHERE user_id = %s", (P(OWNER),)) == 0)
 
     check("the payment record is kept",
-          one("SELECT count(*) FROM star_transactions WHERE user_id = %s", (OWNER,)) == 1)
+          one("SELECT count(*) FROM star_transactions WHERE user_id = %s", (PAYER(OWNER),)) == 1)
     check("but without the username on it",
-          one("SELECT username FROM star_transactions WHERE user_id = %s", (OWNER,)) is None)
+          one("SELECT username_sealed FROM star_transactions WHERE user_id = %s", (PAYER(OWNER),)) is None)
 
     check("the bystander's link is untouched",
-          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (BYSTANDER,)) == 1)
+          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (P(BYSTANDER),)) == 1)
     check("the bystander's language is untouched",
-          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (BYSTANDER,)) == 1)
+          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (P(BYSTANDER),)) == 1)
+    sealed_name = one("SELECT username_sealed FROM star_transactions WHERE user_id = %s", (PAYER(BYSTANDER),))
     check("the bystander's username is untouched",
-          one("SELECT username FROM star_transactions WHERE user_id = %s", (BYSTANDER,)) == "somebody")
+          sealed_name is not None and vault.open_text(sealed_name, "stars.username") == "somebody")
 
     said = owner.last()[0]
     check("the person is told how much went", "erased" in said.lower(), said)
     check("and invited back", "/start" in said)
+
+    # M2: the confirming tap was itself an update, buffered as activity before
+    # the handler ran, and the next flush would write the person straight back
+    # (an activity row, and a settings row that makes them reachable again).
+    check("M2: the erase took the confirming tap out of the activity buffer",
+          OWNER not in shared_features._activity_buffer and OWNER in shared_features._recently_erased)
+    shared_features._flush_activity_now()
+    check("M2: a flush after the erase writes nothing back: no settings row, no activity row",
+          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (P(OWNER),)) == 0
+          and one("SELECT count(*) FROM activity_events WHERE user_id = %s", (P(OWNER),)) == 0)
+    check("M2: ...and the person is not in the broadcast list", OWNER not in db.list_all_users())
+    check("M2: ...while the bystander, recorded by the same flush, is",
+          one("SELECT count(*) FROM activity_events WHERE user_id = %s", (P(BYSTANDER),)) >= 1)
+    # A second, older confirmation tapped afterwards (or any message of theirs
+    # in the minutes after) is buffered again; the flush must still skip them.
+    await owner.send("/privacy")
+    check("M2: an update from the erased person is buffered like any other",
+          OWNER in shared_features._activity_buffer)
+    shared_features._flush_activity_now()
+    check("M2: ...and the flush skips it, for as long as the erase is recent",
+          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (P(OWNER),)) == 0
+          and OWNER not in db.list_all_users())
+    shared_features._recently_erased[OWNER] -= shared_features.ERASED_SKIP_SECONDS + 1
+    shared_features._activity_buffer.add(OWNER)
+    shared_features._flush_activity_now()
+    check("M2: once the erase is older than the skip window they are recorded again, as anyone returning is",
+          OWNER in db.list_all_users() and OWNER not in shared_features._recently_erased)
+    for fake in range(1, shared_features._FLOOD_MAX_TRACKED + 50):
+        shared_features._recently_erased[fake] = 0.0
+        shared_features._flood_trim(shared_features._recently_erased)
+    check("M2: the record of erased people is bounded",
+          len(shared_features._recently_erased) <= shared_features._FLOOD_MAX_TRACKED)
+    shared_features._recently_erased.clear()
+    db.erase_user(OWNER)
 
 
 # ---------------------------------------------------------------------------
@@ -367,13 +415,13 @@ async def group_f() -> None:
     await guest.tap("Erase it")
 
     check("the guest's follower state is gone",
-          one("SELECT count(*) FROM anon_follower_state WHERE follower_user_id = %s", (GUEST,)) == 0)
+          one("SELECT count(*) FROM anon_follower_state WHERE follower_user_id = %s", (P(GUEST),)) == 0)
     check("the jointly-held conversation goes with it",
-          one("SELECT count(*) FROM anon_conversations WHERE follower_user_id = %s", (GUEST,)) == 0)
+          one("SELECT count(*) FROM anon_conversations WHERE follower_user_id = %s", (P(GUEST),)) == 0)
     check("the owner's own link survives -- it was never the guest's to erase",
-          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (OWNER,)) == 1)
+          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (P(OWNER),)) == 1)
     check("and the owner's language survives",
-          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (OWNER,)) == 1)
+          one("SELECT count(*) FROM user_settings WHERE user_id = %s", (P(OWNER),)) == 1)
 
     # The owner replying into a thread whose other half asked to be forgotten.
     await owner.send("hello?")
@@ -424,18 +472,24 @@ async def group_g() -> None:
     # deliberately, and the DELETE that otherwise never runs outside Railway
     # runs against the real schema.
     lifecycle.init_state_table()
+    from psycopg.types.json import Jsonb
+    saved = []
+    for kind, key in (("user", str(OWNER)), ("conversation", f"packs|{OWNER}"), ("user", str(BYSTANDER))):
+        stored_key, stored_value = lifecycle._seal_state(kind, key, {})
+        saved.append((kind, stored_key, Jsonb(stored_value)))
     with db.pooled() as conn:
-        conn.execute(
-            "INSERT INTO runtime_state (kind, key, value) VALUES ('user', %s, '{}'::jsonb), "
-            "('conversation', %s, '{}'::jsonb), ('user', %s, '{}'::jsonb) "
-            "ON CONFLICT (kind, key) DO NOTHING",
-            (str(OWNER), f"packs|{OWNER}", str(BYSTANDER)),
-        )
+        for kind, stored_key, stored_value in saved:
+            conn.execute(
+                "INSERT INTO runtime_state (kind, key, value) VALUES (%s, %s, %s) "
+                "ON CONFLICT (kind, key) DO NOTHING", (kind, stored_key, stored_value))
         conn.commit()
+    check("the saved state is sealed: no plain id is a key",
+          one("SELECT count(*) FROM runtime_state WHERE key IN (%s, %s, %s)",
+              (str(OWNER), f"packs|{OWNER}", str(BYSTANDER))) == 0)
     removed = lifecycle.forget_user(OWNER)
     check("the persisted state rows are deleted for real", removed == 2, str(removed))
     check("and only that person's", one(
-        "SELECT count(*) FROM runtime_state WHERE key = %s", (str(BYSTANDER),)) == 1)
+        "SELECT count(*) FROM runtime_state WHERE key = %s", (str(P(BYSTANDER)),)) == 1)
     with db.pooled() as conn:
         conn.execute("DROP TABLE runtime_state")
         conn.commit()
@@ -486,7 +540,7 @@ async def group_h() -> None:
     await owner.send("/link")
     await owner.tap_data(ERASE_PREFIX + "no")
     check("a 'no' tap leaves the data alone",
-          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (OWNER,)) == 1)
+          one("SELECT count(*) FROM anon_links WHERE owner_user_id = %s", (P(OWNER),)) == 1)
 
 
 async def main() -> int:

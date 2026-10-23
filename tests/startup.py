@@ -67,6 +67,13 @@ db.close_pool()
 
 def main() -> int:
     failures = 0
+    # Every child ends in family_link.attach(), whose key guard refuses a
+    # database not stamped as sealed; this scratch one carries rows from other
+    # suites, so it is stamped the way the conversion script leaves a real one.
+    sys.path.insert(0, str(ROOT / "tests"))
+    sys.path.insert(1, str(ROOT / "shared"))
+    import seal_stamp
+    seal_stamp.stamp_database(DSN)
     for name, (folder, extra) in BOTS.items():
         print(f"== {name} ==")
         env = dict(os.environ)

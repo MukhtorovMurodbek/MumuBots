@@ -63,6 +63,12 @@ ALLOWED = {
         "owner at a keyboard; no bot imports it and no Telegram command "
         "reaches it. The one interpolated identifier is a table name that "
         "came back from information_schema a few lines earlier.",
+    "scripts/encrypt_personal_data.py":
+        "the one-way conversion, run by the owner at a keyboard with the bots "
+        "stopped; no bot imports it and no Telegram command reaches it. Its "
+        "one composed statement is the VACUUM, whose schema and table names "
+        "come from the database catalog (personal_data_tables) and are quoted "
+        "with sql.Identifier.",
     "sticker_bot/db_merge.py": "offline merge tool, identifiers from the database catalog",
     "convert_bot/db_merge.py": "offline merge tool, identifiers from the database catalog",
     "downloader_bot/db_merge.py": "offline merge tool, identifiers from the database catalog",

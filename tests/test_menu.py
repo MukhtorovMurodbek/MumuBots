@@ -37,6 +37,12 @@ UNADVERTISED = {
         "both would offer the same thing twice",
 }
 
+# Commands the bot no longer does but still answers, with one line saying so, for
+# people who type them from habit. Neither advertised nor named in /help.
+REMOVED = {
+    ("anon_bot", "export"): "removed in 2.1.2; the handler only says it is gone",
+}
+
 # The language switches, in every bot. Each is written in the language it
 # switches TO, which is what makes them the way back for somebody who cannot
 # read the menu at all -- so they must never stop working. What they do not
@@ -307,7 +313,8 @@ def check_public(bot):
           + (f" -- {', '.join(leaked)}" if leaked else ""), not leaked)
 
     missing = [c for c in sorted(public)
-               if c not in menu and (bot, c) not in UNADVERTISED]
+               if c not in menu and (bot, c) not in UNADVERTISED
+               and (bot, c) not in REMOVED]
     check(f"{bot}: every public command is advertised"
           + (f" -- {', '.join(missing)}" if missing else ""), not missing)
 
