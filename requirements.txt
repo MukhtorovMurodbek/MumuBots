@@ -2,6 +2,7 @@
 # versions, the higher one wins.
 
 # every bot
+cryptography>=43
 psycopg[binary,pool]>=3.2
 python-dotenv>=1.0
 python-telegram-bot[job-queue]>=21.3

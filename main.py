@@ -128,6 +128,7 @@ class Bot:
     task: asyncio.Task | None = None
     state: str = "new"
     problem: str = ""
+    data_key: bool = False
 
     @property
     def names(self) -> set[str]:
@@ -579,14 +580,33 @@ def load(bot: Bot, wire: bool = True) -> bool:
         return True
     except SystemExit as exc:
         bot.state, bot.problem = "skipped", str(exc)
+        bot.data_key = bool(getattr(exc, "data_key", False))
         log.warning("%s is not running: %s", bot.name, exc)
     except Exception as exc:
         bot.state, bot.problem = "failed", f"{type(exc).__name__}: {exc}"
+        bot.data_key = bool(getattr(exc, "data_key", False))
         log.exception("%s could not be loaded", bot.name)
     finally:
         _CURRENT.reset(token)
     forget(bot)
     return False
+
+def must_stop_family(wanted: list[Bot]) -> str | None:
+    """Why the whole process must end instead of running the bots that did load, or None.
+
+    Two things are not a bot quietly sitting out: the data key guard refused one (a key that is wrong or
+    cannot be checked says nothing about the others, which share the database), and ManagerBot, the one
+    that watches and reports on the rest, failed with an error. Exiting non-zero lets Docker's restart policy
+    try the whole container again; a bot that merely has no token, or failed alone, still leaves the rest running.
+    So does ManagerBot ending itself with a plain SystemExit (state "skipped": a setting it needs is missing),
+    since a restart cannot cure that and would only take the other four down with it."""
+    refused = [bot for bot in wanted if bot.state != "loaded" and bot.data_key]
+    manager = [bot for bot in wanted if bot.state == "failed" and bot.folder == "manager_bot"
+               and bot not in refused]
+    if not (refused or manager):
+        return None
+    return "; ".join([f"{bot.name}: the data key guard refused it ({bot.problem})" for bot in refused]
+                     + [f"{bot.name} could not be loaded ({bot.problem})" for bot in manager])
 
 def one_memory_reporter(bots: list[Bot]) -> None:
     """Every bot records what its process holds, for ManagerBot's /usage and the memory alarm."""
@@ -1113,7 +1133,17 @@ def main(argv: list[str]) -> int:
 
     family_holder: list[Family] = []
     patch_python_telegram_bot(family_holder)
-    runnable = [bot for bot in wanted if load(bot)]
+    runnable = []
+    for bot in wanted:
+        if load(bot):
+            runnable.append(bot)
+        elif bot.data_key:
+            # Nothing will run now, so the rest need not each wait out their own key check first.
+            break
+    stop = must_stop_family(wanted)
+    if stop:
+        log.critical("Not running any bot: %s. Exiting so the container restarts.", stop)
+        return 1
     if not runnable:
         reasons = sorted({bot.problem for bot in wanted if bot.problem})
         log.error("No bot could be loaded: %s", " / ".join(reasons) or "see the errors above")

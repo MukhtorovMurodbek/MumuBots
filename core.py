@@ -26,9 +26,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
+from psycopg import sql as pgsql
 
 import db
 import lifecycle
+import vault
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +316,260 @@ def init_family_schema() -> None:
             f"ON {FAMILY_SCHEMA}.feedback (delivered_at, id)"
         )
         conn.commit()
+
+DATA_KEY_SETTING = "data_key:v1"
+
+SEAL_STAGES = ("anon",)
+
+def sealed_setting(stage: str) -> str:
+    return f"sealed:{stage}:v1"
+
+STAGE_MARK = {"anon": "anon_conversations"}
+STAGE_TABLES = {
+    "anon": frozenset((
+        "anon_links", "anon_conversations", "anon_follower_state", "anon_relay", "anon_blocks",
+        "user_settings", "donation_prompts", "promo_seen", "activity_events", "star_transactions")),
+}
+
+STATE_TABLES = (lifecycle.STATE_TABLE, lifecycle.WAITLIST_TABLE)
+
+_TEST_PREFIX = "testbot_"
+
+def belongs_to_family(schema: str, family_schema: "str | None" = None) -> bool:
+    """Is `schema` one of the schemas of the family kept in `family_schema` (default: this process's)? `family` owns every schema but TestBot's; a family named `<prefix>family` owns the schemas that start with <prefix>."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    prefix = family_schema[:-len("family")] if family_schema.endswith("family") else ""
+    return schema.startswith(prefix) if prefix else not schema.startswith(_TEST_PREFIX)
+
+def _tables_of_family(conn, family_schema: str) -> dict:
+    """{schema: {tables}} for this family's schemas, whatever the connection's role may read (pg_tables lists all of them)."""
+    found: dict = {}
+    for schema, table in conn.execute(
+        "SELECT schemaname, tablename FROM pg_catalog.pg_tables "
+        "WHERE schemaname <> 'information_schema' AND schemaname NOT LIKE 'pg\\_%'"
+    ).fetchall():
+        if belongs_to_family(schema, family_schema):
+            found.setdefault(schema, set()).add(table)
+    return found
+
+def stage_schemas(conn, stage: str, family_schema: "str | None" = None) -> "list[str]":
+    """The schemas of this family that belong to `stage`'s bot."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    return sorted(schema for schema, tables in _tables_of_family(conn, family_schema).items()
+                  if STAGE_MARK[stage] in tables)
+
+def personal_data_tables(conn, stages=SEAL_STAGES, family_schema: "str | None" = None) -> "list[tuple[str, str]]":
+    """(schema, table) of every table that exists in this family's schemas and that the conversion of `stages` touches: each stage's tables in its bot's schemas, and the saved-state tables everywhere."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    out: set = set()
+    for schema, tables in _tables_of_family(conn, family_schema).items():
+        for stage in stages:
+            if STAGE_MARK[stage] in tables:
+                out |= {(schema, table) for table in tables & STAGE_TABLES[stage]}
+        out |= {(schema, table) for table in tables & set(STATE_TABLES)}
+    return sorted(out)
+
+def _has_rows(conn, schema: str, table: str) -> bool:
+    return bool(conn.execute(
+        pgsql.SQL("SELECT EXISTS (SELECT 1 FROM {}.{})").format(
+            pgsql.Identifier(schema), pgsql.Identifier(table))
+    ).fetchone()[0])
+
+def read_stamp(conn, key: str, family_schema: "str | None" = None) -> "str | None":
+    """One of the stamps above, or None when it is not there (or the settings table is not)."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.settings",)).fetchone()[0] is None:
+        return None
+    row = conn.execute(
+        pgsql.SQL("SELECT value FROM {}.settings WHERE key = %s").format(pgsql.Identifier(family_schema)),
+        (key,)).fetchone()
+    return row[0] if row else None
+
+def ensure_settings_table(conn, family_schema: str) -> bool:
+    """Make family.settings if the family has none (a family that never ran a bot: TestBot's on a database that has only its bots' schemas)."""
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.settings",)).fetchone()[0] is not None:
+        return False
+    conn.execute(pgsql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(pgsql.Identifier(family_schema)))
+    conn.execute(pgsql.SQL("CREATE TABLE IF NOT EXISTS {}.settings (key TEXT PRIMARY KEY, value TEXT)")
+                 .format(pgsql.Identifier(family_schema)))
+    return True
+
+def write_stamps(conn, fingerprint: str, stages=SEAL_STAGES, family_schema: "str | None" = None) -> None:
+    """Stamp the family with the key and with every one of `stages`."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    ensure_settings_table(conn, family_schema)
+    insert = pgsql.SQL("INSERT INTO {}.settings (key, value) VALUES (%s, %s) "
+                       "ON CONFLICT (key) DO NOTHING").format(pgsql.Identifier(family_schema))
+    conn.execute(insert, (DATA_KEY_SETTING, fingerprint))
+    for stage in stages:
+        conn.execute(insert, (sealed_setting(stage), "1"))
+
+def fresh_heartbeats(conn, within_seconds: int = 180, family_schema: "str | None" = None) -> "list[str]":
+    """The bot ids whose heartbeat in this family is younger than `within_seconds`: a bot that is, or may still be, running."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    if conn.execute("SELECT to_regclass(%s)", (f"{family_schema}.heartbeats",)).fetchone()[0] is None:
+        return []
+    rows = conn.execute(
+        pgsql.SQL("SELECT bot_id FROM {}.heartbeats "
+                  "WHERE last_seen > now() - make_interval(secs => %s) ORDER BY bot_id")
+        .format(pgsql.Identifier(family_schema)), (within_seconds,)).fetchall()
+    return [row[0] for row in rows]
+
+_NOT_SEALED = ("Personal data in this database is not sealed yet: stop the bots and run "
+               "scripts/encrypt_personal_data.py")
+_WRONG_KEY = "The data key file is not the key this database was sealed with"
+
+class DataKeyRefused(SystemExit):
+    """The data key guard ended this bot: the key is missing, unusable or not the one this database was sealed with, the data is not sealed, or the check could not be made."""
+    data_key = True
+
+def _refuse(message: str):
+    """Say it at CRITICAL and end the process."""
+    logger.critical("%s", message)
+    raise DataKeyRefused(message)
+
+def ensure_data_key(conn) -> None:
+    """Refuse to go on unless the key file in use is the key this database was sealed with, and the database is sealed."""
+    try:
+        fingerprint = vault.require()
+    except vault.VaultError as exc:
+        _refuse(f"The data key is not usable: {exc}")
+    if vault.init_note:
+        logger.warning("%s", vault.init_note)
+
+    stamped = read_stamp(conn, DATA_KEY_SETTING)
+    if stamped is None:
+        holding = [f"{schema}.{table}" for schema, table in personal_data_tables(conn)
+                   if _has_rows(conn, schema, table)]
+        if holding:
+
+            stamped = read_stamp(conn, DATA_KEY_SETTING)
+            if stamped is None:
+                logger.warning("Rows that are not sealed may be in: %s", ", ".join(holding))
+                _refuse(_NOT_SEALED)
+        else:
+            write_stamps(conn, fingerprint)
+            conn.commit()
+            stamped = read_stamp(conn, DATA_KEY_SETTING)
+    if stamped != fingerprint:
+        _refuse(_WRONG_KEY)
+    unsealed = [stage for stage in SEAL_STAGES if read_stamp(conn, sealed_setting(stage)) != "1"]
+    if unsealed:
+        logger.warning("Not sealed yet, by stage: %s", ", ".join(unsealed))
+        _refuse(_NOT_SEALED)
+    logger.info("Data key checked: it is the key this database is sealed with.")
+
+def _require_transaction(conn) -> None:
+    if getattr(conn, "autocommit", False):
+        raise ValueError("The conversion has to run in one transaction: give it a connection "
+                         "with autocommit off")
+
+def _schemas_with(conn, table: str, family_schema: str) -> "list[str]":
+    return sorted(schema for schema, tables in _tables_of_family(conn, family_schema).items()
+                  if table in tables)
+
+def _column_exists(conn, schema: str, table: str, column: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+        (schema, table, column)).fetchone() is not None
+
+def _waitlist_row_opens(user_id, chat_id, sealed) -> bool:
+    """Is this update_waitlist row in the sealed layout, and does its seal open to the very ids its pseudonyms stand for?"""
+    if sealed is None or not (vault.is_pseudonym(user_id) and vault.is_pseudonym(chat_id)):
+        return False
+    try:
+        who = vault.open_json(sealed, lifecycle.WAITLIST_PURPOSE)
+        return (vault.pseudonym(int(who["user"])) == int(user_id)
+                and vault.pseudonym(int(who["chat"])) == int(chat_id))
+    except (vault.VaultError, KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+def convert_personal_data_v1(conn, family_schema: "str | None" = None) -> dict:
+    """Clear the saved state that is not sealed. `family_schema` is the real family's (the default) or TestBot's."""
+    _require_transaction(conn)
+    family_schema = family_schema or FAMILY_SCHEMA
+    changed: dict = {}
+    skipped: list = []
+
+    for schema in _schemas_with(conn, lifecycle.WAITLIST_TABLE, family_schema):
+        label = f"{schema}.{lifecycle.WAITLIST_TABLE}"
+        if not _column_exists(conn, schema, lifecycle.WAITLIST_TABLE, "who_sealed"):
+            conn.execute(pgsql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS who_sealed BYTEA").format(
+                pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE)))
+        rows = conn.execute(pgsql.SQL("SELECT bot_id, user_id, chat_id, who_sealed FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE))).fetchall()
+        gone = 0
+        for bot_id, user_id, chat_id, sealed in rows:
+            if _waitlist_row_opens(user_id, chat_id, sealed):
+                continue
+            gone += conn.execute(
+                pgsql.SQL("DELETE FROM {}.{} WHERE bot_id = %s AND user_id = %s").format(
+                    pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE)),
+                (bot_id, user_id)).rowcount or 0
+        changed[label] = gone
+    if not changed:
+        skipped.append(f"{family_schema}: no {lifecycle.WAITLIST_TABLE} table")
+
+    states = _schemas_with(conn, lifecycle.STATE_TABLE, family_schema)
+    for schema in states:
+        rows = conn.execute(pgsql.SQL("SELECT kind, key, value FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE))).fetchall()
+        gone = 0
+        for kind, key, value in rows:
+            try:
+                lifecycle.unseal_state(kind, key, value)
+                continue
+            except vault.VaultError:
+                pass
+            gone += conn.execute(
+                pgsql.SQL("DELETE FROM {}.{} WHERE kind = %s AND key = %s").format(
+                    pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE)),
+                (kind, key)).rowcount or 0
+        changed[f"{schema}.{lifecycle.STATE_TABLE}"] = gone
+    if not states:
+        skipped.append(f"{family_schema}: no {lifecycle.STATE_TABLE} table in any schema")
+    return {"changed": changed, "skipped": skipped}
+
+def verify_personal_data_v1(conn, family_schema: "str | None" = None) -> dict:
+    """Check that the family's saved state is all sealed: every runtime_state row opens and belongs to its key, every update_waitlist row has pseudonyms and a seal that opens to them."""
+    family_schema = family_schema or FAMILY_SCHEMA
+    checked: dict = {}
+    skipped: list = []
+    problems: list = []
+
+    for schema in _schemas_with(conn, lifecycle.WAITLIST_TABLE, family_schema):
+        label = f"{schema}.{lifecycle.WAITLIST_TABLE}"
+        if not _column_exists(conn, schema, lifecycle.WAITLIST_TABLE, "who_sealed"):
+            problems.append(f"{label} has no who_sealed column")
+            continue
+        rows = conn.execute(pgsql.SQL("SELECT bot_id, user_id, chat_id, who_sealed FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.WAITLIST_TABLE))).fetchall()
+        for index, (bot_id, user_id, chat_id, sealed) in enumerate(rows, 1):
+            if not _waitlist_row_opens(user_id, chat_id, sealed):
+                problems.append(f"{label} row {index} ({bot_id}): not sealed, or does not open")
+        checked[label] = len(rows)
+    if not checked:
+        skipped.append(f"{family_schema}: no {lifecycle.WAITLIST_TABLE} table")
+
+    states = _schemas_with(conn, lifecycle.STATE_TABLE, family_schema)
+    for schema in states:
+        label = f"{schema}.{lifecycle.STATE_TABLE}"
+        rows = conn.execute(pgsql.SQL("SELECT kind, key, value FROM {}.{}").format(
+            pgsql.Identifier(schema), pgsql.Identifier(lifecycle.STATE_TABLE))).fetchall()
+        for index, (kind, key, value) in enumerate(rows, 1):
+            try:
+                lifecycle.unseal_state(kind, key, value)
+            except vault.VaultError:
+                problems.append(f"{label} row {index} ({kind}): not sealed, or does not open")
+        checked[label] = len(rows)
+    if not states:
+        skipped.append(f"{family_schema}: no {lifecycle.STATE_TABLE} table in any schema")
+
+    if problems:
+        raise RuntimeError("Saved state in the family is not sealed: " + "; ".join(problems[:20])
+                           + (f" (and {len(problems) - 20} more)" if len(problems) > 20 else ""))
+    return {"checked": checked, "skipped": skipped}
 
 TOPUP_MULTIPLIER = float(os.environ.get("FAMILY_TOPUP_MULTIPLIER", "2"))
 
@@ -2028,11 +2284,36 @@ async def _housekeeping(context) -> None:
         return
     logger.info("Housekeeping: pruned %s.", removed)
 
+_GUARD_RETRY_SLEEPS = (2, 4, 8, 16, 30, 30)
+_sleep = time.sleep
+
+def guard_data_key() -> None:
+    """The start-of-day check every bot makes: ensure_data_key() on the shared database, creating the family tables it reads first."""
+    attempts = len(_GUARD_RETRY_SLEEPS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            init_family_schema()
+            with _connect() as conn:
+                ensure_data_key(conn)
+            return
+        except psycopg.OperationalError as exc:
+            if attempt == attempts:
+                _refuse("The data key could not be checked: the database is not answering")
+            wait = _GUARD_RETRY_SLEEPS[attempt - 1]
+            logger.warning("The data key could not be checked yet (%s); trying again in %ss "
+                           "(attempt %s of %s).", type(exc).__name__, wait, attempt, attempts)
+            _sleep(wait)
+        except Exception as exc:
+            _refuse(f"The data key could not be checked against the database ({type(exc).__name__}): "
+                    "the bot does not start without that check.")
+
 def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
     """One line in each bot's main(), just before run_polling()."""
     global _bot_id, _display_name, _start_time, _enabled
 
     keep_recent_log_lines()
+
+    guard_data_key()
 
     if os.environ.get("FAMILY_BUS", "on").lower() in ("off", "0", "false", "no"):
         logger.info("Family bus disabled (FAMILY_BUS=off) -- running standalone.")
@@ -2043,7 +2324,6 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
     _bot_id, _display_name, _start_time = bot_id, display_name, start_time
 
     try:
-        init_family_schema()
         write_heartbeat()
     except Exception as exc:
         logger.warning(
@@ -2085,6 +2365,8 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import logging
 import os
@@ -2095,6 +2377,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import db
+import vault
 
 logger = logging.getLogger(__name__)
 
@@ -2175,6 +2458,47 @@ def release_lease() -> None:
 
 STATE_TABLE = "runtime_state"
 
+STATE_PURPOSE = "lifecycle.state"
+WAITLIST_PURPOSE = "lifecycle.waitlist"
+
+def _pseudo_key(kind: str, key: str) -> str:
+    """The key a row is stored under."""
+    if kind == "user":
+        return str(vault.pseudonym(int(key)))
+    if kind == "conversation":
+        name, bar, pair = key.partition("|")
+        if not bar:
+            raise ValueError("a conversation key has the form name|chat:user")
+        return f"{name}|" + ":".join(str(vault.pseudonym(int(part))) for part in pair.split(":"))
+    raise ValueError(f"unknown kind of saved state: {kind!r}")
+
+def _seal_state(kind: str, key: str, value) -> "tuple[str, dict]":
+    """(the key to store, the value to store) for one row."""
+    stored_key = _pseudo_key(kind, key)
+    blob = vault.seal_json({"key": key, "data": value}, STATE_PURPOSE)
+    return stored_key, {"sealed": base64.b64encode(blob).decode("ascii")}
+
+def unseal_state(kind: str, stored_key: str, stored_value) -> "tuple[str, object]":
+    """(the original key, the original value) of a stored row."""
+    if not isinstance(stored_value, dict) or not isinstance(stored_value.get("sealed"), str):
+        raise vault.VaultError("A saved state row is not sealed")
+    try:
+        blob = base64.b64decode(stored_value["sealed"], validate=True)
+    except (ValueError, binascii.Error):
+        raise vault.VaultError("A saved state row is not sealed") from None
+    try:
+        payload = vault.open_json(blob, STATE_PURPOSE)
+    except ValueError:
+        raise vault.VaultError("A saved state row is malformed") from None
+    try:
+        key, data = payload["key"], payload["data"]
+        belongs = _pseudo_key(kind, key) == stored_key
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise vault.VaultError("A saved state row is malformed") from None
+    if not belongs:
+        raise vault.VaultError("A saved state row does not belong to its key")
+    return key, data
+
 def init_state_table() -> None:
     with db.pooled() as conn:
         conn.execute(
@@ -2223,6 +2547,16 @@ def _write_state(rows: list[tuple[str, str, dict]]) -> None:
         return
     from psycopg.types.json import Jsonb
 
+    sealed = []
+    for kind, key, value in rows:
+        try:
+            stored_key, stored_value = _seal_state(kind, key, value)
+        except ValueError:
+            logger.warning("%s: not saving a %s row whose key cannot be hidden.", STATE_TABLE, kind)
+            continue
+        sealed.append((kind, stored_key, Jsonb(stored_value)))
+    if not sealed:
+        return
     with db.pooled() as conn:
         with conn.cursor() as cur:
             cur.executemany(
@@ -2232,16 +2566,22 @@ def _write_state(rows: list[tuple[str, str, dict]]) -> None:
                 ON CONFLICT (kind, key) DO UPDATE
                 SET value = excluded.value, updated_at = excluded.updated_at
                 """,
-                [(kind, key, Jsonb(value)) for kind, key, value in rows],
+                sealed,
             )
         conn.commit()
 
 def _delete_state(rows: list[tuple[str, str]]) -> None:
-    if not rows:
+    stored = []
+    for kind, key in rows:
+        try:
+            stored.append((kind, _pseudo_key(kind, key)))
+        except ValueError:
+            continue
+    if not stored:
         return
     with db.pooled() as conn:
         with conn.cursor() as cur:
-            cur.executemany(f"DELETE FROM {STATE_TABLE} WHERE kind = %s AND key = %s", rows)
+            cur.executemany(f"DELETE FROM {STATE_TABLE} WHERE kind = %s AND key = %s", stored)
         conn.commit()
 
 def _read_state(kind: str) -> list[tuple[str, dict]]:
@@ -2254,17 +2594,24 @@ def _read_state(kind: str) -> list[tuple[str, dict]]:
         cur = conn.execute(f"SELECT key, value FROM {STATE_TABLE} WHERE kind = %s", (kind,))
         rows = cur.fetchall()
         conn.commit()
-    return rows
+    opened = []
+    for stored_key, stored_value in rows:
+        try:
+            opened.append(unseal_state(kind, stored_key, stored_value))
+        except vault.VaultError:
+            logger.warning("%s: a saved %s row did not open -- skipping it.", STATE_TABLE, kind)
+    return opened
 
 def forget_user(user_id: int) -> int:
     """Delete everything this table holds for one person. Blocking; call through asyncio.to_thread."""
     with db.pooled() as conn:
         if conn.execute("SELECT to_regclass(%s)", (STATE_TABLE,)).fetchone()[0] is None:
             return 0
+        who = vault.pseudonym(user_id)
         cur = conn.execute(
             f"DELETE FROM {STATE_TABLE} WHERE (kind = 'user' AND key = %s) "
             f"OR (kind = 'conversation' AND (key LIKE %s OR key LIKE %s))",
-            (str(user_id), f"%:{user_id}", f"%|{user_id}"),
+            (str(who), f"%:{who}", f"%|{who}"),
         )
         removed = cur.rowcount or 0
         conn.commit()
@@ -2485,10 +2832,16 @@ def init_waitlist_table() -> None:
                 user_id BIGINT NOT NULL,
                 chat_id BIGINT NOT NULL,
                 held_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                who_sealed BYTEA,
                 PRIMARY KEY (bot_id, user_id)
             )
             """
         )
+
+        import family_link
+
+        if family_link._column_missing(conn, WAITLIST_TABLE, "who_sealed"):
+            conn.execute(f"ALTER TABLE {schema}.{WAITLIST_TABLE} ADD COLUMN IF NOT EXISTS who_sealed BYTEA")
         conn.commit()
 
 def _read_maintenance(bot_id: str) -> "tuple[bool, datetime | None]":
@@ -2571,31 +2924,43 @@ def hold_for_update(user_id: int, chat_id: int, bot_id: "str | None" = None) -> 
         return
     schema = _family_schema()
     try:
+        who = vault.seal_json({"user": user_id, "chat": chat_id}, WAITLIST_PURPOSE)
         with db.pooled() as conn:
             conn.execute(
                 f"""
-                INSERT INTO {schema}.{WAITLIST_TABLE} (bot_id, user_id, chat_id)
-                VALUES (%s, %s, %s)
+                INSERT INTO {schema}.{WAITLIST_TABLE} (bot_id, user_id, chat_id, who_sealed)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (bot_id, user_id) DO NOTHING
                 """,
-                (bot_id, user_id, chat_id),
+                (bot_id, vault.pseudonym(user_id), vault.pseudonym(chat_id), who),
             )
             conn.commit()
     except Exception:
-        logger.debug("Could not add %s to the update waitlist", user_id, exc_info=True)
+        logger.debug("Could not add somebody to the update waitlist", exc_info=True)
 
 def take_held(bot_id: str) -> "list[tuple[int, int]]":
-    """Everyone waiting on this bot, as (user_id, chat_id), removed as they are handed over. Blocking."""
+    """Everyone waiting on this bot, as (user_id, chat_id) -- the real ids, opened from the sealed column -- removed as they are handed over."""
     schema = _family_schema()
     with db.pooled() as conn:
         cur = conn.execute(
             f"DELETE FROM {schema}.{WAITLIST_TABLE} WHERE bot_id = %s "
-            f"RETURNING user_id, chat_id",
+            f"RETURNING user_id, chat_id, who_sealed",
             (bot_id,),
         )
         rows = cur.fetchall()
         conn.commit()
-    return [(int(u), int(c)) for u, c in rows]
+    held = []
+    for user_pseudonym, chat_pseudonym, sealed in rows:
+        try:
+            who = vault.open_json(sealed, WAITLIST_PURPOSE)
+            user_id, chat_id = int(who["user"]), int(who["chat"])
+            if vault.pseudonym(user_id) != user_pseudonym or vault.pseudonym(chat_id) != chat_pseudonym:
+                raise vault.VaultError("A sealed waitlist entry does not belong to its row")
+        except (vault.VaultError, KeyError, TypeError, ValueError, AttributeError):
+            logger.warning("family.%s: a held row for %s did not open -- skipping it.", WAITLIST_TABLE, bot_id)
+            continue
+        held.append((user_id, chat_id))
+    return held
 
 def in_flight() -> "list[tuple[int, str]]":
     """Who is mid-something right now, as (chat_id, the message they would get if it were interrupted) -- one entry per stretch of slow work."""
@@ -2918,7 +3283,7 @@ PROBLEMS = {
         EVERY_PUBLIC_BOT, "Too many updates from one person",
         "One person sent more than FLOOD_UPDATES_PER_MINUTE updates (40 by default) inside a minute; the rest "
         "were ignored until the window cleared.",
-        "Tapping buttons very fast, a client resending, forwarding a big selection outside /export, or a script.",
+        "Tapping buttons very fast, a client resending, forwarding a big selection, or a script.",
         "Usually nothing. If ordinary use trips it, raise FLOOD_UPDATES_PER_MINUTE on that bot."),
     "FM-DONATE-CURRENCY": Problem(
         EVERY_PUBLIC_BOT, "Unknown currency in /donate or /recharge",
@@ -3513,23 +3878,6 @@ PROBLEMS = {
         "A guest tried to archive a conversation.",
         "A guest using the owner's command.",
         "Nothing."),
-    "AN-EXPORT-FAILED": Problem(
-        "AnonBot", "Building the document failed",
-        "Reading the conversation or rendering the page failed; nothing was sent and nothing was kept.",
-        "A bug, the database failing during the relay lookup, or Telegram refusing every forward.",
-        "The traceback beside 'Could not build a transcript' in the log."),
-    "AN-EXPORT-GONE": Problem(
-        "AnonBot", "That conversation is no longer on record",
-        "A conversation chosen for export had no relay rows left by the time the button was tapped.",
-        "prune_old_data clearing a long-silent conversation, or /cancel removing it, between the "
-        "menu being drawn and the button being tapped.",
-        "Nothing. RELAY_RETENTION_DAYS is what decides how long a conversation stays exportable."),
-    "AN-EXPORT-NOTHING": Problem(
-        "AnonBot", "Nothing to export",
-        "/export was sent by somebody with no conversation on record in this chat.",
-        "Never having used an inbox link in either direction, or every conversation being older "
-        "than RELAY_RETENTION_DAYS.",
-        "Nothing."),
     "AN-UNADDRESSED": Problem(
         "AnonBot", "Message with nowhere to go",
         "A message from somebody with no inbox and no open conversation.",
@@ -3652,9 +4000,6 @@ KEYS = {
         "jump_no_anchor": "AN-NO-ANCHOR",
         "which_unknown": "AN-WHICH-UNKNOWN",
         "archive_not_owner": "AN-ARCHIVE-OWNER-ONLY",
-        "export_failed": "AN-EXPORT-FAILED",
-        "export_gone": "AN-EXPORT-GONE",
-        "export_nothing_to_export": "AN-EXPORT-NOTHING",
         "generic_nudge": "AN-UNADDRESSED",
 
         "reaction_not_passed": "AN-REACTION-NOT-PASSED",
@@ -3679,7 +4024,7 @@ ALERT_KEYS = {
                     "job_not_running", "unknown_order"},
     "downloader_bot": {"redeliver_expired"},
     "sticker_bot": {"not_your_pack", "only_owner_coedit", "only_owner_rename", "only_owner_delete"},
-    "anon_bot": {"conv_gone", "not_your_conversation", "export_ended", "export_nothing_yet"},
+    "anon_bot": {"conv_gone", "not_your_conversation"},
 }
 
 SIMPLE = frozenset({
@@ -3697,8 +4042,8 @@ SIMPLE = frozenset({
     "AN-LINK-INVALID", "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",
     "AN-NOT-STARTED", "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-BLOCKED",
     "AN-REPLY-STALE", "AN-TOO-FAST", "AN-EDIT-NOT-RELAYED", "AN-CONV-GONE", "AN-NOT-YOURS",
-    "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-GONE",
-    "AN-EXPORT-NOTHING", "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
+    "AN-NO-ANCHOR", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY",
+    "AN-UNADDRESSED", "AN-REACTION-NOT-PASSED",
 })
 
 URGENT, FAULT, REFUSED = 1, 2, 3
@@ -3739,7 +4084,7 @@ KINDS = {
         "ST-WHOMADE-UNKNOWN", "ST-TITLE-EMPTY", "ST-IMPORT-SOURCE", "ST-UNRECOGNIZED",
         "ST-NOTHING-ADDED", "ST-NO-STICKER",
         "AN-NEEDS-REPLY", "AN-OPENING-NEEDS-REPLY", "AN-AMBIGUOUS", "AN-REPLY-STALE",
-        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY", "AN-EXPORT-NOTHING",
+        "AN-EDIT-NOT-RELAYED", "AN-WHICH-UNKNOWN", "AN-ARCHIVE-OWNER-ONLY",
         "AN-UNADDRESSED",
     }),
     LIMIT: frozenset({
@@ -3756,7 +4101,7 @@ KINDS = {
     GONE: frozenset({
         "CV-EXPIRED", "CV-JOB-GONE", "DL-BUTTON-EXPIRED", "DL-MERGE-NO-PHOTOS",
         "ST-COEDIT-LINK", "ST-COEDIT-GONE", "ST-NOT-YOURS", "ST-OWNER-ONLY",
-        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR", "AN-EXPORT-GONE",
+        "AN-LINK-INVALID", "AN-CONV-GONE", "AN-NOT-YOURS", "AN-NO-ANCHOR",
     }),
     OTHER_SIDE: frozenset({
         "AN-LINK-BLOCKED", "AN-LINK-PAUSED", "AN-INBOX-GONE", "AN-SENDER-BLOCKED",
@@ -3852,6 +4197,7 @@ import os
 import re
 import socket
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -4806,9 +5152,13 @@ async def delete_my_data_chosen(update, context):
     user_id = update.effective_user.id
 
     try:
+        await asyncio.to_thread(note_erased, user_id)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not keep an erased user out of the activity flush")
+    try:
         rows = await asyncio.to_thread(db.erase_user, user_id)
     except Exception:
-        logging.getLogger(__name__).exception("Erasing user %s failed", user_id)
+        logging.getLogger(__name__).exception("Erasing a user's data failed")
         await live_message.edit_in_place(
             query.message, context.bot, body(i18n.t(lang, "delete_data_failed")), parse_mode=ParseMode.HTML
         )
@@ -4817,14 +5167,14 @@ async def delete_my_data_chosen(update, context):
         rows += await asyncio.to_thread(lifecycle.forget_user, user_id)
     except Exception:
         logging.getLogger(__name__).exception(
-            "Cleared %s's data but could not clear their saved state", user_id
+            "Cleared a user's data but could not clear their saved state"
         )
 
     try:
         rows += await asyncio.to_thread(family_link.forget_problem_reporter, user_id)
     except Exception:
         logging.getLogger(__name__).exception(
-            "Cleared %s's data but could not take them off their problem reports", user_id
+            "Cleared a user's data but could not take them off their problem reports"
         )
 
     done = body(i18n.t(lang, "delete_data_done", rows=rows))
@@ -4832,7 +5182,7 @@ async def delete_my_data_chosen(update, context):
     try:
         context.application.drop_user_data(user_id)
     except Exception:
-        logging.getLogger(__name__).debug("Nothing cached for %s to drop", user_id)
+        logging.getLogger(__name__).debug("Nothing cached to drop for the erased user")
     await live_message.edit_in_place(
         query.message, context.bot, done, parse_mode=ParseMode.HTML
     )
@@ -5594,19 +5944,46 @@ ACTIVITY_FLUSH_SECONDS = int(os.environ.get("ACTIVITY_FLUSH_SECONDS", "60"))
 
 _activity_buffer: set[int] = set()
 
+ERASED_SKIP_SECONDS = 600
+_recently_erased: "OrderedDict[int, float]" = OrderedDict()
+
+_activity_lock = threading.Lock()
+
+def note_erased(user_id: int) -> None:
+    """Blocking; call through asyncio.to_thread, BEFORE the erase."""
+    with _activity_lock:
+        _activity_buffer.discard(user_id)
+        _recently_erased[user_id] = time.monotonic()
+        _recently_erased.move_to_end(user_id)
+        _flood_trim(_recently_erased)
+
+def _erased_recently(user_id: int, now: float) -> bool:
+    when = _recently_erased.get(user_id)
+    if when is None:
+        return False
+    if now - when > ERASED_SKIP_SECONDS:
+        _recently_erased.pop(user_id, None)
+        return False
+    return True
+
 def _flush_activity_now() -> int:
     """Blocking; call through asyncio.to_thread."""
     global _activity_buffer
-    if not _activity_buffer:
-        return 0
-    batch, _activity_buffer = _activity_buffer, set()
-    try:
-        db.record_activity_batch(batch)
-    except Exception:
+    with _activity_lock:
+        if not _activity_buffer:
+            return 0
+        batch, _activity_buffer = _activity_buffer, set()
+        now = time.monotonic()
+        batch = {user_id for user_id in batch if not _erased_recently(user_id, now)}
+        if not batch:
+            return 0
+        try:
+            db.record_activity_batch(batch)
+        except Exception:
 
-        _activity_buffer |= batch
-        raise
-    return len(batch)
+            _activity_buffer |= batch
+            raise
+        return len(batch)
 
 async def _flush_activity_job(context) -> None:
     try:
@@ -6552,3 +6929,180 @@ def affordable_seconds(sold_for: int, sent_bytes: float) -> float:
     """How long a job sold for `sold_for` ⚡ may run, sending `sent_bytes`, before it would cost more than it was sold for."""
     left = (sold_for - OVERHEAD) * usd_per_credit() - egress_usd(sent_bytes)
     return max(0.0, left / running_usd(1))
+
+# ─── module: vault ───────────────────────────────────────────────────────────
+"""Personal data the database cannot give away on its own."""
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+import os
+from pathlib import Path
+
+KEY_FILE = os.environ.get("DATA_KEY_FILE", "/run/secrets/mumu_data_key")
+INIT_VARIABLE = "DATA_KEY_INIT"
+
+init_note: "str | None" = None
+
+SEAL_VERSION = 1
+
+PSEUDONYM_CEILING = -(2 ** 62)
+
+_NONCE = 12
+_TAG = 16
+
+_keys: "tuple[bytes, bytes, str] | None" = None
+
+class VaultError(RuntimeError):
+    """The key is missing or unusable, or a sealed value does not open."""
+
+def _hkdf(master: bytes, label: bytes) -> bytes:
+    """RFC 5869 with a zero salt and one output block: two unrelated keys out of one."""
+    prk = hmac.new(b"\0" * 32, master, hashlib.sha256).digest()
+    return hmac.new(prk, label + b"\x01", hashlib.sha256).digest()
+
+def _parse_key(text: str, where: str) -> bytes:
+    text = text.strip()
+    try:
+        raw = bytes.fromhex(text) if len(text) == 64 else base64.b64decode(text, validate=True)
+    except (ValueError, binascii.Error):
+        raise VaultError(f"{where} does not hold a key: 32 bytes, as base64 or 64 hex digits") from None
+    if len(raw) != 32:
+        raise VaultError(f"{where} holds {len(raw)} bytes; a data key is 32")
+    return raw
+
+def _read_key(path: Path) -> bytes:
+    try:
+        text = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise VaultError(
+            f"No data key at {path} ({exc}). Point DATA_KEY_FILE at the key file -- see vault.py."
+        ) from None
+    return _parse_key(text, str(path))
+
+def _write_new_key_file(path: Path, raw: bytes) -> bool:
+    """The key as a base64 line, readable by its owner only."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="ascii") as handle:
+        handle.write(base64.b64encode(raw).decode("ascii") + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return True
+
+def _load() -> "tuple[bytes, bytes, str]":
+    global _keys, init_note
+    if _keys is None:
+        path = Path(KEY_FILE)
+        given = os.environ.get(INIT_VARIABLE, "").strip()
+        note = None
+        if given:
+            init_key = _parse_key(given, INIT_VARIABLE)
+            if not path.exists():
+                try:
+                    if _write_new_key_file(path, init_key):
+                        note = (f"The data key was written to {path} from {INIT_VARIABLE}. "
+                                f"Delete {INIT_VARIABLE} from the host's variables now.")
+                except OSError as exc:
+                    raise VaultError(f"{INIT_VARIABLE} is set, but the key could not be written to {path} "
+                                     f"({type(exc).__name__}). Point DATA_KEY_FILE at the host's volume.") from None
+        master = _read_key(path)
+        if given:
+            if not hmac.compare_digest(init_key, master):
+                raise VaultError(f"{INIT_VARIABLE} is not the key in {path}, and a key file is never written "
+                                 f"over. Delete {INIT_VARIABLE}, or the file if it holds the wrong key.")
+            note = note or (f"{INIT_VARIABLE} is still set, and the key is already in {path}. "
+                            f"Delete {INIT_VARIABLE} from the host's variables.")
+        init_note = note
+        _keys = (
+            _hkdf(master, b"mumubots pseudonym v1"),
+            _hkdf(master, b"mumubots seal v1"),
+            _hkdf(master, b"mumubots fingerprint v1")[:8].hex(),
+        )
+    return _keys
+
+def require() -> str:
+    """Load the key and the cipher now, so a bot fails at start rather than at its first message; returns the key's fingerprint."""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise VaultError("The `cryptography` package is not installed; personal data cannot be read") from None
+    return _load()[2]
+
+def fingerprint() -> str:
+    """16 hex digits that name the key without revealing it: stored beside the data it sealed, so a wrong key file is caught at start."""
+    return _load()[2]
+
+def new_key() -> str:
+    """A fresh key, as the base64 line a key file holds."""
+    return base64.b64encode(os.urandom(32)).decode("ascii")
+
+def is_pseudonym(value) -> bool:
+    return value is not None and int(value) < PSEUDONYM_CEILING
+
+def pseudonym(telegram_id: int) -> int:
+    """The stored stand-in for a person's or a chat's id."""
+    value = int(telegram_id)
+    if value < PSEUDONYM_CEILING:
+        raise ValueError("pseudonym() was given a pseudonym")
+    mac = hmac.new(_load()[0], b"tg:%d" % value, hashlib.sha256).digest()
+    return -(2 ** 63) + (int.from_bytes(mac[:8], "big") >> 2)
+
+def pseudonym_in(telegram_id: int, domain: str) -> int:
+    """A stand-in that can't be matched to pseudonym() of the same id, nor to another domain's: for a table whose rows can be lined up with a record that holds the real id (a payment and the family ledger), so that the match reveals only that domain's stand-in."""
+    value = int(telegram_id)
+    if value < PSEUDONYM_CEILING:
+        raise ValueError("pseudonym_in() was given a pseudonym")
+    if not domain or not domain.isascii() or not all(c.isalnum() or c in "._-" for c in domain) or not domain[0].isalpha():
+        raise ValueError("pseudonym_in() needs a domain of letters, digits, '.', '_' or '-', starting with a letter")
+    mac = hmac.new(_load()[0], b"tg:%s:%d" % (domain.encode("ascii"), value), hashlib.sha256).digest()
+    return -(2 ** 63) + (int.from_bytes(mac[:8], "big") >> 2)
+
+def _aad(purpose: str) -> bytes:
+    return b"mumubots v1 " + purpose.encode("utf-8")
+
+def seal(data: bytes, purpose: str) -> bytes:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(_NONCE)
+    return bytes([SEAL_VERSION]) + nonce + AESGCM(_load()[1]).encrypt(nonce, bytes(data), _aad(purpose))
+
+def unseal(blob, purpose: str) -> bytes:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    blob = bytes(blob)
+    if len(blob) < 1 + _NONCE + _TAG or blob[0] != SEAL_VERSION:
+        raise VaultError(f"Not a sealed value ({purpose})")
+    try:
+        return AESGCM(_load()[1]).decrypt(blob[1:1 + _NONCE], blob[1 + _NONCE:], _aad(purpose))
+    except InvalidTag:
+        raise VaultError(f"A sealed value did not open ({purpose}): another key, or altered") from None
+
+def seal_id(telegram_id: int, purpose: str) -> bytes:
+    return seal(b"%d" % int(telegram_id), purpose)
+
+def open_id(blob, purpose: str, *, expected: "int | None" = None) -> int:
+    """A sealed id back. With `expected` (the row's pseudonym), refuse one that belongs to another row."""
+    value = int(unseal(blob, purpose).decode("ascii"))
+    if expected is not None and pseudonym(value) != int(expected):
+        raise VaultError(f"A sealed id does not belong to its row ({purpose})")
+    return value
+
+def seal_text(text: "str | None", purpose: str) -> "bytes | None":
+    return None if text is None else seal(text.encode("utf-8"), purpose)
+
+def open_text(blob, purpose: str) -> "str | None":
+    return None if blob is None else unseal(blob, purpose).decode("utf-8")
+
+def seal_json(value, purpose: str) -> bytes:
+    return seal(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), purpose)
+
+def open_json(blob, purpose: str):
+    return json.loads(unseal(blob, purpose).decode("utf-8"))

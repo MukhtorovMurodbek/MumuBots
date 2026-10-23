@@ -7,7 +7,7 @@ sections apply to all four; a bot's own section adds what is particular to it.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 3 October 2026._
+_Last reviewed: 23 October 2026._
 
 **Privacy:** [every bot](#privacy-every-bot) ·
 [StickerBot](#stickerbot-privacy) · [ConvertBot](#convertbot-privacy) ·
@@ -89,6 +89,21 @@ Anything beyond those two is named in the bot's own section. Nothing is sold,
 rented, shared for advertising, or used to build a profile of anybody. There is
 no analytics service, no advertising identifier and no tracking of any kind — a
 Telegram bot has no browser to put one in.
+
+### How it is protected
+
+AnonBot's records are not stored in readable form. Every person and chat in
+AnonBot is stored as a keyed pseudonym — a number computed with a secret key
+that is kept apart from the database — and the ids the bot needs in order to
+deliver a message are encrypted (AES-256) with that key, as is the username on
+an AnonBot payment. The work in progress every bot saves for a few hours (where
+a conversation with a bot had got to) is encrypted the same way. A copy of the
+database without the key shows that AnonBot conversations exist and when, not
+who is in them. It does show, in the family's ⚡ credit ledger, the Telegram id
+of anyone who paid in AnonBot or was given credit there: a refund needs it. The other bots' records — user ids, and the usernames kept with
+a payment, a sticker pack or a problem report — are not stored this way yet.
+The bots need the key to work, so none of this protects against someone who
+takes over the machine running them.
 
 ### Why
 
@@ -283,10 +298,10 @@ applies. Also held:
   number, when it started, when it was last spoken in, and whether the inbox
   owner has filed it away. This is what makes a reply reach the right thread.
   Kept until erased, or until the conversation is.
-- **A message-id map** — which message belongs to which conversation, when each
-  was relayed, and whether the bot or the person wrote it. This is what lets a
-  reply be matched to what it answers, and a transcript be sorted into
-  conversations. Pruned once a conversation has gone quiet.
+- **A message-id map** — which message belongs to which conversation, and
+  nothing about when or by whom. This is what lets a reply be matched to what it
+  answers. Deleted 30 days after a conversation's last message, which closes
+  that conversation.
 - **A block list** — who an inbox owner has blocked.
 - **Announcements you were shown** — that this bot showed you a one-time
   announcement (the 220 ⚡ gift), so that it is shown to you only once. Kept
@@ -302,29 +317,15 @@ who made it, and nothing about it is written down. Nor are the names, usernames 
 photos of the people writing anonymously. Messages travel over Telegram and no
 further; no outside service is called.
 
-**Getting a conversation back (`/export`).** It works from the message-id map,
-so nothing is forwarded by hand and no chat history is read, which no bot can
-do. There are two ways, and the bot says which is which before either runs:
-
-- **Copied back here.** The bot gives Telegram a list of message numbers and
-  Telegram makes the copies. The bot does not see what is in them; everything
-  arrives exactly as it was, and the copies stay in the chat until deleted.
-- **Written into a document.** To put words on a page the bot has to read
-  them: it forwards each message to itself, reads it, and deletes what it read
-  straight away, one at a time. It reads the text or caption, what kind of
-  media it is, and when it was sent; media is not downloaded, only named by
-  kind. It keeps nothing — the page is assembled in memory, sent, and dropped.
-  Nobody is named: the inbox holder is "Owner", the person writing is "Anon",
-  and the other person is not told. A document holds what somebody else wrote;
-  sharing it is your responsibility.
-
 **What "anonymous" means here.** Anonymity is towards the person being written
 to: they are never shown a sender's name, username or user id, and there is no
 command, button or owner-only view that reveals one. It is not anonymity from
-the service: the pairing above is stored, and an operator with database access
-could read which two ids are in a conversation — though not anything that was
-said, because none of it is stored. Anyone who needs anonymity from the service
-as well should not use a service like this one.
+the service: the pairing above is stored — as pseudonyms, with the ids needed
+for delivery encrypted, so a copy of the database alone does not show who is in
+a conversation (see "How it is protected"). The operator, who holds the key,
+could still work out which two ids are in a conversation — though not anything
+that was said, because none of it is stored. Anyone who needs anonymity from the
+service as well should not use a service like this one.
 
 For an inbox owner, erasing invalidates the link — permanently, including every
 copy of it anybody has posted — and open conversations stop being routable, so
@@ -499,10 +500,9 @@ operator.
 An inbox owner is responsible for the inbox they open. Inviting people to send
 things that should not be sent is the owner's doing, not the bot's.
 
-A transcript made with `/export` holds what other people wrote, and what happens
-to it after the bot sends it is the exporter's to answer for. Publishing what
-somebody wrote anonymously can still harm them, and it is subject to the same
-law as sharing any other private correspondence.
+What other people write to you is yours to keep or share, and yours to answer
+for. Publishing what somebody wrote anonymously can still harm them, and it is
+subject to the same law as sharing any other private correspondence.
 
 Every inbox owner can block a sender permanently, pause new conversations, or
 issue a new link that invalidates the old one. Those three are the tools this
