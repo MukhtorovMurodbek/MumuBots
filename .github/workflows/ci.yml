@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only, and no secrets anywhere: CI can neither change the repository nor deploy.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      LOG_TO_FILES: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libarchive-tools
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: python -m pyflakes main.py bots scripts tests
+      - name: Every bot loads
+        run: python main.py --check
+      - name: Tests
+        run: pytest -q tests
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (runs main.py --check inside)
+        run: docker build -t mumubots .

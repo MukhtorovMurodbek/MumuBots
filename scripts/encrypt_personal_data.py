@@ -11,10 +11,10 @@ Stop all five bots first, and keep a copy of the database (ManagerBot's
 /backup, or db_backup.ps1): plain-text columns are dropped, and a backup taken
 afterwards cannot give them back. Keep a copy of the key file offline too --
 losing it loses every sealed value and every way to find a person by id
-(shared/vault.py says why).
+(bots/shared/vault.py says why).
 
 THE STAGES. The owner seals the bots one group of tables at a time, a release
-each, so this script converts by stage (STAGES below). 2.1.2CHL has one:
+each, so this script converts by stage (STAGES below). 2.2.0 has two:
 
   anon   AnonBot's tables, in every schema that has `anon_conversations`
          (anon_bot, testbot_anon_bot, ...): identities become pseudonyms, the
@@ -23,10 +23,13 @@ each, so this script converts by stage (STAGES below). 2.1.2CHL has one:
          saved conversation state (`runtime_state`, every bot's schema) and
          the update waitlist: rows that are not sealed are deleted, because
          they live hours.
+  names  usernames and names in Sticker, Convert and DownloaderBot: the payment
+         records' usernames (star_transactions) and the sticker packs' owner
+         (packs) go into sealed columns, and the plain columns are dropped.
 
 A later release adds its stage ("convert", "downloader", "sticker",
 "family-reports") to STAGES and to the bots' own SEAL_STAGES
-(shared/family_link.py), and runs this script again: a stage already done is
+(bots/shared/family_link.py), and runs this script again: a stage already done is
 converted again at no change, and is stamped again at no change.
 
 WHAT IT DOES, in ONE transaction:
@@ -53,9 +56,10 @@ WHAT IT DOES, in ONE transaction:
 
 Running it again changes nothing. It prints the number of rows per table and
 nothing personal; the database address is read from the environment variable
-you name and never printed. It starts by printing the key file's fingerprint
-(16 hex digits that name the key without revealing it) and the fingerprint the
-database is stamped with, if it is.
+you name and never printed. It gives the key to every bot's copy of the vault
+(each bot has its own) and refuses unless they all load the same key; then it
+prints the key file's fingerprint (16 hex digits that name the key without
+revealing it) and the fingerprint the database is stamped with, if it is.
 
     --vacuum-only   convert nothing; run step 7 alone, for a run that
                     committed but could not vacuum. Refused unless the
@@ -68,28 +72,87 @@ converted and committed but a VACUUM failed (rerun with --vacuum-only).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
+import importlib.util
 import os
 import re
 import sys
+import tempfile
 import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-for _path in (str(ROOT / "shared"), str(ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(1, _path)
 
-import vault  # noqa: E402
+# The bots' modules are not importable by path: each bot has its own copy. main.py's own loader
+# finds them: `anon_bot.db`, and `anon_bot.vault` / `anon_bot.family_link` beside it, as AnonBot sees them.
+_BOTS_REGISTERED = False
+# The bots that have the `vault` module: each imports a copy of its own.
+_VAULT_FOLDERS: "list[str]" = []
+
+
+def _bot_modules_ready() -> None:
+    """Register the five bots' packages with main.py's loader, once."""
+    global _BOTS_REGISTERED
+    if _BOTS_REGISTERED:
+        return
+    main = sys.modules.get("main")
+    if main is None or getattr(main, "ROOT", None) != ROOT:
+        spec = importlib.util.spec_from_file_location("main", ROOT / "main.py")
+        main = importlib.util.module_from_spec(spec)
+        sys.modules["main"] = main          # @dataclass looks its module up here while main.py runs
+        spec.loader.exec_module(main)
+    for bot in main.discover()[0]:
+        main.register(bot)
+        if "vault" in bot.shared or "vault" in bot.files:
+            _VAULT_FOLDERS.append(bot.folder)
+    sys.meta_path.insert(0, main._BotFinder)
+    _BOTS_REGISTERED = True
+
+
+def bot_vaults() -> list:
+    """Every bot's copy of the `vault` section, as main.py's loader gives them."""
+    _bot_modules_ready()
+    return [importlib.import_module(f"{folder}.vault") for folder in _VAULT_FOLDERS]
+
+
+class KeyProblem(Exception):
+    """The key file cannot be used, in the vault's own words."""
+
+
+def hand_over_key(key_file: str, modules: dict) -> "dict[str, str]":
+    """Point every vault there is at `key_file` and load the key in each: every
+    bot's copy, and the copy each of `modules` uses (a later stage seals with
+    its own bot's). Returns {the vault module's name: its key's fingerprint}.
+
+    Until 2.2.0 only the first stage's bot was given the key: any other bot's
+    copy kept the path it read from DATA_KEY_FILE at import, so a later stage
+    would have sealed with another key (or none) than the one stamped."""
+    vaults = {module.__name__: module for module in bot_vaults()}
+    for module in modules.values():
+        used = getattr(module, "vault", None)
+        if isinstance(used, types.ModuleType) and hasattr(used, "require"):
+            vaults.setdefault(used.__name__, used)
+    found = {}
+    for name, module in vaults.items():
+        module.KEY_FILE = key_file
+        module._keys = None
+        try:
+            found[name] = module.require()
+        except module.VaultError as exc:
+            raise KeyProblem(str(exc)) from None
+    return found
+
 
 REAL_FAMILY = "family"
 TEST_FAMILY = "testbot_family"
 
-# Each stage and the bot whose `<folder>.db` converts its tables. A later
-# release appends here -- and in family_link.SEAL_STAGES, STAGE_MARK and
-# STAGE_TABLES, which tell the bots what to require.
-STAGES = ["anon"]
-STAGE_FOLDER = {"anon": "anon_bot"}
+STAGES = ["anon", "names"]
+STAGE_FOLDER = {"anon": "anon_bot", "names": "family_link"}
+STAGE_STEPS = {
+    "anon": ("convert_personal_data_v1", "verify_personal_data_v1"),
+    "names": ("convert_names_v1", "verify_names_v1"),
+}
 
 # How long after its last heartbeat a bot still counts as running (bots write
 # one every 30 seconds).
@@ -101,20 +164,17 @@ class Refusal(Exception):
 
 
 def load_bot_db(folder: str):
-    """`<folder>.db`, imported by package path: the bots' db.py files share a
-    module name, so they cannot be put on sys.path side by side."""
+    """`<folder>.db`, imported by package path through main.py's loader: the bots' db modules
+    share a module name, so each is a module of its own bot's package."""
+    _bot_modules_ready()
     return importlib.import_module(f"{folder}.db")
 
 
 def load_family_link():
-    """shared/family_link.py. It imports the running bot's `db` and
-    `lifecycle` by bare name; this script uses neither's pool, so a hollow
-    `db` stands in when there is none."""
-    if "db" not in sys.modules:
-        hollow = types.ModuleType("db")
-        hollow.__doc__ = "stand-in: encrypt_personal_data.py opens its own connection"
-        sys.modules["db"] = hollow
-    return importlib.import_module("family_link")
+    """bots/shared/family_link.py, as the sealing bot sees it (its `db` and `lifecycle`
+    are that bot's own; this script uses neither's pool, it opens its own connection)."""
+    _bot_modules_ready()
+    return importlib.import_module(f"{STAGE_FOLDER[STAGES[0]]}.family_link")
 
 
 def default_families(conn) -> "list[str]":
@@ -267,12 +327,13 @@ def run(conn, fingerprint: str, modules: dict, say, families: "list[str] | None"
         if not plan[stage]:
             say(f"note: stage {stage}: no schema to convert here.")
 
-    for step, name in (("convert_personal_data_v1", "Converting"), ("verify_personal_data_v1", "Verifying")):
+    for index, (step, name) in enumerate((("convert_personal_data_v1", "Converting"),
+                                          ("verify_personal_data_v1", "Verifying"))):
         say(f"{name}:")
         for stage in STAGES:
             module = modules[STAGE_FOLDER[stage]]
             for _family, schema in plan[stage]:
-                for label, count in flatten(getattr(module, step)(conn, schema)):
+                for label, count in flatten(getattr(module, STAGE_STEPS[stage][index])(conn, schema)):
                     say(f"  {stage} {schema} {label}: {count}")
         for family in fams:
             for label, count in flatten(getattr(link, step)(conn, family)):
@@ -306,11 +367,16 @@ def main(argv=None, modules: "dict | None" = None, connect=None,
               "variable and give --database-url-env that variable's NAME.", file=sys.stderr)
         return 2
 
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("--database-url-env", required=True, metavar="NAME",
                         help="the name of the environment variable that holds the database URL "
                              "(the URL itself is never taken as an argument, and never printed)")
-    parser.add_argument("--key-file", required=True, metavar="PATH", help="the data key file")
+    key_group = parser.add_mutually_exclusive_group(required=True)
+    key_group.add_argument("--key-file", metavar="PATH", help="the data key file")
+    key_group.add_argument("--key-env", metavar="NAME",
+                           help="the name of the environment variable that holds the data key, for a key "
+                                "kept in a password manager rather than a file (the key itself is never "
+                                "taken as an argument)")
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--dry-run", action="store_true",
                             help="do everything, print the counts, and roll back")
@@ -327,18 +393,46 @@ def main(argv=None, modules: "dict | None" = None, connect=None,
         print(f"The environment variable {args.database_url_env} is not set.", file=sys.stderr)
         return 1
 
-    vault.KEY_FILE = args.key_file
-    vault._keys = None
+    key_copy = None
+    if args.key_env:
+        if not _ENV_NAME.match(args.key_env):
+            print("--key-env takes the NAME of an environment variable.", file=sys.stderr)
+            return 2
+        text = os.environ.get(args.key_env, "").strip()
+        if not text:
+            print(f"The environment variable {args.key_env} is not set.", file=sys.stderr)
+            return 1
+        handle, key_copy = tempfile.mkstemp(prefix="mumu-data-key-")
+        with os.fdopen(handle, "w", encoding="ascii", errors="replace") as out:
+            out.write(text + "\n")
+        args.key_file = key_copy
     try:
-        fingerprint = vault.require()
-    except vault.VaultError as exc:
+        return _with_key(args, url, modules, connect, families)
+    finally:
+        if key_copy is not None:
+            with contextlib.suppress(OSError):
+                os.remove(key_copy)
+
+
+def _with_key(args, url: str, modules, connect, families) -> int:
+    os.environ["DATA_KEY_FILE"] = args.key_file
+    if modules is None:
+        modules = {folder: load_bot_db(folder) for folder in dict.fromkeys(STAGE_FOLDER[s] for s in STAGES)
+                   if folder != "family_link"}
+        modules["family_link"] = load_family_link()
+    try:
+        fingerprints = hand_over_key(args.key_file, modules)
+    except KeyProblem as exc:
         print(f"The data key cannot be used: {exc}", file=sys.stderr)
         return 1
+    if len(set(fingerprints.values())) != 1:
+        print("Refused: the bots' vaults do not all hold the key given, so what one sealed another could not "
+              "open; nothing was changed. Fingerprints: "
+              + ", ".join(f"{name} {fp or 'none'}" for name, fp in sorted(fingerprints.items())),
+              file=sys.stderr)
+        return 2
+    fingerprint = next(iter(fingerprints.values()))
     print(f"Key fingerprint: {fingerprint}")
-
-    if modules is None:
-        modules = {folder: load_bot_db(folder) for folder in dict.fromkeys(STAGE_FOLDER[s] for s in STAGES)}
-        modules["family_link"] = load_family_link()
 
     if connect is None:
         import psycopg

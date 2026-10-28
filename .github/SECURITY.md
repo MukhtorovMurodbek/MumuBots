@@ -38,7 +38,7 @@ Anything that lets somebody:
 
 ## What this bot holds
 
-`/privacy` inside the bot, and `PRIVACY.md` in this repository, say exactly
+`/privacy` inside the bot, and `LEGAL.md` in this repository, say exactly
 what is stored, who else can see it and how long it stays. `/deletemydata`
 erases it. Those documents are the reference for what a leak would actually
 expose.
