@@ -17,7 +17,8 @@ Commands:
   /mypacks      - list your packs; tap one for Add/Rename/Co-edit
   /import       - (while editing a pack) bulk-import from another Telegram
                   pack or a WhatsApp sticker pack .zip/.wastickers file
-  /done         - finish the current pack-editing session
+  /done         - optional: close the pack being edited and get its link
+                  (every sticker is saved as it is added, so nothing asks for it)
   /cancel       - stop whatever the bot is waiting on you for
   /whomade      - look up who created a pack (packs made through this bot)
   /donate       - support hosting costs (voluntary)
@@ -27,7 +28,10 @@ Commands:
 Once you're "editing" a pack (after /newpack, tapping Add on a pack, or
 opening someone else's co-edit link), just send images, GIFs, videos, or
 static/video stickers one after another -- each is added immediately with a
-default 😭 emoji. Send emoji right after a sticker to retag it instead.
+default 😭 emoji, and answered with a short reply of its own. Send emoji right
+after a sticker to retag it, or reply with emoji to any sticker (or to the
+bot's reply about it) to retag that one. Other commands work in the middle of
+a session without ending it. In group chats see group_mode.py.
 GIFs/videos are auto-converted (via ffmpeg) into Telegram's video-sticker
 format; Lottie/.tgs animated stickers still aren't supported anywhere in
 this bot family (needs a separate rendering pipeline neither bot has).
@@ -60,9 +64,9 @@ from telegram import (
     InlineKeyboardMarkup,
     InputSticker,
 )
-from telegram.error import TimedOut
 from telegram.ext import (
     ApplicationBuilder,
+    ChatMemberHandler,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -75,12 +79,13 @@ from telegram.ext import (
 
 import emoji_utils
 import family_link
+import group_mode
 import i18n
 import import_utils
 import problems
 import lifecycle
-import live_message
 import shared_features
+import sticker_ops
 import video_sticker
 from live_message import LiveMessage, edit_in_place
 from db import (
@@ -91,18 +96,33 @@ from db import (
     get_pack_title,
     set_pack_title,
     get_pack_creator_info,
-    add_editor,
     get_coedit_view,
     reset_share_token,
-    get_pack_by_token,
+    join_by_token,
+    set_link_valid_days,
+    set_max_editors,
+    set_editors_delete,
+    pack_name_by_id,
+    pack_editors,
+    remove_editor,
+    shared_packs,
+    add_invites,
+    pack_invites,
+    remove_invite,
+    claim_invites,
+    invites_usable,
+    pack_access,
+    MAX_EDITORS_CHOICES,
+    VALID_DAYS_CHOICES,
     delete_pack_records,
     dump_database_csv_zip,
     count_active_users_since,
     get_user_language,
     set_user_language,
+    is_pack_public,
+    set_pack_public,
 )
-from image_utils import to_sticker_png
-from video_sticker import to_video_sticker_webm, ConversionError
+from video_sticker import ConversionError
 from emoji_utils import DEFAULT_EMOJI, looks_like_emoji_message, split_emoji
 from import_utils import (
     parse_telegram_pack_source,
@@ -199,7 +219,7 @@ BOT_NAME = "stickerbot"
 # latency; 30s is comfortably inside every proxy's idle timeout.
 POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT", "30"))
 
-TITLE, EDITING, RENAME = range(3)
+TITLE, EDITING, RENAME, INVITE = range(4)
 
 # The most characters Telegram takes in a pack's title; a longer one is cut.
 PACK_TITLE_MAX = 64
@@ -239,8 +259,15 @@ def _help_page_import(lang: str) -> str:
     return i18n.t(lang, "helppage_import", max=import_utils.MAX_IMPORT_PER_RUN)
 
 
-HELP_PAGES = {"newpack": _help_page_newpack, "addsticker": _help_page_addsticker, "import": _help_page_import}
-HELP_ALIASES = {}
+def _help_page_groups(lang: str) -> str:
+    return i18n.t(lang, "helppage_groups")
+
+
+HELP_PAGES = {"newpack": _help_page_newpack, "addsticker": _help_page_addsticker, "import": _help_page_import,
+              "groups": _help_page_groups}
+HELP_ALIASES = {"group": "groups"}
+# There is no /groups command, so its button says what it is rather than "/groups".
+HELP_LABELS = {"groups": "help_btn_groups"}
 
 
 def build_start_text(lang: str) -> str:
@@ -270,7 +297,8 @@ BOT_COMMANDS = [
     BotCommand("addsticker", "Add stickers to one of your packs"),
     BotCommand("mypacks", "Your packs"),
     BotCommand("import", "Copy stickers in from another pack"),
-    BotCommand("done", "Finish the pack you are editing"),
+    BotCommand("done", "Close the pack you are filling (optional)"),
+    BotCommand("emoji", "Reply to a sticker: change its emoji"),
     BotCommand("whomade", "Who made a pack — send me one of its stickers"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
@@ -341,18 +369,22 @@ def help_rows(lang: str) -> list:
 
 
 def start_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
-    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES)
+    return help_keyboard(lang, False, help_rows(lang) + [sibling_bots_keyboard_row(BOT_NAME)], HELP_PAGES,
+                         HELP_LABELS)
 
 
-def packs_keyboard(packs: list[tuple[str, str]], lang: str) -> InlineKeyboardMarkup:
-    """One button per pack (tap opens its menu), fStik-style."""
+def packs_keyboard(packs: list[tuple[str, str]], lang: str, shared=()) -> InlineKeyboardMarkup:
+    """One button per pack (tap opens its menu), fStik-style. Packs somebody shared with
+    you come after yours, marked 👥, and a tap opens them for adding straight away: their
+    menu (rename, sharing, deleting) is their owner's."""
     rows = [[InlineKeyboardButton(title, callback_data=f"packopen:{name}")] for name, title in packs]
+    rows += [[InlineKeyboardButton(f"👥 {title}", callback_data=f"pack:{name}")] for name, title in shared]
     rows.append([InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="menu_newpack")])
     rows.append([InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_start")])
     return InlineKeyboardMarkup(rows)
 
 
-def pack_detail_keyboard(pack_name: str, lang: str) -> InlineKeyboardMarkup:
+def pack_detail_keyboard(pack_name: str, lang: str, public: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(i18n.t(lang, "btn_open_pack"), url=f"https://t.me/addstickers/{pack_name}")],
@@ -361,56 +393,23 @@ def pack_detail_keyboard(pack_name: str, lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(i18n.t(lang, "btn_rename"), callback_data=f"packrename:{pack_name}"),
                 InlineKeyboardButton(i18n.t(lang, "btn_coedit"), callback_data=f"packcoedit:{pack_name}"),
             ],
+            # Private (the default) or public in groups -- see group_mode.py.
+            [InlineKeyboardButton(i18n.t(lang, "btn_pack_public" if public else "btn_pack_private"),
+                                  callback_data=f"packpub:{pack_name}")],
             [InlineKeyboardButton(i18n.t(lang, "btn_delete_pack"), callback_data=f"packdel:{pack_name}")],
             [InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_mypacks")],
         ]
     )
 
 
-def _sticker_error_key(exc: Exception) -> tuple:
-    """Which explanation a raw Telegram error from set-creation/add calls
-    gets, as (i18n key, fields)."""
-    if isinstance(exc, TimedOut):
-        # Not a rejection -- Telegram (or a local Bot API server) just
-        # didn't confirm in time, most often on a slow connection uploading
-        # a converted video sticker. The upload may well have gone through
-        # anyway, so don't call it "rejected" -- that's actively misleading.
-        return "err_timed_out", {}
-    msg = str(exc)
-    lower = msg.lower()
-    if "invalid sticker set name" in lower or "sticker_set_name_invalid" in lower:
-        return "err_invalid_name", {}
-    if "name is already occupied" in lower or "sticker_set_name_occupied" in lower:
-        return "err_name_occupied", {}
-    if "stickers_too_much" in lower:
-        return "err_too_many_stickers", {}
-    if "png" in lower and "type" in lower or "webp" in lower and "type" in lower:
-        return "err_bad_format", {}
-    return "err_generic", {"msg": msg}
-
-
-def _explain_sticker_error(exc: Exception, lang: str) -> str:
-    """Turns raw Telegram API errors from set-creation/add calls into
-    something the user can actually act on, instead of a bare exception."""
-    key, fields = _sticker_error_key(exc)
-    return i18n.t(lang, key, **fields)
-
-
-def _sticker_error_note(exc: Exception, lang: str) -> str:
-    """The status note a failed sticker leaves: what went wrong, what to do
-    next, and its problem code last, where the Report button looks for it."""
-    key, _ = _sticker_error_key(exc)
-    return (_explain_sticker_error(exc, lang) + "\n" + i18n.t(lang, "last_attempt_failed")
-            + problems.code_line(problems.STICKER_ERRORS[key]))
-
-
 def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "") -> str:
     title = context.user_data.get("title") or i18n.t(lang, "status_default_title")
     created = context.user_data.get("pack_created")
-    count = context.user_data.get("sticker_count", 0)
     verb = i18n.t(lang, "status_verb_creating" if not created else "status_verb_editing")
     intro = context.user_data.get("status_intro", "")
-    text = i18n.t(lang, "status_line", verb=verb, title=title, count=count)
+    # No running count since 2.2.0: each sticker is answered on its own (sticker_ops), so
+    # this message is only refreshed for imports and stays where it was otherwise.
+    text = i18n.t(lang, "status_line_open", verb=verb, title=title)
     if intro:
         text = f"{intro}\n\n{text}"
     if note:
@@ -418,13 +417,12 @@ def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "") 
     return text
 
 
-# The one message that tracks an editing session. It is the *only* thing
-# this bot says while a pack is open: every "added ✅", every failure, every
-# count is folded into it as the note line, rather than sent as a reply
-# underneath. That is not tidiness for its own sake -- a message that keeps
-# rewriting itself only works while it is the newest thing on screen, and a
-# separate confirmation after each sticker would push it out of that place
-# itself, every single time.
+# The one message that opens an editing session and carries the long notes
+# (an import's progress and summary). Until 2.2.0 it was the only thing the
+# bot said while a pack was open, every "added ✅" folded into it; the owner
+# found that several pictures sent quickly read as if only one had been added,
+# so each sticker now gets a short reply of its own (_add_and_confirm), which
+# is also what a later emoji reply points at.
 #
 # When the user does speak over it -- another photo, a stray "ok" -- the
 # handle notices and moves the whole status down to the bottom as a new
@@ -484,7 +482,9 @@ async def _end_status(context: ContextTypes.DEFAULT_TYPE, final_note: str):
 async def _owns_pack_or_deny(pack_name: str, user_id: int) -> bool:
     """True if user_id owns pack_name. Packs can only be managed (renamed,
     shared, or opened via the /mypacks menu) by their owner -- co-editors
-    only ever get add access, and only through a valid share link.
+    get the editing session only (adding, and taking a sticker out by
+    sending it again), through a valid share link or an invitation of their
+    @username.
 
     Async because it is a database round trip, and this runs on the first
     line of six different button handlers: doing it inline would stall every
@@ -644,6 +644,22 @@ async def crashtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- /start and menu buttons ----------
 
+async def _claim_invites(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> None:
+    """Packs whose owner invited this person's @username: they co-edit them from now on,
+    and are told so once. Never in the way: a failure is a line in the log."""
+    user = update.effective_user
+    if user is None or not user.username:
+        return
+    try:
+        joined = await asyncio.to_thread(claim_invites, user.id, user.username)
+    except Exception:
+        logger.warning("Could not check this person's invitations", exc_info=True)
+        return
+    if joined:
+        titles = ", ".join(f"“{title}”" for _, title in joined)
+        await update.effective_message.reply_text(i18n.t(lang, "invites_claimed", titles=titles))
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start prints the instructions -- except the very first one, which
     asks for a language first.
@@ -666,6 +682,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     language first and is carried there afterwards by pending_start_args.
     """
     lang = await asyncio.to_thread(get_user_language, update.effective_user.id)
+    await _claim_invites(update, context, lang or "en")
     if context.args:
         if lang is None:
             context.user_data["pending_start_args"] = context.args
@@ -674,15 +691,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["lang"] = lang
         return await _continue_start(update, context, lang, context.args)
 
-    # A bare /start abandons any half-finished pack session, exactly as it
-    # always has -- it is registered as a conversation fallback for that
-    # reason -- so tear that session status message down with it rather than
-    # leaving one dangling above a fresh greeting. Before the language gate
-    # below, not after it: a user who never picked a language is served in
-    # English (i18n.get_lang) rather than turned away, so they can be in the
-    # middle of a pack when this arrives.
+    # Since 2.2.0 a bare /start in the middle of a pack shows the menu and
+    # leaves the pack open (the owner: "users should be able to do anything
+    # else while they are adding new stickers"). Returning None keeps the
+    # conversation in the state it was in; the next picture still goes in.
+    if _has_status(context) and lang is not None:
+        context.user_data["lang"] = lang
+        await reply(update, build_start_text(lang), reply_markup=start_menu_keyboard(lang))
+        return None
     if _has_status(context):
-        await _end_status(context, i18n.t(lang or "en", "cancelled_status_note"))
+        await _end_status(context, i18n.t("en", "cancelled_status_note"))
     context.user_data.clear()
 
     if lang is None:
@@ -800,21 +818,16 @@ async def start_coedit_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     Replies through reply() rather than update.message, because a first-time
     user reaches this by tapping a language button, and a button tap has no
     message of its own to reply to."""
-    pack_name = await asyncio.to_thread(get_pack_by_token, token)
-    if not pack_name:
-        await reply(update, i18n.t(lang, "coedit_link_invalid"))
-        return ConversationHandler.END
-
-    owner_id = await asyncio.to_thread(get_pack_owner, pack_name)
     user = update.effective_user
-    if owner_id is None:
-        await reply(update, i18n.t(lang, "coedit_pack_gone"))
+    # The link's own limits (owner, 2026-10-28): how many editors it lets in, and until
+    # when. Somebody already in comes back in whatever the link's state.
+    outcome, pack_name = await asyncio.to_thread(join_by_token, token, user.id)
+    refusal = {"invalid": "coedit_link_invalid", "gone": "coedit_pack_gone", "own": "coedit_own_pack",
+               "expired": "coedit_link_expired", "full": "coedit_link_full"}.get(outcome)
+    if refusal:
+        await reply(update, i18n.t(lang, refusal))
         return ConversationHandler.END
-    if owner_id == user.id:
-        await reply(update, i18n.t(lang, "coedit_own_pack"))
-        return ConversationHandler.END
-
-    await asyncio.to_thread(add_editor, pack_name, user.id)
+    owner_id = await asyncio.to_thread(get_pack_owner, pack_name)
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
 
     context.user_data.clear()
@@ -834,7 +847,7 @@ async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.callback_query.answer()
     await edit_in_place(update.callback_query.message, context.bot, build_help_text(lang, full=True),
-                        reply_markup=help_keyboard(lang, True, help_rows(lang), HELP_PAGES))
+                        reply_markup=help_keyboard(lang, True, help_rows(lang), HELP_PAGES, HELP_LABELS))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -847,7 +860,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     full = wants_full_help(context)
     await update.message.reply_text(build_help_text(lang, full=full),
-                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES))
+                                    reply_markup=help_keyboard(lang, full, help_rows(lang), HELP_PAGES, HELP_LABELS))
 
 
 async def menu_mypacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -862,8 +875,11 @@ async def mypacks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_packs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     user_id = update.effective_user.id
+    if update.message is not None:
+        await _claim_invites(update, context, lang)
     packs = await asyncio.to_thread(get_user_packs, user_id)
-    if not packs:
+    shared = await asyncio.to_thread(shared_packs, user_id)
+    if not packs and not shared:
         kb = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="menu_newpack")],
@@ -872,7 +888,8 @@ async def show_packs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await reply(update, i18n.t(lang, "no_packs_yet"), reply_markup=kb)
         return
-    await reply(update, i18n.t(lang, "your_packs"), reply_markup=packs_keyboard(packs, lang))
+    text = i18n.t(lang, "your_packs") + ("\n" + i18n.t(lang, "your_packs_shared_note") if shared else "")
+    await reply(update, text, reply_markup=packs_keyboard(packs, lang, shared))
 
 
 # ---------- pack detail menu (Add / Rename / Co-edit) ----------
@@ -889,33 +906,265 @@ async def pack_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
-    await edit_in_place(query.message, context.bot, 
-        i18n.t(lang, "pack_detail_title", title=title), reply_markup=pack_detail_keyboard(pack_name, lang)
+    public = await asyncio.to_thread(is_pack_public, pack_name)
+    await edit_in_place(query.message, context.bot,
+        i18n.t(lang, "pack_detail_title", title=title), reply_markup=pack_detail_keyboard(pack_name, lang, public)
     )
+
+
+async def pack_public_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The 🔒/🌐 button: a pack private (only its owner and co-editors add to it) or
+    public (also anybody in a group its owner or a co-editor uses the bot in). Owner only."""
+    query = update.callback_query
+    pack_name = query.data.split(":", 1)[1]
+    user = update.effective_user
+    lang = await i18n.get_lang(user.id, context)
+    if not await _owns_pack_or_deny(pack_name, user.id):
+        await query.answer(i18n.t(lang, "not_your_pack"), show_alert=True)
+        return
+    public = not await asyncio.to_thread(is_pack_public, pack_name)
+    await asyncio.to_thread(set_pack_public, pack_name, public)
+    title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
+    await query.answer(i18n.t(lang, "pack_now_public" if public else "pack_now_private", title=title),
+                       show_alert=True)
+    await edit_in_place(query.message, context.bot, i18n.t(lang, "pack_detail_title", title=title),
+                        reply_markup=pack_detail_keyboard(pack_name, lang, public))
 
 
 # ---------- co-editing menu ----------
 
-async def _send_coedit_message(message, bot, pack_name: str, lang: str):
-    # One trip to the database for all three values -- this used to be a
-    # token read, a title read and an editor count, each with its own
-    # round trip, to render a single message.
-    token, title, editor_count = await asyncio.to_thread(get_coedit_view, pack_name)
-    title = title or pack_name
-    link = f"https://t.me/{BOT_USERNAME}?start=s_{token}"
-    editors_line = (
-        i18n.t(lang, "coedit_count_some", count=editor_count) if editor_count
-        else i18n.t(lang, "coedit_count_none")
-    )
+# The owner (2026-10-28): "The link might be shared/leaked to a group too large. Add options
+# when creating a link, like max editors (10 by default excluding owner), adding editor list
+# by telegram username (manually) or an activity period (1 week by default)." So the screen
+# shows the link with its limits, and buttons that cycle each (db.MAX_EDITORS_CHOICES,
+# db.VALID_DAYS_CHOICES), invite people by @username, and list everybody with a ✖ each. And
+# (owner, same day): "let the owner pick if they want to grant delete rights to the link" --
+# the 🗑 switch, off by default, lets every co-editor of the pack delete stickers.
+#
+# Its buttons carry the pack's number ("co:<action>:<id>"): a pack's name can be 48
+# characters, and a button's data 64 bytes. The cotoken_reset:<name> buttons of messages sent
+# before this still work.
+CO_PREFIX = "co:"
 
-    text = i18n.t(lang, "coedit_message", title=title, link=link, editors_line=editors_line)
+
+def _period_label(lang: str, days: "int | None") -> str:
+    return i18n.t(lang, "co_period_none") if days is None else i18n.t(lang, f"co_period_{days}")
+
+
+def _valid_line(lang: str, view: dict) -> str:
+    expires = view["expires_at"]
+    if expires is None:
+        return i18n.t(lang, "co_valid_forever")
+    left = expires - datetime.now(timezone.utc)
+    date = expires.strftime("%Y-%m-%d %H:%M UTC")
+    if left.total_seconds() <= 0:
+        return i18n.t(lang, "co_valid_expired", date=date)
+    hours = int(left.total_seconds() // 3600)
+    left_text = i18n.t(lang, "co_left_days", n=hours // 24) if hours >= 48 else i18n.t(lang, "co_left_hours", n=max(1, hours))
+    return i18n.t(lang, "co_valid_until", date=date, left=left_text)
+
+
+def _next_choice(choices, current):
+    try:
+        return choices[(choices.index(current) + 1) % len(choices)]
+    except ValueError:
+        return choices[0]
+
+
+async def _send_coedit_message(message, bot, pack_name: str, lang: str):
+    # One trip to the database for everything the screen shows (get_coedit_view).
+    view = await asyncio.to_thread(get_coedit_view, pack_name)
+    title = view["title"] or pack_name
+    link = f"https://t.me/{BOT_USERNAME}?start=s_{view['token']}"
+    invited = i18n.t(lang, "co_invited_count", n=view["invited"]) if view["invited"] else ""
+    text = i18n.t(lang, "coedit_message", title=title, link=link, valid_line=_valid_line(lang, view),
+                  editors=view["editors"], max=view["max_editors"], invited=invited)
+    pid = view["pack_id"]
     kb = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(i18n.t(lang, "btn_reset_link"), callback_data=f"cotoken_reset:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_co_valid", period=_period_label(lang, view["valid_days"])),
+                                  callback_data=f"{CO_PREFIX}exp:{pid}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_co_max", n=view["max_editors"]),
+                                  callback_data=f"{CO_PREFIX}max:{pid}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_co_delete_on" if view["editors_delete"] else "btn_co_delete_off"),
+                                  callback_data=f"{CO_PREFIX}del:{pid}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_co_invite"), callback_data=f"{CO_PREFIX}inv:{pid}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_co_list", n=view["editors"] + view["invited"]),
+                                  callback_data=f"{CO_PREFIX}list:{pid}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_reset_link"), callback_data=f"{CO_PREFIX}new:{pid}")],
             [InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data=f"packopen:{pack_name}")],
         ]
     )
-    await edit_in_place(message, bot, text, reply_markup=kb)
+    await edit_in_place(message, bot, text, reply_markup=kb, link_preview_options=NO_PREVIEW)
+
+
+async def _editor_name(bot, user_id: int) -> str:
+    """How the owner's list names a co-editor: their name as Telegram gives it now, or
+    their number when Telegram will not say."""
+    try:
+        chat = await bot.get_chat(user_id)
+    except Exception:
+        return f"#{user_id}"
+    if chat.username:
+        return f"@{chat.username}"
+    return chat.full_name or f"#{user_id}"
+
+
+# The list shows this many people at most; the rest are summed up in a line.
+CO_LIST_MAX = 30
+# How much of an invitation's mark (64 hex characters) its ✖ button carries.
+INVITE_MARK_CHARS = 16
+
+
+async def _send_coedit_list(message, bot, pack_name: str, pid: int, lang: str):
+    editors = await asyncio.to_thread(pack_editors, pack_name)
+    invites = await asyncio.to_thread(pack_invites, pack_name)
+    title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
+    lines = [i18n.t(lang, "co_list_heading", title=title)]
+    rows = []
+    # Asked of Telegram all at once: one at a time, thirty names took seconds to draw.
+    names = await asyncio.gather(*(_editor_name(bot, user_id) for user_id in editors[:CO_LIST_MAX]))
+    for user_id, name in zip(editors, names):
+        lines.append(f"• {name}")
+        rows.append([InlineKeyboardButton(f"✖ {name}", callback_data=f"{CO_PREFIX}rme:{pid}:{user_id}")])
+    for mark, username in invites[:CO_LIST_MAX]:
+        lines.append(i18n.t(lang, "co_list_invited", username=username))
+        # The start of the invitation's mark, not its place in the list: the list can change
+        # (somebody takes up an invitation) between drawing it and the tap.
+        rows.append([InlineKeyboardButton(f"✖ @{username}",
+                                          callback_data=f"{CO_PREFIX}rmi:{pid}:{mark[:INVITE_MARK_CHARS]}")])
+    hidden = max(0, len(editors) - CO_LIST_MAX) + max(0, len(invites) - CO_LIST_MAX)
+    if hidden:
+        lines.append(i18n.t(lang, "co_list_more", n=hidden))
+    if not editors and not invites:
+        lines.append(i18n.t(lang, "co_list_empty"))
+    else:
+        lines.append("\n" + i18n.t(lang, "co_list_remove_hint"))
+    rows.append([InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data=f"{CO_PREFIX}back:{pid}")])
+    await edit_in_place(message, bot, "\n".join(lines), reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _co_pack(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """(pack name, pack number, action, the rest of the button's data) for a co-edit button
+    whose pack the tapper owns, or None once they have been told why not."""
+    query = update.callback_query
+    parts = query.data[len(CO_PREFIX):].split(":")
+    pack_name = None
+    if len(parts) >= 2 and parts[1].isdigit():
+        pack_name = await asyncio.to_thread(pack_name_by_id, int(parts[1]))
+    if pack_name is None or not await _owns_pack_or_deny(pack_name, update.effective_user.id):
+        await query.answer(i18n.t(lang, "only_owner_coedit"), show_alert=True)
+        return None
+    return pack_name, int(parts[1]), parts[0], parts[2:]
+
+
+async def coedit_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Every button of the co-edit screen and its list, except "➕ Add by @username"
+    (invite_start), which waits for typing and so belongs to the conversation."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    found = await _co_pack(update, context, lang)
+    if found is None:
+        return
+    pack_name, pid, action, rest = found
+    if action == "exp":
+        view = await asyncio.to_thread(get_coedit_view, pack_name)
+        days = _next_choice(VALID_DAYS_CHOICES, view["valid_days"])
+        await asyncio.to_thread(set_link_valid_days, pack_name, days)
+        await query.answer(i18n.t(lang, "co_valid_set", period=_period_label(lang, days)))
+    elif action == "max":
+        view = await asyncio.to_thread(get_coedit_view, pack_name)
+        most = _next_choice(MAX_EDITORS_CHOICES, view["max_editors"])
+        await asyncio.to_thread(set_max_editors, pack_name, most)
+        await query.answer(i18n.t(lang, "co_max_set", n=most))
+    elif action == "del":
+        view = await asyncio.to_thread(get_coedit_view, pack_name)
+        allowed = not view["editors_delete"]
+        await asyncio.to_thread(set_editors_delete, pack_name, allowed)
+        await query.answer(i18n.t(lang, "co_delete_set_on" if allowed else "co_delete_set_off"), show_alert=allowed)
+    elif action == "new":
+        await asyncio.to_thread(reset_share_token, pack_name)
+        await query.answer(i18n.t(lang, "link_reset_confirm"))
+    elif action == "list":
+        await query.answer()
+        await _send_coedit_list(query.message, context.bot, pack_name, pid, lang)
+        return
+    elif action == "rme" and rest and rest[0].isdigit():
+        await asyncio.to_thread(remove_editor, pack_name, int(rest[0]))
+        await query.answer(i18n.t(lang, "co_removed"))
+        await _send_coedit_list(query.message, context.bot, pack_name, pid, lang)
+        return
+    elif action == "rmi" and rest and len(rest[0]) == INVITE_MARK_CHARS:
+        invites = await asyncio.to_thread(pack_invites, pack_name)
+        for mark, _ in invites:
+            if mark.startswith(rest[0]):
+                await asyncio.to_thread(remove_invite, pack_name, mark)
+                break
+        await query.answer(i18n.t(lang, "co_removed"))
+        await _send_coedit_list(query.message, context.bot, pack_name, pid, lang)
+        return
+    else:
+        await query.answer()
+    await _send_coedit_message(query.message, context.bot, pack_name, lang)
+
+
+# A Telegram username: 5 to 32 letters, digits and underscores, starting with a letter.
+USERNAME_RE = re.compile(r"^@?([A-Za-z][A-Za-z0-9_]{4,31})$")
+INVITES_PER_MESSAGE = 20
+
+
+async def invite_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"➕ Add by @username": asks for the names, as a message. An open pack stays open
+    behind the question, as behind a rename."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    found = await _co_pack(update, context, lang)
+    if found is None:
+        return None
+    pack_name, pid = found[0], found[1]
+    if not invites_usable():
+        await query.answer(i18n.t(lang, "invite_unavailable"), show_alert=True)
+        return None
+    await query.answer()
+    session = _session_of(context)
+    context.user_data.clear()
+    context.user_data.update(session)
+    context.user_data["lang"] = lang
+    context.user_data["invite_pack"] = pack_name
+    context.user_data["invite_pack_id"] = pid
+    title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
+    await edit_in_place(query.message, context.bot, i18n.t(lang, "invite_prompt", title=title))
+    return INVITE
+
+
+async def receive_invites(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    pack_name = context.user_data.pop("invite_pack", None)
+    pid = context.user_data.pop("invite_pack_id", None)
+    back = EDITING if _session_of(context) else ConversationHandler.END
+    if not pack_name or not await _owns_pack_or_deny(pack_name, update.effective_user.id):
+        await update.message.reply_text(i18n.t(lang, "only_owner_coedit"))
+        return back
+    names, bad = [], []
+    for word in update.message.text.replace(",", " ").split()[:INVITES_PER_MESSAGE]:
+        match = USERNAME_RE.match(word)
+        if match and match.group(1).lower() not in (n.lower() for n in names):
+            names.append(match.group(1))
+        elif not match:
+            bad.append(word)
+    invited, full = await asyncio.to_thread(add_invites, pack_name, names) if names else ([], [])
+    view = await asyncio.to_thread(get_coedit_view, pack_name)
+    lines = []
+    if invited:
+        lines.append(i18n.t(lang, "invite_done", names=", ".join("@" + n for n in invited)))
+    if full:
+        lines.append(i18n.t(lang, "invite_full", max=view["max_editors"], names=", ".join("@" + n for n in full)))
+    if bad:
+        lines.append(i18n.t(lang, "invite_bad", names=", ".join(bad[:5])))
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back"),
+                                                     callback_data=f"{CO_PREFIX}back:{pid}")]])
+    await update.message.reply_text("\n".join(lines) or i18n.t(lang, "invite_bad", names="—"), reply_markup=kb)
+    return back
 
 
 async def coedit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -956,10 +1205,14 @@ async def rename_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await _owns_pack_or_deny(pack_name, user.id):
         await query.answer(i18n.t(lang, "only_owner_rename"), show_alert=True)
-        return ConversationHandler.END
+        return None  # a pack being filled stays open, as behind a rename that goes ahead
 
     await query.answer()
+    # A pack being filled stays open behind the rename (receive_new_title goes
+    # back to it); anything else that was waiting is dropped, as before.
+    session = _session_of(context)
     context.user_data.clear()
+    context.user_data.update(session)
     context.user_data["lang"] = lang
     context.user_data["rename_pack"] = pack_name
     # The new title arrives as a plain text message, not a button tap --
@@ -983,7 +1236,7 @@ async def receive_new_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_title = update.message.text.strip()[:PACK_TITLE_MAX]  # Telegram title limit
     if not pack_name or prompt is None:
         await update.message.reply_text(i18n.t(lang, "rename_broken_state"))
-        return ConversationHandler.END
+        return EDITING if _session_of(context) else ConversationHandler.END
 
     kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back_to_pack"), callback_data=f"packopen:{pack_name}")]])
     try:
@@ -994,6 +1247,12 @@ async def receive_new_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Rename failed")
         await prompt.finish(context.bot, i18n.t(lang, "renamed_failed", error=exc), reply_markup=kb)
 
+    context.user_data.pop("rename_pack", None)
+    context.user_data.pop("rename_prompt", None)
+    if _session_of(context):
+        if context.user_data.get("target_pack") == pack_name:
+            context.user_data["title"] = new_title
+        return EDITING
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -1059,7 +1318,9 @@ async def delete_pack_confirm2(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
-    if not _owns_pack_or_deny(pack_name, user.id):
+    # Awaited since 2.2.0: without it the coroutine itself was the answer, always truthy, so
+    # this check never refused anybody -- a forged button could reach the delete below.
+    if not await _owns_pack_or_deny(pack_name, user.id):
         await query.answer(i18n.t(lang, "only_owner_delete"), show_alert=True)
         return
     await query.answer()
@@ -1124,7 +1385,10 @@ async def receive_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def addsticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     user_id = update.effective_user.id
+    await _claim_invites(update, context, lang)
     packs = await asyncio.to_thread(get_user_packs, user_id)
+    if not packs and await asyncio.to_thread(shared_packs, user_id):
+        return await show_packs(update, context)
     if not packs:
         await update.message.reply_text(i18n.t(lang, "no_packs_for_add"))
         return
@@ -1139,10 +1403,13 @@ async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
-    owner_id = await asyncio.to_thread(get_pack_owner, pack_name)
-    if owner_id != user.id:
+    access = await asyncio.to_thread(pack_access, pack_name, user.id)
+    if access is None or not access["allowed"]:
+        # None, not END: a refused tap (a 👥 pack whose owner has since removed you) leaves a
+        # pack you have open as it was.
         await query.answer(i18n.t(lang, "not_your_pack"), show_alert=True)
-        return ConversationHandler.END
+        return None
+    owner_id = access["owner_id"]
     await query.answer()
 
     context.user_data.clear()
@@ -1152,7 +1419,10 @@ async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["target_pack"] = pack_name
     context.user_data["owner_id"] = owner_id
 
-    intro = i18n.t(lang, "editing_intro_add")
+    # The tip says what sending a sticker that is already in it does for this person:
+    # take it out (the owner, or a co-editor allowed to delete), or ask about adding it again.
+    deletes = owner_id == user.id or access["can_delete"]
+    intro = i18n.t(lang, "editing_intro_add" if deletes else "editing_intro_shared")
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
     await _start_status(
         context, query.message.chat_id, title, lang,
@@ -1166,9 +1436,10 @@ async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _add_input_sticker(
     context: ContextTypes.DEFAULT_TYPE, user, input_sticker: InputSticker,
     want_file_id: bool = True,
-) -> str | None:
+) -> "tuple[str | None, int | None]":
     """Creates the pack (first sticker of a /newpack session) or adds to the
-    existing target pack. Returns the newly-added sticker's file_id.
+    existing target pack. Returns the newly-added sticker's file_id and its
+    place in the pack, or (None, None) with want_file_id=False.
 
     Always acts on Telegram's behalf of the pack's *owner* (owner_id), even
     if a co-editor is the one physically sending the sticker through the
@@ -1181,6 +1452,8 @@ async def _add_input_sticker(
     hundred round trips and the whole set is read once at the end instead.
     """
     owner_id = context.user_data["owner_id"]
+    if owner_id != user.id and context.user_data.get("pack_created"):
+        await _still_coediting(context, user.id)
 
     if not context.user_data.get("pack_created"):
         title = context.user_data["title"]
@@ -1208,20 +1481,98 @@ async def _add_input_sticker(
         )
         context.user_data["target_pack"] = pack_name
         context.user_data["pack_created"] = True
-    else:
-        pack_name = context.user_data["target_pack"]
-        await context.bot.add_sticker_to_set(
-            user_id=owner_id,
-            name=pack_name,
-            sticker=input_sticker,
-            read_timeout=60,
-            write_timeout=60,
-        )
+        if not want_file_id:
+            return None, None
+        return await sticker_ops.last_sticker(context.bot, pack_name)
+    return await sticker_ops.add_to_pack(context.bot, owner_id, context.user_data["target_pack"],
+                                         input_sticker, want_file_id)
 
-    if not want_file_id:
+
+class NoLongerEditor(Exception):
+    """The pack's owner removed this co-editor while their session was open."""
+
+
+# How long a co-editor's access, once checked, is trusted within a session: a bulk import
+# adds up to a hundred stickers, and one question a minute is enough to stop a removed one.
+ACCESS_RECHECK_SECONDS = 60
+
+
+async def _still_coediting(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    if now - context.user_data.get("access_checked_at", 0) < ACCESS_RECHECK_SECONDS:
+        return
+    access = await asyncio.to_thread(pack_access, context.user_data["target_pack"], user_id)
+    if access is None or not access["allowed"]:
+        raise NoLongerEditor(context.user_data.get("title") or context.user_data["target_pack"])
+    context.user_data["access_checked_at"] = now
+
+
+def _session_of(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    """The keys of an open editing session, to carry it past something else
+    (a rename) that starts from a clean user_data. Empty when none is open."""
+    if not _has_status(context):
+        return {}
+    keys = ("mode", "pack_created", "target_pack", "owner_id", "title", "sticker_count",
+            "status_intro", "last_sticker_id", "nudge_counted", STATUS_KEY)
+    return {key: context.user_data[key] for key in keys if key in context.user_data}
+
+
+def _behind_question(handler):
+    """`handler` for a picture sent while a rename or an invitation waits for typing. With a
+    pack open behind the question (since 2.2.0 it stays open there), the picture goes into the
+    pack and the question keeps waiting; with none open, nothing happens, as before."""
+    async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if _has_status(context):
+            await handler(update, context)
         return None
-    sticker_set = await context.bot.get_sticker_set(pack_name)
-    return sticker_set.stickers[-1].file_id
+    return run
+
+
+async def _say(message, working, text: str, **kwargs):
+    """`working` (the "⏳ Converting..." reply) turned into `text`, or a new reply to
+    `message` when there is none. Returns the message that now says it."""
+    if working is not None:
+        await working.edit_text(text, **kwargs)
+        return working
+    return await message.reply_text(text, **kwargs)
+
+
+async def _add_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str,
+                           input_sticker: InputSticker, working=None) -> None:
+    """Add one sticker to the session's pack and answer that one message: added as #N, or
+    why not. Both the person's message and the answer are remembered as pointing at the
+    new sticker, so a reply to either with emoji retags it (sticker_ops)."""
+    msg = update.message
+    try:
+        file_id, number = await _add_input_sticker(context, update.effective_user, input_sticker)
+    except NoLongerEditor as exc:
+        await _say(msg, working, i18n.t(lang, "coedit_removed_access", title=str(exc)))
+        return
+    except Exception as exc:
+        logger.exception("Sticker set operation failed")
+        record_error(exc)
+        await _say(msg, working, sticker_ops.error_note(exc, lang))
+        return
+    context.user_data["last_sticker_id"] = file_id
+    context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
+    pack_name = context.user_data["target_pack"]
+    title = context.user_data.get("title") or pack_name
+    # Named every time: with nothing asking for /done any more, a pack can stay open for
+    # days, and the reply is where the person sees which one a picture went into. The
+    # first sticker of a new pack also carries its link -- what /done used to be for.
+    text = i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=DEFAULT_EMOJI)
+    if number == 1:
+        text = i18n.t(lang, "pack_created_link", pack_name=pack_name) + "\n" + text
+    sent = await _say(msg, working, text)
+    sticker_ops.remember(msg.chat_id, msg.message_id, pack_name, file_id)
+    sticker_ops.remember(sent.chat_id, sent.message_id, pack_name, file_id)
+    if not context.user_data.get("nudge_counted"):
+        # One "finished something" per session for the donation cadence, as /done was
+        # until 2.2.0 (shared_features: not shown every time).
+        context.user_data["nudge_counted"] = True
+        nudge = await maybe_donation_nudge(update.effective_user.id, lang, context, msg.chat_id)
+        if nudge:
+            await msg.reply_text(nudge)
 
 
 async def _remember_last_sticker(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1251,63 +1602,116 @@ async def _is_own_pack_sticker(context: ContextTypes.DEFAULT_TYPE, sticker) -> b
     it). Trusting set_name alone in that case would try to delete an
     already-deleted sticker and fail with STICKERSET_NOT_MODIFIED instead of
     doing what the user clearly wants: re-add it. So once set_name points at
-    our pack, confirm against the pack's actual current contents."""
-    target_pack = context.user_data.get("target_pack")
-    if not target_pack or not sticker.set_name or sticker.set_name != target_pack:
-        return False
-    try:
-        sticker_set = await context.bot.get_sticker_set(target_pack)
-    except Exception:
-        return True  # can't verify right now -- fall back to trusting set_name
-    return any(s.file_unique_id == sticker.file_unique_id for s in sticker_set.stickers)
+    our pack, confirm against the pack's actual current contents (sticker_ops.in_pack, which
+    group chats use too)."""
+    return await sticker_ops.in_pack(context.bot, context.user_data.get("target_pack"), sticker)
 
 
-async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE, sticker) -> int:
-    """Handles the 'sent a sticker that's already in this pack' case by
-    removing it instead of trying (and failing) to re-add it -- Telegram
-    rejects re-adding a sticker to the exact set it already belongs to with
-    an unhelpful STICKERSET_INVALID error, so this sidesteps that entirely.
-
-    If it's the *last* sticker in the pack, removing it would make Telegram
-    auto-delete the whole set (packs can't be empty) -- so that case asks
-    for confirmation first instead of silently nuking the pack.
-    """
-    lang = await i18n.get_lang(update.effective_user.id, context)
-    try:
-        sticker_set = await context.bot.get_sticker_set(sticker.set_name)
-    except Exception:
-        sticker_set = None
-
-    if sticker_set and len(sticker_set.stickers) <= 1:
-        context.user_data["pending_removal"] = sticker.file_id
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(i18n.t(lang, "btn_delete_pack_yes"), callback_data="confirmremove:yes"),
-                    InlineKeyboardButton(i18n.t(lang, "btn_cancel"), callback_data="confirmremove:no"),
-                ]
-            ]
-        )
-        await update.message.reply_text(
-            i18n.t(lang, "remove_last_confirm"),
-            reply_markup=kb,
-        )
+async def _sticker_already_in_pack(update: Update, context: ContextTypes.DEFAULT_TYPE, sticker) -> int:
+    """A sticker sent that is already in the pack being filled: asked about, never acted on at
+    once (group_mode.ask_add_again, where the owner's words on it are). Whoever may delete --
+    the owner, or a co-editor the owner allows (the co-edit screen's 🗑) -- chooses between
+    adding it again and removing it; anybody else between adding it again or not, and is told
+    that only the owner deletes. Until 2.2.0 it was removed at once, whoever sent it."""
+    user_id = update.effective_user.id
+    pack_name = context.user_data["target_pack"]
+    lang = await i18n.get_lang(user_id, context)
+    access = await asyncio.to_thread(pack_access, pack_name, user_id)
+    title = context.user_data.get("title") or (access or {}).get("title") or pack_name
+    if access is None or not access["allowed"]:
+        await update.message.reply_text(i18n.t(lang, "coedit_removed_access", title=title))
         return EDITING
-
-    try:
-        await context.bot.delete_sticker_from_set(sticker=sticker.file_id)
-    except Exception as exc:
-        logger.exception("Failed to delete sticker from set")
-        record_error(exc)
-        await update.message.reply_text(i18n.t(lang, "remove_failed", error=exc))
-        return EDITING
-    context.user_data["sticker_count"] = max(0, context.user_data.get("sticker_count", 0) - 1)
-    await _refresh_status(context, lang)
-    await update.message.reply_text(i18n.t(lang, "remove_success"))
+    kind, file_id = sticker_ops.media_of(update.message)
+    await group_mode.ask_add_again(update, context, lang, pack_name, title, kind, file_id, in_group=False,
+                                   can_remove=access["can_delete"])
     return EDITING
 
 
+async def already_in_pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on that question: add it again (y), don't (n), remove it (r) -- and, for the
+    pack's last sticker, the owner's "delete the whole pack?" (R) or "keep it" (c). Only by
+    whoever was asked, once. A conversation entry point as well as a plain handler, like
+    cancel_choice_callback: deleting the pack this way has to be able to close the session
+    that was filling it. Returns None (the conversation stays as it was) otherwise."""
+    query, user = update.callback_query, update.effective_user
+    lang = await i18n.get_lang(user.id, context)
+    token, _, choice = query.data[len(group_mode.DUP_PREFIX):].partition(":")
+    asked = sticker_ops.held(token)
+    if asked is None:
+        await query.answer(i18n.t(lang, "dup_expired"), show_alert=True)
+        return None
+    if asked["user"] != user.id:
+        await query.answer(i18n.t(lang, "dup_not_yours"), show_alert=True)
+        return None
+    if choice in ("r", "R") and not asked["group"]:
+        return await _remove_asked(update, context, lang, token, asked, confirmed=choice == "R")
+    sticker_ops.release(token)
+    await query.answer()
+    if choice == "y":
+        await group_mode.add_again(update, context, lang, asked)
+    else:
+        await query.message.edit_text(i18n.t(lang, "keep_pack" if choice == "c" else "dup_not_added"))
+    return None
+
+
+async def _remove_asked(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, token: str,
+                        asked: dict, confirmed: bool):
+    """ "Remove it": the right to delete is checked again (the owner may have switched it off
+    since). The pack's last sticker takes the whole pack with it -- Telegram deletes an empty
+    set -- so the owner is asked once more, and a co-editor is never let do it."""
+    query, user = update.callback_query, update.effective_user
+    pack_name = asked["pack"]
+    access = await asyncio.to_thread(pack_access, pack_name, user.id)
+    if access is None or not access["can_delete"]:
+        sticker_ops.release(token)
+        await query.answer()
+        await query.message.edit_text(i18n.t(lang, "remove_not_allowed"))
+        return None
+    try:
+        sticker_set = await context.bot.get_sticker_set(pack_name)
+    except Exception:
+        sticker_set = None
+    last = sticker_set is not None and len(sticker_set.stickers) <= 1
+    if last and access["owner_id"] != user.id:
+        sticker_ops.release(token)
+        await query.answer()
+        await query.message.edit_text(i18n.t(lang, "remove_last_owner_only"))
+        return None
+    if last and not confirmed:
+        await query.answer()
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(i18n.t(lang, "btn_delete_pack_yes"), callback_data=f"{group_mode.DUP_PREFIX}{token}:R"),
+            InlineKeyboardButton(i18n.t(lang, "btn_cancel"), callback_data=f"{group_mode.DUP_PREFIX}{token}:c"),
+        ]])
+        await query.message.edit_text(i18n.t(lang, "remove_last_confirm"), reply_markup=keyboard)
+        return None
+    sticker_ops.release(token)
+    await query.answer()
+    try:
+        await context.bot.delete_sticker_from_set(sticker=asked["file_id"])
+    except Exception as exc:
+        logger.exception("Failed to delete a sticker from its set")
+        record_error(exc)
+        await query.message.edit_text(i18n.t(lang, "remove_failed", error=exc))
+        return None
+    filling = context.user_data.get("target_pack") == pack_name
+    if last:
+        await asyncio.to_thread(delete_pack_records, pack_name)  # Telegram auto-deleted the empty set
+        await query.message.edit_text(i18n.t(lang, "pack_deleted_empty"))
+        if filling:
+            await _end_status(context, i18n.t(lang, "pack_deleted_note"))
+            context.user_data.clear()
+            return ConversationHandler.END
+        return None
+    if filling:
+        context.user_data["sticker_count"] = max(0, context.user_data.get("sticker_count", 0) - 1)
+    await query.message.edit_text(i18n.t(lang, "remove_success"))
+    return None
+
+
 async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The "delete the whole pack?" buttons sent before 2.2.0, still answered for messages already
+    in people's chats; since then the question is already_in_pack_chosen's."""
     query = update.callback_query
     lang = await i18n.get_lang(update.effective_user.id, context)
     await query.answer()
@@ -1340,7 +1744,7 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
     if msg.sticker and await _is_own_pack_sticker(context, msg.sticker):
-        return await _remove_own_sticker(update, context, msg.sticker)
+        return await _sticker_already_in_pack(update, context, msg.sticker)
 
     if msg.photo:
         file_id = msg.photo[-1].file_id
@@ -1351,38 +1755,14 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         return EDITING
 
-    tg_file = await context.bot.get_file(file_id)
-    raw = await tg_file.download_as_bytearray()
-
     try:
-        # Pillow decodes and resamples in-process; a phone photo is tens of
-        # milliseconds of pure CPU, which on the event loop is every other
-        # user's update waiting behind it.
-        png_bytes = (await asyncio.to_thread(to_sticker_png, bytes(raw))).getvalue()
+        input_sticker = await sticker_ops.static_sticker(await sticker_ops.download(context.bot, file_id))
     except Exception as exc:
         record_error(exc)
         await msg.reply_text(i18n.t(lang, "image_process_failed", error=exc))
         return EDITING
 
-    input_sticker = InputSticker(sticker=png_bytes, emoji_list=[DEFAULT_EMOJI], format="static")
-
-    try:
-        last_id = await _add_input_sticker(context, update.effective_user, input_sticker)
-        context.user_data["last_sticker_id"] = last_id
-        context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
-        # The confirmation goes *into* the status message rather than under
-        # it. A separate "added ✅" reply would sit below the status and push
-        # it out of last place on every single sticker, which is the one
-        # thing an evolving message cannot survive.
-        await _refresh_status(context, lang, i18n.t(lang, "added_default_emoji", emoji=DEFAULT_EMOJI))
-    except Exception as exc:
-        logger.exception("Sticker set operation failed")
-        record_error(exc)
-        await _refresh_status(
-            context, lang,
-            _sticker_error_note(exc, lang),
-        )
-
+    await _add_and_confirm(update, context, lang, input_sticker)
     return EDITING
 
 
@@ -1391,7 +1771,7 @@ async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
     if msg.sticker and await _is_own_pack_sticker(context, msg.sticker):
-        return await _remove_own_sticker(update, context, msg.sticker)
+        return await _sticker_already_in_pack(update, context, msg.sticker)
 
     if msg.animation:
         file_id = msg.animation.file_id
@@ -1412,15 +1792,14 @@ async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(refusal)
         return EDITING
 
-    tg_file = await context.bot.get_file(file_id)
-    raw = await tg_file.download_as_bytearray()
+    raw = await sticker_ops.download(context.bot, file_id)
 
-    # The status message *is* the progress message: one bot message per
-    # action, always at the bottom of the chat, always current.
-    await _refresh_status(context, lang, i18n.t(lang, "converting_video"))
+    # The reply this clip gets is its progress message too: "converting", then
+    # "added as #N", or why not.
+    working = await msg.reply_text(i18n.t(lang, "converting_video"))
     try:
         async with lifecycle.busy(msg.chat_id, i18n.t(lang, "restarting_send_again")):
-            webm_bytes = await asyncio.to_thread(to_video_sticker_webm, bytes(raw), lang)
+            input_sticker = await sticker_ops.video_sticker(raw, lang)
     except ConversionError as exc:
         # Couldn't hit the 256 KB video-sticker target -- the raw clip itself is
         # still fine, so point at @ConvertBot for a plain (non-sticker)
@@ -1429,40 +1808,15 @@ async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE
         # the file over there themselves.
         record_error(exc)
         kb = InlineKeyboardMarkup([sibling_bots_keyboard_row(BOT_NAME, only="convertbot")])
-        # The buttons need a message of their own -- an inline keyboard on
-        # the status line would still be sitting there, live, several
-        # stickers later. bump() then tells the status handle that something
-        # has been sent underneath it (the watermark only watches the *user*,
-        # which is right everywhere except here), so the refresh moves the
-        # status down to the bottom instead of rewriting it above the
-        # buttons.
-        sent = await msg.reply_text(
-            i18n.t(lang, "video_convert_failed_redirect", error=exc), reply_markup=kb,
-        )
-        live_message.bump(sent.chat_id, sent.message_id)
-        await _refresh_status(context, lang)
+        await working.edit_text(i18n.t(lang, "video_convert_failed_redirect", error=exc), reply_markup=kb)
         return EDITING
     except Exception as exc:
         logger.exception("Video conversion failed")
         record_error(exc)
-        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        await working.edit_text(i18n.t(lang, "video_convert_generic_failed", error=exc))
         return EDITING
 
-    input_sticker = InputSticker(sticker=webm_bytes, emoji_list=[DEFAULT_EMOJI], format="video")
-
-    try:
-        last_id = await _add_input_sticker(context, update.effective_user, input_sticker)
-        context.user_data["last_sticker_id"] = last_id
-        context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
-        await _refresh_status(context, lang, i18n.t(lang, "added_video_default_emoji", emoji=DEFAULT_EMOJI))
-    except Exception as exc:
-        logger.exception("Sticker set operation failed")
-        record_error(exc)
-        await _refresh_status(
-            context, lang,
-            _sticker_error_note(exc, lang),
-        )
-
+    await _add_and_confirm(update, context, lang, input_sticker, working)
     return EDITING
 
 
@@ -1521,6 +1875,8 @@ async def import_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
                 added += 1
                 await asyncio.sleep(0.3)  # be gentle with Telegram's API during bulk adds
+            except NoLongerEditor:
+                break
             except Exception:
                 logger.exception("Import: failed to add one sticker")
                 failed += 1
@@ -1583,6 +1939,8 @@ async def receive_whatsapp_import(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
                 added += 1
                 await asyncio.sleep(0.3)
+            except NoLongerEditor:
+                break
             except Exception:
                 logger.exception("WhatsApp import: failed to add one sticker")
                 failed += 1
@@ -1601,7 +1959,16 @@ async def maybe_emoji_override(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = await i18n.get_lang(update.effective_user.id, context)
 
     if not looks_like_emoji_message(text):
-        await update.message.reply_text(i18n.t(lang, "not_emoji_message"))
+        # Nothing is asked for here since 2.2.0. It used to answer "Send an
+        # image/GIF/video/sticker to add, emoji to retag the last one, or
+        # /done", and the owner had it removed: "users should be able to do
+        # anything else while they are adding new stickers to a pack".
+        return EDITING
+    if update.message.reply_to_message is not None:
+        # A reply with emoji whose sticker emoji_reply could not find (the bot
+        # restarted since, or it is not a sticker of a pack made here):
+        # retagging the *last* sticker instead would be the wrong one.
+        await update.message.reply_text(i18n.t(lang, "emoji_target_unknown"))
         return EDITING
 
     last_sticker_id = context.user_data.get("last_sticker_id")
@@ -1619,6 +1986,51 @@ async def maybe_emoji_override(update: Update, context: ContextTypes.DEFAULT_TYP
     return EDITING
 
 
+class _EmojiReply(filters.MessageFilter):
+    """A message of only emoji that replies to a sticker, or to a message remembered as
+    standing for one (sticker_ops.sticker_of)."""
+
+    def filter(self, message) -> bool:
+        text = message.text or ""
+        return (message.reply_to_message is not None and not text.startswith("/")
+                and looks_like_emoji_message(text)
+                and sticker_ops.sticker_of(message.reply_to_message) is not None)
+
+
+async def emoji_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Emoji, as a reply to a sticker or to the bot's "Added" reply: retag that sticker. In
+    the middle of a session or not -- it is registered ahead of the conversation, and leaves
+    its state where it was."""
+    await group_mode.change_emoji(update, context, update.message.reply_to_message, update.message.text)
+
+
+async def emoji_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/emoji 😎 -- as a reply, that sticker; otherwise, in a session, the last one added.
+    /emoji alone as a reply asks for the emoji (group_mode.ask_for_emoji)."""
+    message = update.message
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    text = " ".join(context.args or [])
+    if (not text and message.reply_to_message is not None
+            and await group_mode.ask_for_emoji(update, context, message.reply_to_message)):
+        return
+    if not looks_like_emoji_message(text):
+        await message.reply_text(i18n.t(lang, "emoji_usage"))
+        return
+    if message.reply_to_message is not None:
+        await group_mode.change_emoji(update, context, message.reply_to_message, text)
+        return
+    last_sticker_id = context.user_data.get("last_sticker_id")
+    if not last_sticker_id:
+        await message.reply_text(i18n.t(lang, "emoji_usage"))
+        return
+    emojis = split_emoji(text)
+    try:
+        await context.bot.set_sticker_emoji_list(sticker=last_sticker_id, emoji_list=emojis)
+        await message.reply_text(i18n.t(lang, "retagged_success", emojis=" ".join(emojis)))
+    except Exception as exc:
+        await message.reply_text(i18n.t(lang, "retag_failed", error=exc))
+
+
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     pack_name = context.user_data.get("target_pack")
@@ -1632,13 +2044,9 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         i18n.t(lang, "done_success", title=title, count=count, pack_name=pack_name),
     )
 
-    # Finishing a pack is a natural "successful action" checkpoint -- see
-    # shared_features.py for the cadence this is throttled to (not shown every time).
-    nudge = await maybe_donation_nudge(
-        update.effective_user.id, lang, context, update.effective_chat.id)
-    if nudge:
-        await update.message.reply_text(nudge)
-
+    # Nothing asks for /done since 2.2.0 -- every sticker is saved as it is added, and the
+    # first one's reply carries the link -- so the donation checkpoint moved to the first
+    # sticker of a session (_add_and_confirm). This only closes the pack and sums it up.
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -1657,7 +2065,10 @@ async def convert_redirect_command(update: Update, context: ContextTypes.DEFAULT
 # The three pack states, as opposed to the donation prompt: cancelling one
 # of these is what closes the ConversationHandler, and cancelling anything
 # else must not.
-PACK_CANCEL_KEYS = ("rename", "editing", "newpack")
+PACK_CANCEL_KEYS = ("rename", "editing", "newpack", "invite")
+# Questions asked on top of an open pack (since 2.2.0 a rename or an invitation keeps it):
+# cancelling one of them goes back to the pack instead of closing it.
+OVER_PACK_KEYS = {"rename": ("rename_pack", "rename_prompt"), "invite": ("invite_pack", "invite_pack_id")}
 
 
 async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> list[CancelItem]:
@@ -1668,7 +2079,13 @@ async def _cancel_items(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
     this menu exists for is "the pack, or the donation prompt, or both".
     """
     items = cancel_items(context, lang)
-    if context.user_data.get("rename_pack"):
+    if context.user_data.get("invite_pack"):
+        pack = context.user_data["invite_pack"]
+        title = await asyncio.to_thread(get_pack_title, pack) or pack
+        items.append(CancelItem("invite",
+                                i18n.t(lang, "cancel_item_invite", title=title),
+                                i18n.t(lang, "cancel_button_invite")))
+    elif context.user_data.get("rename_pack"):
         pack = context.user_data["rename_pack"]
         title = await asyncio.to_thread(get_pack_title, pack) or pack
         items.append(CancelItem("rename",
@@ -1702,6 +2119,11 @@ async def _apply_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
     for chosen in keys:
         item = items.get(chosen)
         if item is None:
+            continue
+        if chosen in OVER_PACK_KEYS and _has_status(context):
+            for key in OVER_PACK_KEYS[chosen]:
+                context.user_data.pop(key, None)
+            stopped.append(item.label)
             continue
         if chosen == "editing":
             # The editing session owns the status message -- close that out
@@ -1766,7 +2188,13 @@ async def cancel_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
         keys = [key]
     stopped, pack_stopped = await _apply_cancel(update, context, lang, keys)
     await finish_cancel_choice(update, context, lang, stopped)
-    return ConversationHandler.END if pack_stopped else None
+    if pack_stopped:
+        return ConversationHandler.END
+    # A rename or an invitation cancelled on top of an open pack: back to the pack. Cancelling
+    # only something else (the donation prompt) leaves the conversation where it was.
+    if stopped and _has_status(context) and any(key in OVER_PACK_KEYS for key in keys):
+        return EDITING
+    return None
 
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1789,7 +2217,8 @@ async def _post_init(application):
     # replacing is still polling, two processes would be splitting this
     # bot's updates between them and getting 409 Conflict for their trouble.
     await lifecycle.on_start(BOT_NAME)
-    await lifecycle.optional("command menu", publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS))
+    await lifecycle.optional("command menu", publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS,
+                                                               group=group_mode.GROUP_COMMANDS))
     await lifecycle.optional("profile text", publish_profile(application))
 
 
@@ -1848,9 +2277,23 @@ def main():
     # just asked for something to be typed, in which case it takes the answer
     # and stops it from also being treated as, e.g., a pack title (see
     # awaited_text_received's docstring).
+    # Group chats first in the same handler group: python-telegram-bot runs the first
+    # handler that matches, so a group message reaches group_mode's router and never the
+    # private-chat prompt-taker below it (see group_mode.group_router).
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, group_mode.group_router), group=-1)
     app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
                                    awaited_text_received), group=-1)
+    app.add_handler(ChatMemberHandler(group_mode.bot_membership_changed, ChatMemberHandler.MY_CHAT_MEMBER))
+    # Ahead of the conversation, so a reply with emoji retags the sticker it replies to in
+    # any state, and the conversation never takes it for "retag the last one".
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & _EmojiReply(), emoji_reply))
 
+    static_media = filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC
+    video_media = filters.ANIMATION | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO
+    # While a rename or an invitation waits for typing, a picture still goes into the pack
+    # open behind it (_behind_question).
+    behind_question = [MessageHandler(static_media, _behind_question(receive_media)),
+                       MessageHandler(video_media, _behind_question(receive_video_media))]
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -1858,6 +2301,7 @@ def main():
             CallbackQueryHandler(newpack_start, pattern="^menu_newpack$"),
             CallbackQueryHandler(pack_chosen, pattern="^pack:"),
             CallbackQueryHandler(rename_start, pattern="^packrename:"),
+            CallbackQueryHandler(invite_start, pattern="^co:inv:"),
             # The three language switches are entry points purely so that the
             # END they return is honoured. A handler registered only outside
             # the conversation has its return value discarded, which is how a
@@ -1867,6 +2311,9 @@ def main():
             # Same reasoning: /cancel's buttons have to be able to close the
             # session the /cancel that raised them was sent from.
             CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"),
+            # And the question a sticker already in the pack gets: deleting the pack's last
+            # sticker there closes the session (already_in_pack_chosen).
+            CallbackQueryHandler(already_in_pack_chosen, pattern="^" + group_mode.DUP_PREFIX),
             CommandHandler("en", set_language_en),
             CommandHandler("uz", set_language_uz),
             CommandHandler("rus", set_language_rus),
@@ -1880,21 +2327,16 @@ def main():
         ],
         states={
             TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_title)],
-            RENAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_title)],
+            RENAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_title), *behind_question],
+            INVITE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_invites), *behind_question],
             EDITING: [
                 CallbackQueryHandler(confirm_remove_last_sticker, pattern="^confirmremove:"),
                 MessageHandler(
                     filters.Document.FileExtension("zip") | filters.Document.FileExtension("wastickers"),
                     receive_whatsapp_import,
                 ),
-                MessageHandler(
-                    filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC,
-                    receive_media,
-                ),
-                MessageHandler(
-                    filters.ANIMATION | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO,
-                    receive_video_media,
-                ),
+                MessageHandler(static_media, receive_media),
+                MessageHandler(video_media, receive_video_media),
                 MessageHandler(
                     filters.Sticker.ANIMATED,
                     reject_unsupported_sticker,
@@ -1947,14 +2389,15 @@ def main():
     app.add_handler(CommandHandler("addsticker", addsticker_command))
     app.add_handler(CommandHandler("help", help_command))
     # Outside the conversation, like /help, so they work in the middle of a pack.
-    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES)))
-    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES),
+    app.add_handler(CommandHandler("fullhelp", full_help_command(build_help_text, help_rows, HELP_PAGES, HELP_LABELS)))
+    app.add_handler(CallbackQueryHandler(help_toggle(build_help_text, help_rows, HELP_PAGES, HELP_LABELS),
                                          pattern=HELP_TOGGLE_PATTERN))
     # A page tap sends a new message and edits nothing, so it is fine here, outside
     # the conversation: it answers in the middle of a pack and does not end it.
     app.add_handler(CallbackQueryHandler(help_page_button(HELP_PAGES), pattern=HELP_PAGE_PATTERN))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("whomade", whomade_command))
+    app.add_handler(CommandHandler("emoji", emoji_command))
     app.add_handler(CommandHandler("whois", whois_command))  # owner-only
     app.add_handler(CommandHandler("messageas", messageas_command))  # owner-only
     app.add_handler(CommandHandler("dbdump", dbdump_command))  # owner-only
@@ -1969,8 +2412,11 @@ def main():
     app.add_handler(CallbackQueryHandler(menu_help, pattern="^menu_help$"))
     app.add_handler(CallbackQueryHandler(menu_start, pattern="^menu_start$"))
     app.add_handler(CallbackQueryHandler(pack_detail, pattern="^packopen:"))
+    app.add_handler(CallbackQueryHandler(pack_public_toggle, pattern="^packpub:"))
     app.add_handler(CallbackQueryHandler(coedit_menu, pattern="^packcoedit:"))
     app.add_handler(CallbackQueryHandler(coedit_reset, pattern="^cotoken_reset:"))
+    app.add_handler(CallbackQueryHandler(coedit_button, pattern="^co:(?!inv:)"))
+    app.add_handler(CallbackQueryHandler(already_in_pack_chosen, pattern="^" + group_mode.DUP_PREFIX))
     app.add_handler(CallbackQueryHandler(delete_pack_start, pattern="^packdel:"))
     app.add_handler(CallbackQueryHandler(delete_pack_confirm1, pattern="^packdelconfirm1:"))
     app.add_handler(CallbackQueryHandler(delete_pack_confirm2, pattern="^packdelconfirm2:"))
@@ -2002,9 +2448,10 @@ def main():
     # Telegram answers the moment an update exists -- for a third of the HTTP
     # requests, which on an idle bot is most of what it does all day. The
     # allowed_updates list is every kind this bot has a handler for; anything
-    # else (edited messages, channel posts, reactions, chat member changes)
-    # Telegram now stops sending at all rather than this process downloading
-    # and parsing it only to drop it.
+    # else (edited messages, channel posts, reactions, other people's
+    # membership changes) Telegram now stops sending at all rather than this
+    # process downloading and parsing it only to drop it. Its own membership
+    # (MY_CHAT_MEMBER) is in since 2.2.0: being added to a group or removed.
     # polling_kwargs() is what lets this process hear SIGTERM before
     # python-telegram-bot shuts it down, so a redeploy can tell anyone
     # mid-conversion what happened instead of leaving them waiting.
@@ -2013,7 +2460,8 @@ def main():
     # the poll that collects them.
     app.run_polling(**lifecycle.polling_kwargs(
         timeout=POLL_TIMEOUT,
-        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY],
+        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY,
+                         Update.MY_CHAT_MEMBER],
     ))
 
 

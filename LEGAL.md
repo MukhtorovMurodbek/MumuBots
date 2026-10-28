@@ -172,14 +172,35 @@ Everything under [Privacy, every bot](#privacy-every-bot) applies. Also held:
 - **The packs made through the bot** — each pack's short name and title, and
   the display name and username its creator had at the time. This is what
   `/mypacks`, `/addsticker` and `/whomade` read.
-- **Co-editing records** — the share links issued for a pack, and who has been
-  granted permission to add to it through one.
+- **Co-editing records** — the share links issued for a pack (with how many
+  co-editors each lets in, until when, and whether co-editors may delete
+  stickers), who has been granted permission to add
+  to it, and the Telegram usernames its owner invited who have not used the bot
+  yet. An invited username is kept sealed with the data key, beside a keyed hash
+  to recognise it by; it is deleted when that person next uses the bot (they then
+  become a co-editor), when the owner removes it, or after 30 days.
+- **Whether each pack is public.** Packs are private unless their owner makes
+  them public. A public pack is listed by `/packs` in the group chats where its
+  owner or a co-editor uses the bot, and anybody in such a group can add to it.
+- **Who has used the bot in which group chat** — the group's id and the person's
+  id, so that a group's `/packs` can list its own members' public packs (Telegram
+  does not let a bot see who is in a group). Kept 90 days from the person's last
+  use of the bot in that group; deleted sooner when they leave the group, when the
+  bot leaves it, or with `/deletemydata`.
+- **Which message stands for which sticker** — for the last stickers added, the
+  message that was turned into a sticker and the bot's reply to it, so that a reply
+  with an emoji changes the right sticker; and, while the bot waits for an answer to
+  "add it again, or remove it?" (a sticker sent that is already in the pack), who
+  was asked and which sticker, for an hour at most. In memory only: gone on every restart.
 - **Work in progress** — a pack half-built when the bot restarts.
 
 Not held: the images, videos and stickers sent in (they are handed to
 Telegram, which builds the pack), any message content beyond a pack title, and
-anything about anyone who has not messaged the bot. Stickers are prepared on the
-machine the bot runs on; no outside service is called.
+anything about anyone who has not messaged the bot. In a group the bot acts only
+on the commands sent to it and on replies to its own messages, and keeps nothing
+from any other message there; with Telegram's default settings for bots it is not
+even shown the others, only the group's join and leave notices. Stickers are
+prepared on the machine the bot runs on; no outside service is called.
 
 Packs and co-editing records are kept until erased. Erasing makes the bot
 forget the packs created through it: it stops listing them and can no longer
@@ -239,13 +260,21 @@ Reddit or X and sends back the media behind it. Everything under
 
 - **The caption, quality and large-file settings** that go with the chosen
   language.
-- **The last three downloads, for 30 minutes each.** What the bot has just sent you
-  stays on its server for 30 minutes, so that the buttons under it, or the same link
-  sent again, are answered without fetching the post a second time. Each of those
-  starts the 30 minutes again, but it never lasts past 12 hours after the
-  download. It is deleted sooner when a fourth download pushes it out, when the bot
-  restarts, when the server is short of space, or when you use `/deletemydata`.
-  Only you can get it back, and a download over 100 MB is never kept.
+- **The last download, for 10 minutes.** What the bot has just sent you stays on
+  its server for 10 minutes, so that the buttons under it, or the same link sent
+  again, are answered without fetching the post a second time. Each of those starts
+  the 10 minutes again, but it never lasts past 12 hours after the download. It is
+  deleted sooner when your next download replaces it, when the bot restarts, when
+  the server is short of space, or when you use `/deletemydata`. Only you can get it
+  back, and a download over 100 MB is never kept.
+- **For a group chat the bot was added to:** the group's id and its `/settings`
+  (which sites' links to download, the quality, video or file, the credit line,
+  who may change them). Nothing about the group's members. Deleted when the bot
+  leaves the group or is removed from it. To see the links, the bot reads every
+  message in the group (it can only as an admin, or with Telegram's privacy mode
+  off for it) and keeps nothing from those without one. A link it downloads is
+  handled like one sent in a private chat, on the allowance of the person who
+  posted it, who then counts as having used the bot; nobody else in the group does.
 - **References to files the bot has already sent** (Telegram's file IDs), filed
   under a scrambled name of the post and not under who asked for it. They let the
   bot send the same post again without downloading it. Before re-using one, the
@@ -262,7 +291,7 @@ Reddit or X and sends back the media behind it. Everything under
   the link and the platform are not part of the row. Kept 2 days.
 - **Work in progress** — a download waiting on a choice.
 
-Not held: the media itself beyond those 30 minutes (fetched, sent, and
+Not held: the media itself beyond those 10 minutes (fetched, sent, and
 deleted); who asked for which post, in the references to files already sent (they
 are kept under a scrambled name of the post alone, and nothing in them says who the
 post was sent to); and anything about the author of the post beyond what is inside
@@ -412,7 +441,17 @@ what this is for, and neither is a pack of anything Telegram's own terms forbid.
 
 A pack, once created, lives on Telegram under this bot's name. The bot can be
 made to forget a pack; deleting one for real is done through Telegram, by the
-person who owns it. Complaints about a specific pack are best taken to
+person who owns it.
+
+Making a pack public lets anybody in a group where its owner or a co-editor uses
+the bot add stickers to it and change their emoji, and posting a pack's co-edit
+link anywhere lets whoever opens it do the same, within the link's limits (10
+co-editors and one week unless the owner sets others). Only the owner deletes
+stickers, unless the owner lets co-editors do it too (never the last sticker,
+which would delete the pack), and nothing is deleted from a group chat. The owner
+decides all of it, can make the pack private again, reset the link, invite people
+by username and remove any co-editor; what others added stays in the pack until
+the owner removes it. Complaints about a specific pack are best taken to
 Telegram, which hosts it and can remove it; the operator can also be told, and
 will forget the pack here.
 
@@ -460,14 +499,14 @@ reviews nor licenses any of it. Rights holders who want a specific post to stop
 being retrievable should approach the platform hosting it. Remove the post at the
 platform: once neither the platform nor the download services the bot asks still
 serve it, the bot stops sending it within 12 hours. This bot keeps no copy of any
-post. It holds only the last three downloads, for 30 minutes each, and references to files it
+post. It holds only each person's last download, for 10 minutes, and references to files it
 has already sent (see below); before it re-uses one of those it checks, at least
 every 12 hours, that the post is still public. It has nothing else to take down.
 
-**The last downloads.** What the bot has just sent you is held on its server for 30
+**The last download.** What the bot has just sent you is held on its server for 10
 minutes, so that the buttons under it, or the same link sent again, are answered
 without fetching the post a second time. It is a convenience, not storage: it is
-deleted when a fourth download pushes it out, after 30 minutes, on a restart, or
+deleted when your next download replaces it, after 10 minutes, on a restart, or
 with `/deletemydata`, and it may be deleted sooner when the server is short of
 space. It never lasts past 12 hours after the download. The DownloaderBot privacy
 section above has the details.

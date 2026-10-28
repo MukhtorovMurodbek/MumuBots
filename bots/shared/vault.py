@@ -191,6 +191,17 @@ def pseudonym_in(telegram_id: int, domain: str) -> int:
     return -(2 ** 63) + (int.from_bytes(mac[:8], "big") >> 2)
 
 
+def text_mark(text: str, domain: str) -> str:
+    """A keyed hash (HMAC-SHA256, hex) of a short text in `domain`: what a table stores to find
+    a row by a value it must not hold in the clear -- StickerBot's invitations by @username,
+    beside the sealed name the owner is shown. Like pseudonym(), nothing can be computed from
+    it, or for it, without the key."""
+    if not domain or not domain.isascii():
+        raise ValueError("text_mark() needs an ASCII domain")
+    return hmac.new(_load()[0], b"text:%s:" % domain.encode("ascii") + text.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
 def _aad(purpose: str) -> bytes:
     return b"mumubots v1 " + purpose.encode("utf-8")
 

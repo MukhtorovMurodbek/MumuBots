@@ -88,7 +88,7 @@ STRINGS = {
         "topup_failed": "⚠️ Your payment of {stars} ⭐ went through, but a problem on my side kept the ⚡ from reaching your balance. Nothing is lost: the owner has been told and will add it by hand. To follow up: /paysupport",
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded to you automatically, in full.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
         "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
+        "problem_logged_note": "Anonymous report is saved",
         "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
         "report_send": '📨 Send my details',
         "report_cancel": '✖️ Cancel',
@@ -126,10 +126,10 @@ STRINGS = {
             "• the links you send: each one while it is fetched, then the last five, so the "
             "buttons under those downloads work. They are dropped after 12 hours without using "
             "the bot\n"
-            "• the last three things it sent you, for 30 minutes each, so the buttons under them "
-            "and the same link sent again are answered without fetching them twice. /deletemydata "
-            "or a restart deletes them sooner. All of it is deleted no later than 12 hours after "
-            "the download\n"
+            "• the last thing it sent you, for 10 minutes, so the buttons under it and the same "
+            "link sent again are answered without fetching it twice. Your next link, /deletemydata "
+            "or a restart deletes it sooner, and it is deleted no later than 12 hours after the "
+            "download\n"
             "• references to files the bot has already sent (Telegram's file IDs), filed under a "
             "scrambled name of the post and not under who asked for it. They let the bot send the "
             "same post again without downloading it. Before re-using one, the bot checks at least "
@@ -142,8 +142,13 @@ STRINGS = {
             "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "• whatever the bot is in the middle of doing with you, until it is finished\n"
+            "• in a group chat it was added to: the group's id and its /settings, until the bot "
+            "leaves the group. It looks at every message there for a link and keeps nothing from "
+            "the others; a link it downloads counts as the poster's, like one sent here (the "
+            "allowance row, and the last download for 10 minutes). Nothing else about the group's "
+            "members\n"
             "\n"
-            "Apart from those 30 minutes the media itself is not kept. It is fetched, sent to you, "
+            "Apart from those 10 minutes the media itself is not kept. It is fetched, sent to you, "
             "and deleted."
         ),
         "privacy_problems_heading": "When something goes wrong:",
@@ -372,6 +377,28 @@ STRINGS = {
         "merge_no_photos": "📄 A PDF needs at least two photos, and I found fewer than that in the post this time. Send the link again, or take the files from the chat above.",
         "merge_failed": "😕 Something went wrong while I was putting them into one file, so there's no PDF or ZIP this time. The files above are fine — send the link again to retry.",
         "unknown_command": "I don't recognize that command. Send /help to see what I can do.",
+        # 2.2.0: the quality picker and group chats (bot.py).
+        "quality_heading": '📹 {title}',
+        "quality_paid_note": '⚡ — over {free} MB: paid with ⚡ credit (/settings, large files).',
+        "quality_choose": 'Choose a quality ↓',
+        "quality_more_button": '🎵 MP3 · ✂️ Trim · more ↗️',
+        "quality_expired": 'That choice has expired — send the link again.',
+        "quality_picked": '⏳ {height}p — fetching...',
+        "group_hello": "👋 Hi! Post a link from Instagram, TikTok, Pinterest, Reddit or X in this chat and I'll send the video here.\n\n/settings — which links I download here, in what quality, and as videos or files. Anyone in the group can change them, unless an admin locks them.",
+        "group_cant_see": '⚠️ Right now I only see messages addressed to me. To see the links people post, make me an admin of this group.',
+        "group_settings_text": '⚙️ What I do in this group — tap to change.\n\nQuality applies where the site offers a choice; other links come as the site sends them. Files over {free} MB are not sent in groups.',
+        "group_on": '✅ Downloading links',
+        "group_paused": '⏸ Paused — tap to resume',
+        "group_other_videos": '🎬 Other video sites',
+        "group_quality_best": 'Best',
+        "group_as_video": '📹 Sent as videos',
+        "group_as_file": '📄 Sent as files',
+        "group_credit_on": '🏷 Credit line: on',
+        "group_credit_off": '🏷 Credit line: off',
+        "group_anyone": '🔓 Anyone can change these',
+        "group_admins_only": '🔒 Only admins can change these',
+        "group_admins_alert": "Only this group's admins can change that.",
+        "group_saved": 'Saved ✅',
     },
     "uz": {
         "transfer_waiting": "⏳ Hozir boshqa katta fayl uzatilmoqda. Siznikini u tugashi bilan boshlayman — hech narsa qilishingiz shart emas.",
@@ -406,7 +433,7 @@ STRINGS = {
         "topup_failed": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin men tomondagi muammo tufayli ⚡ balansingizga tushmadi. Hech narsa yo'qolmaydi: egasiga xabar berildi, u qo'lda qo'shib qo'yadi. Murojaat uchun: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov sizga avtomatik ravishda to'liq qaytariladi.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
         "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
+        "problem_logged_note": "Anonim hisobot saqlandi",
         "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
         "report_send": "📨 Ma'lumotlarimni yuborish",
         "report_cancel": '✖️ Bekor qilish',
@@ -431,7 +458,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• siz yuborgan havolalar: har biri u bo'yicha fayl olinayotgan paytda, keyin esa oxirgi beshtasi — o'sha yuklamalar ostidagi tugmalar ishlashi uchun. Botdan 12 soat foydalanmasangiz, ular o'chiriladi\n• bot sizga oxirgi yuborgan uchta narsa — har biri 30 daqiqa davomida, ularning ostidagi tugmalar va qayta yuborilgan o'sha havola fayllarni qaytadan yuklamasdan javob berishi uchun. /deletemydata buyrug'ini bersangiz yoki bot qayta ishga tushsa, ular oldinroq o'chiriladi. Bularning hammasi yuklab olinganidan keyin 12 soatdan kechiktirmay o'chiriladi\n• bot avval yuborgan fayllarning Telegram fayl ID'lari — postning qaytarib bo'lmaydigan kodi ostida saqlanadi, kim so'ragani esa saqlanmaydi. Ular yordamida bot o'sha postni qayta yuklab olmasdan yana yubora oladi. Fayl ID'sidan qayta foydalanishdan oldin bot post hali ham ochiq ekanini kamida har 12 soatda tekshiradi. Hech kim foydalanmagan fayl ID'lari 90 kundan keyin o'chiriladi\n• har bir yuklab olish uchun bitta yozuv: faqat qachonligi; kunlik limit shu asosida hisoblanadi. Yozuvlar 2 kundan keyin o'chiriladi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n\nShu 30 daqiqadan tashqari faylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
+        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• siz yuborgan havolalar: har biri u bo'yicha fayl olinayotgan paytda, keyin esa oxirgi beshtasi — o'sha yuklamalar ostidagi tugmalar ishlashi uchun. Botdan 12 soat foydalanmasangiz, ular o'chiriladi\n• bot sizga oxirgi yuborgan narsa — 10 daqiqa davomida, uning ostidagi tugmalar va qayta yuborilgan o'sha havola faylni qaytadan yuklamasdan javob berishi uchun. Keyingi havolangiz, /deletemydata yoki botning qayta ishga tushishi uni oldinroq o'chiradi; u yuklab olinganidan keyin 12 soatdan kechiktirmay o'chiriladi\n• bot avval yuborgan fayllarning Telegram fayl ID'lari — postning qaytarib bo'lmaydigan kodi ostida saqlanadi, kim so'ragani esa saqlanmaydi. Ular yordamida bot o'sha postni qayta yuklab olmasdan yana yubora oladi. Fayl ID'sidan qayta foydalanishdan oldin bot post hali ham ochiq ekanini kamida har 12 soatda tekshiradi. Hech kim foydalanmagan fayl ID'lari 90 kundan keyin o'chiriladi\n• har bir yuklab olish uchun bitta yozuv: faqat qachonligi; kunlik limit shu asosida hisoblanadi. Yozuvlar 2 kundan keyin o'chiriladi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n• bot qo'shilgan guruh chatida: guruh ID raqami va uning /settings sozlamalari — bot guruhdan chiqquncha. U yerdagi har bir xabarda havola bor-yo'qligini qaraydi va boshqa xabarlardan hech narsa saqlamaydi; yuklab olingan havola uni yuborgan kishiniki hisoblanadi, xuddi shu yerda yuborilgandek (kunlik limit yozuvi va 10 daqiqalik oxirgi yuklab olish). Guruh a'zolari haqida boshqa hech narsa\n\nShu 10 daqiqadan tashqari faylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -600,6 +627,28 @@ STRINGS = {
         "merge_no_photos": "📄 PDF uchun kamida ikkita rasm kerak, postda esa bu safar ikkitadan kam rasm topildi. Havolani qayta yuboring yoki fayllarni yuqoridan oling.",
         "merge_failed": "😕 Fayllarni bitta qilib yig'ishda nimadir xato ketdi, shuning uchun bu safar PDF ham, ZIP ham chiqmadi. Yuqoridagi fayllar joyida — qayta urinish uchun havolani yana yuboring.",
         "unknown_command": "Bunday buyruq yo'q. Bot nimalar qila olishini bilish uchun /help yuboring.",
+        # 2.2.0: the quality picker and group chats (bot.py).
+        "quality_heading": '📹 {title}',
+        "quality_paid_note": '⚡ — {free} MB dan katta: ⚡ kredit bilan pullik (/settings, katta fayllar).',
+        "quality_choose": 'Sifatni tanlang ↓',
+        "quality_more_button": '🎵 MP3 · ✂️ Kesish · boshqalar ↗️',
+        "quality_expired": 'Bu tanlov eskirgan — havolani qaytadan yuboring.',
+        "quality_picked": '⏳ {height}p — olinmoqda...',
+        "group_hello": "👋 Salom! Bu chatga Instagram, TikTok, Pinterest, Reddit yoki X havolasini yuboring — videoni shu yerga yuboraman.\n\n/settings — bu yerda qaysi havolalarni, qanday sifatda, video yoki fayl sifatida yuklashim. Admin qulflamagan bo'lsa, guruhdagi har kim o'zgartira oladi.",
+        "group_cant_see": "⚠️ Hozir faqat menga yozilgan xabarlarni ko'raman. Odamlar yuborgan havolalarni ko'rishim uchun meni guruh admini qiling.",
+        "group_settings_text": "⚙️ Bu guruhda nima qilaman — o'zgartirish uchun bosing.\n\nSifat sayt tanlov bergan joyda ishlaydi; boshqa havolalar sayt qanday bersa, shunday keladi. {free} MB dan katta fayllar guruhlarda yuborilmaydi.",
+        "group_on": '✅ Havolalarni yuklayapman',
+        "group_paused": "⏸ To'xtatilgan — davom ettirish uchun bosing",
+        "group_other_videos": '🎬 Boshqa video saytlar',
+        "group_quality_best": 'Eng yaxshi',
+        "group_as_video": '📹 Video sifatida',
+        "group_as_file": '📄 Fayl sifatida',
+        "group_credit_on": '🏷 Bot nomi yozuvi: yoqilgan',
+        "group_credit_off": "🏷 Bot nomi yozuvi: o'chirilgan",
+        "group_anyone": "🔓 Har kim o'zgartira oladi",
+        "group_admins_only": "🔒 Faqat adminlar o'zgartiradi",
+        "group_admins_alert": "Buni faqat guruh adminlari o'zgartira oladi.",
+        "group_saved": 'Saqlandi ✅',
     },
     "ru": {
         "transfer_waiting": "⏳ Сейчас передаётся другой большой файл. Ваш начнётся сразу после него — ничего делать не нужно.",
@@ -653,7 +702,7 @@ STRINGS = {
         "topup_failed": "⚠️ Ваш платёж на {stars} ⭐ прошёл, но из-за проблемы на моей стороне ⚡ не поступили на баланс. Ничего не потеряно: владелец уже знает и начислит их вручную. Уточнить: /paysupport",
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается вам автоматически и полностью.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
         "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
+        "problem_logged_note": 'Анонимный отчёт сохранён',
         "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
         "report_send": '📨 Отправить мои данные',
         "report_cancel": '✖️ Отмена',
@@ -691,10 +740,10 @@ STRINGS = {
             "• ссылки, которые вы присылаете: каждую — пока загружается то, что по ней, затем "
             "последние пять, чтобы работали кнопки под этими загрузками. Они удаляются, если вы "
             "не пользуетесь ботом 12 часов\n"
-            "• три последних файла, которые бот вам отправил, — по 30 минут каждый, чтобы кнопки "
-            "под ними и та же ссылка, присланная снова, срабатывали без повторной загрузки. "
-            "/deletemydata или перезапуск бота удаляют их раньше. Всё это удаляется не позже чем "
-            "через 12 часов после скачивания\n"
+            "• последний файл, который бот вам отправил, — на 10 минут, чтобы кнопки под ним и та "
+            "же ссылка, присланная снова, срабатывали без повторной загрузки. Ваша следующая "
+            "ссылка, /deletemydata или перезапуск бота удаляют его раньше; он удаляется не позже "
+            "чем через 12 часов после скачивания\n"
             "• file ID Telegram для файлов, которые бот уже отправлял, — под необратимым кодом "
             "поста, без сведений о том, кто его запрашивал. Они позволяют отправить тот же пост "
             "ещё раз, не скачивая его заново. Прежде чем снова использовать file ID, бот не "
@@ -707,8 +756,13 @@ STRINGS = {
             "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "• то, что бот в этот момент для вас делает — пока не закончит\n"
+            "• в группе, куда бота добавили: id группы и её настройки /settings — пока бот не "
+            "покинет группу. Бот просматривает там каждое сообщение в поисках ссылки и ничего не "
+            "сохраняет из остальных; скачанная ссылка считается ссылкой того, кто её прислал, как "
+            "если бы её прислали сюда (запись для дневного лимита и последняя загрузка на 10 минут). "
+            "Больше об участниках группы — ничего\n"
             "\n"
-            "Кроме этих 30 минут, сами файлы не хранятся: они загружаются, отправляются вам и "
+            "Кроме этих 10 минут, сами файлы не хранятся: они загружаются, отправляются вам и "
             "удаляются."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
@@ -920,6 +974,28 @@ STRINGS = {
         "merge_no_photos": "📄 Для PDF нужно хотя бы два фото, а в этом посте сейчас нашлось меньше. Пришлите ссылку заново или возьмите файлы из чата выше.",
         "merge_failed": "😕 Что-то пошло не так, пока я собирал всё в один файл, — ни PDF, ни ZIP в этот раз не вышло. Файлы выше целы; пришлите ссылку заново, чтобы попробовать ещё раз.",
         "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
+        # 2.2.0: the quality picker and group chats (bot.py).
+        "quality_heading": '📹 {title}',
+        "quality_paid_note": '⚡ — больше {free} МБ: платно, ⚡ кредитом (/settings, большие файлы).',
+        "quality_choose": 'Выберите качество ↓',
+        "quality_more_button": '🎵 MP3 · ✂️ Обрезка · другое ↗️',
+        "quality_expired": 'Этот выбор устарел — отправьте ссылку ещё раз.',
+        "quality_picked": '⏳ {height}p — загружаю...',
+        "group_hello": '👋 Привет! Отправьте в этот чат ссылку из Instagram, TikTok, Pinterest, Reddit или X — и я пришлю видео сюда.\n\n/settings — какие ссылки я скачиваю здесь, в каком качестве, видео или файлом. Менять может любой участник, если админ не закрыл это.',
+        "group_cant_see": '⚠️ Сейчас я вижу только сообщения, адресованные мне. Чтобы видеть ссылки участников, сделайте меня админом группы.',
+        "group_settings_text": '⚙️ Что я делаю в этой группе — нажмите, чтобы изменить.\n\nКачество работает там, где сайт даёт выбор; остальные ссылки приходят такими, какими их отдаёт сайт. Файлы больше {free} МБ в группах не отправляются.',
+        "group_on": '✅ Скачиваю ссылки',
+        "group_paused": '⏸ На паузе — нажмите, чтобы продолжить',
+        "group_other_videos": '🎬 Другие видеосайты',
+        "group_quality_best": 'Лучшее',
+        "group_as_video": '📹 Отправляю видео',
+        "group_as_file": '📄 Отправляю файлом',
+        "group_credit_on": '🏷 Подпись бота: вкл',
+        "group_credit_off": '🏷 Подпись бота: выкл',
+        "group_anyone": '🔓 Менять может любой',
+        "group_admins_only": '🔒 Менять могут только админы',
+        "group_admins_alert": 'Это могут менять только админы группы.',
+        "group_saved": 'Сохранено ✅',
     },
 }
 
@@ -999,4 +1075,10 @@ COMMAND_MENU = {
         "terms": "Для чего можно пользоваться ботом",
         "deletemydata": "Удалить всё, что я о вас храню",
     },
+}
+
+# The group-chat menu (bot.py's GROUP_COMMANDS), in the other two languages.
+GROUP_COMMAND_MENU = {
+    "uz": {"settings": "Bu guruhda nimani yuklayman", "help": "Guruhda qanday ishlayman"},
+    "ru": {"settings": "Что я скачиваю в этой группе", "help": "Как я работаю в группе"},
 }

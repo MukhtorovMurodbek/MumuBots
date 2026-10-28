@@ -17,6 +17,7 @@ download pays it once, and it stays loaded from then on.
 """
 import asyncio
 import contextlib
+import copy
 import glob
 import json
 import logging
@@ -315,11 +316,18 @@ def _audio_rank(fmt: dict) -> tuple:
     return (1 if codec.startswith(("mp4a", "aac")) else 0), min(fmt.get("abr") or fmt.get("tbr") or 0, 192)
 
 
-def pick_format(info: dict, budget_bytes: int) -> "str | None":
+def _best(info: dict, budget_bytes: "float", height: "int | None" = None,
+          exact: bool = False) -> "tuple | None":
+    """(rank, format id, bytes) of the best video (with audio) that fits the budget, or None.
+    `height` caps the picture height (`exact`: that height and no other)."""
     duration = info.get("duration") or 0
     formats = [fmt for fmt in info.get("formats") or () if _wanted(fmt)]
     room = budget_bytes * SIZE_MARGIN
-    tall = lambda fmt: (fmt.get("height") or 0) <= MAX_HEIGHT
+    cap = MAX_HEIGHT if height is None else min(height, MAX_HEIGHT)
+    if exact and height is not None:
+        tall = lambda fmt: (fmt.get("height") or 0) == height
+    else:
+        tall = lambda fmt: (fmt.get("height") or 0) <= cap
     audios = sorted((fmt for fmt in formats if _has(fmt, "acodec") and not _has(fmt, "vcodec")),
                     key=_audio_rank, reverse=True)
     best = None
@@ -330,17 +338,44 @@ def pick_format(info: dict, budget_bytes: int) -> "str | None":
         if size is None:
             continue
         if _has(fmt, "acodec"):
-            choice = (_video_rank(fmt) + (1, 0), fmt["format_id"]) if size <= room else None
+            choice = (_video_rank(fmt) + (1, 0), fmt["format_id"], size) if size <= room else None
         else:
             choice = None
             for audio in audios:
                 extra = _size_of(audio, duration)
                 if extra is not None and size + extra <= room:
-                    choice = (_video_rank(fmt) + _audio_rank(audio), f"{fmt['format_id']}+{audio['format_id']}")
+                    choice = (_video_rank(fmt) + _audio_rank(audio),
+                              f"{fmt['format_id']}+{audio['format_id']}", size + extra)
                     break
         if choice is not None and (best is None or choice[0] > best[0]):
             best = choice
+    return best
+
+
+def pick_format(info: dict, budget_bytes: int, height: "int | None" = None,
+                exact: bool = False) -> "str | None":
+    best = _best(info, budget_bytes, height, exact)
     return None if best is None else best[1]
+
+
+# The quality picker (bot.py's _offer_qualities): every picture height a video offers, each
+# with the size of what would be downloaded at it. Heights under this are not offered.
+MIN_OFFERED_HEIGHT = 144
+
+
+def quality_options(info: dict) -> "list[tuple[int, int]]":
+    """[(height, bytes)], lowest first: for each height from MIN_OFFERED_HEIGHT to MAX_HEIGHT,
+    the size of the best video at exactly that height (with audio), whatever its size. Heights
+    whose size nobody knows are left out: a button has to say what it costs. Pure."""
+    heights = sorted({fmt.get("height") for fmt in info.get("formats") or ()
+                      if _wanted(fmt) and _has(fmt, "vcodec") and isinstance(fmt.get("height"), int)
+                      and MIN_OFFERED_HEIGHT <= fmt["height"] <= MAX_HEIGHT})
+    options = []
+    for height in heights:
+        best = _best(info, float("inf"), height, exact=True)
+        if best is not None:
+            options.append((height, best[2]))
+    return options
 
 
 def sizes_known(info: dict) -> bool:
@@ -454,7 +489,77 @@ def ytdlp_version() -> "str | None":
     return None
 
 
-def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=None) -> str:
+# What list_qualities read, by link, so that the download after the person picks a quality
+# starts from it rather than reading the page a second time (a few seconds on a long video).
+# Format links on such a page are good for hours; this keeps them for minutes.
+READ_KEEP_SECONDS = 600
+READ_KEEP_MAX = 32
+_read: "dict[str, tuple[float, dict]]" = {}
+_read_lock = threading.Lock()
+
+
+def _remember_read(url: str, info: dict) -> None:
+    with _read_lock:
+        now = time.monotonic()
+        for key in [k for k, (at, _) in _read.items() if now - at > READ_KEEP_SECONDS]:
+            del _read[key]
+        while len(_read) >= READ_KEEP_MAX:
+            del _read[next(iter(_read))]
+        _read[url] = (now, info)
+
+
+def _recall_read(url: str) -> "dict | None":
+    """A copy of what was read: yt-dlp writes into the info it downloads from, and two
+    people downloading the same video at once would otherwise share one, across threads."""
+    with _read_lock:
+        found = _read.get(url)
+        if found is None or time.monotonic() - found[0] > READ_KEEP_SECONDS:
+            return None
+        return copy.deepcopy(found[1])
+
+
+def _site_options(url: str) -> dict:
+    """The yt-dlp options that depend on the site: player clients, cookies, proxy."""
+    opts = {}
+    if YT_PLAYER_CLIENTS:
+        opts["extractor_args"] = {"youtube": {"player_client": YT_PLAYER_CLIENTS}}
+    site = _site_of(url)
+    cookiefile = cookiefile_for(site)
+    if cookiefile:
+        opts["cookiefile"] = cookiefile
+    proxy = SITE_PROXIES.get(site) or PROXY
+    if proxy:
+        opts["proxy"] = proxy
+    return opts
+
+
+def list_qualities(url: str) -> "dict | None":
+    """{"title", "duration", "options": quality_options(...)} for one video, or None when the
+    link is not one video, or is over the length cap (the normal download path then says why).
+    Reads the page only, no media. Blocking -- call it through asyncio.to_thread."""
+    with _slot():
+        import yt_dlp  # deferred: see the module docstring
+        opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "cachedir": False,
+                "socket_timeout": SOCKET_TIMEOUT_S, **_site_options(url)}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception as exc:
+                found = _blocked(exc, _site_of(url))
+                if found is exc:
+                    raise
+                raise found from exc
+    if info is None or info.get("_type") in ("playlist", "multi_video"):
+        return None
+    if _reject_long(info, incomplete=False):
+        return None
+    _remember_read(url, info)
+    return {"title": str(info.get("title") or ""), "duration": info.get("duration"),
+            "options": quality_options(info)}
+
+
+def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=None,
+                   height: "int | None" = None, exact: bool = False) -> str:
     """Downloads the video at `url` into `out_dir`, returns the local file path.
     `max_mb` is the ceiling for this one download -- MAX_DOWNLOAD_MB unless
     somebody has switched on large files (large_files.py).
@@ -464,6 +569,10 @@ def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=Non
     asked, and a caller that stops waiting (resolvers.py gives a route a time
     limit) would otherwise leave the download running to its end, holding
     bandwidth and disk for a file nobody will collect.
+
+    `height` caps the picture height (a group's setting); with `exact`, it is the one height
+    the person picked from the quality picker, and a version at another height is never sent
+    in its place.
 
     Whatever ends the download -- it finishing, failing or being stopped --
     leaves only the file it returns.
@@ -490,7 +599,7 @@ def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=Non
 
         path = None
         try:
-            path = _download(yt_dlp, url, mb, outtmpl, stop_if_asked, match_filter)
+            path = _download(yt_dlp, url, mb, outtmpl, stop_if_asked, match_filter, height, exact)
             stop_if_asked()          # finished, but too late for anyone to use it
             return path
         except BaseException:
@@ -509,7 +618,8 @@ def _blocked(exc: Exception, site: str) -> Exception:
     return exc
 
 
-def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filter) -> str:
+def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filter,
+              height: "int | None" = None, exact: bool = False) -> str:
     ydl_opts = {
         "outtmpl": outtmpl,
         "format": _format_selector(mb),
@@ -530,29 +640,27 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
         "cachedir": False,
         "merge_output_format": "mp4",
     }
-    if YT_PLAYER_CLIENTS:
-        ydl_opts["extractor_args"] = {"youtube": {"player_client": YT_PLAYER_CLIENTS}}
+    ydl_opts.update(_site_options(url))
     site = _site_of(url)
-    cookiefile = cookiefile_for(site)
-    if cookiefile:
-        ydl_opts["cookiefile"] = cookiefile
-    proxy = SITE_PROXIES.get(site) or PROXY
-    if proxy:
-        ydl_opts["proxy"] = proxy
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except Exception as exc:
-            found = _blocked(exc, site)
-            if found is exc:
-                raise
-            raise found from exc
+    # Read already when the person was offered the qualities: start from that.
+    info = _recall_read(url)
+    if info is None:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception as exc:
+                found = _blocked(exc, site)
+                if found is exc:
+                    raise
+                raise found from exc
     if info is None or info.get("_type") in ("playlist", "multi_video"):
         raise TooLarge("That link is not one video this bot can fetch.")
     too_long = _reject_long(info, incomplete=False)
     if too_long:
         raise TooLarge(f"Not fetched: {too_long} minutes.")
-    chosen = pick_format(info, mb * 1024 * 1024)
+    chosen = pick_format(info, mb * 1024 * 1024, height, exact)
+    if chosen is None and exact and height is not None:
+        raise TooLarge(f"The {height}p version is over this bot's {mb} MB limit.")
     if chosen is None and sizes_known(info):
         raise TooLarge(f"Even its smallest version is over this bot's {mb} MB limit.")
     if chosen is not None:

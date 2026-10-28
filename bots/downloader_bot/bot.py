@@ -37,6 +37,7 @@ Env vars: DBOT_TOKEN, DBOT_USERNAME (no @), DBOT_ADMIN_ID (optional,
           the per-site cookie/proxy settings are documented in .env.example.
 """
 import asyncio
+import contextvars
 import hashlib
 import logging
 import os
@@ -68,6 +69,8 @@ from telegram.error import BadRequest
 NO_PREVIEW = {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
 from telegram.ext import (
     ApplicationBuilder,
+    ApplicationHandlerStop,
+    ChatMemberHandler,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -81,6 +84,7 @@ import cards
 import db
 import delivery_cache
 import family_link
+import groups
 import i18n
 import problems
 import lifecycle
@@ -117,8 +121,13 @@ from db import (
     sent_files_confirmed,
     sent_files_used,
     sent_files_drop,
+    get_group_settings,
+    set_group_settings,
+    forget_group,
+    move_group_settings,
 )
 from shared_features import (
+    note_active,
     note_job,
     note_tap,
     publish_profile,
@@ -1124,7 +1133,45 @@ REDELIVER_MEMORY = 5
 MERGE_PREFIX = "merge:"
 
 
-def _remember_delivery(context, platform: str, url: str, lossless: bool) -> str:
+# ---------------------------------------------------------------------------
+# A chosen quality travels inside the link
+# ---------------------------------------------------------------------------
+# The quality picker's choice is part of what was asked for: the 720p and the 1080p of one
+# video are two deliveries, and the delivery cache, the file-id store and the redo button all
+# key on the link. So the height rides on the link -- "#q720" for the one height the person
+# picked, "#upto480" for a group's cap -- and comes off only where the link is fetched
+# (_split_height). A capped copy is then never sent to somebody who asked for the best, nor
+# the other way round.
+_EXACT_MARK, _CAP_MARK = "#q", "#upto"
+
+
+def _with_height(url: str, height: int, exact: bool = True) -> str:
+    return f"{url}{_EXACT_MARK if exact else _CAP_MARK}{int(height)}"
+
+
+def _split_height(url: str) -> "tuple[str, int | None, bool]":
+    """("<link>", 720, True) from "<link>#q720", ("<link>", 480, False) from
+    "<link>#upto480", and (url, None, False) for a link with neither."""
+    for mark, exact in ((_CAP_MARK, False), (_EXACT_MARK, True)):
+        base, found, height = url.rpartition(mark)
+        if found and height.isdigit():
+            return base, int(height), exact
+    return url, None, False
+
+
+# The settings of the group chat a download is for (groups.py), or None in a private chat.
+# group_router sets it around handle_link, and the download task handle_link starts copies it
+# (asyncio tasks take the context they were created in), so the whole path -- the quality, video
+# or file, the credit line, no buttons -- reads it here instead of taking it as one more argument
+# through every function.
+_GROUP: contextvars.ContextVar = contextvars.ContextVar("group_settings", default=None)
+
+
+def _remember_delivery(context, platform: str, url: str, lossless: bool) -> "str | None":
+    if _GROUP.get() is not None:
+        # A group gets no buttons (_send_media), so there is nothing for them to read back,
+        # and the link a member posted there is not kept with them for it.
+        return None
     memory = context.user_data.setdefault("redeliver", {})
     while len(memory) >= REDELIVER_MEMORY:
         memory.pop(next(iter(memory)))
@@ -1435,7 +1482,7 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     raise _MergeStop("merge_too_big")
             else:
                 try:
-                    resolved = await resolvers.resolve(platform, url)
+                    resolved = await resolvers.resolve(platform, _split_height(url)[0])
                 except resolvers.NothingWorked as exc:
                     logger.info("no route worked for %s (merge): %s", platform, exc)
                     if exc.kind not in ("missing", "too_big"):
@@ -1526,6 +1573,8 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 async def _after_send(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    if _GROUP.get() is not None:
+        return  # a donation nudge is for the person, never for a whole group
     nudge = await maybe_donation_nudge(
         update.effective_user.id, lang, context, update.effective_chat.id)
     if nudge:
@@ -1559,11 +1608,13 @@ async def _reply_image_with_button(update, context, data: bytes, stem: str, lang
     puts under a video. Reddit and Twitter reach the chat through here rather
     than through _send_media, and a button that appeared under a downloaded
     video but not under a downloaded picture would read as a bug."""
+    group = _GROUP.get()
     if lossless is None:
-        lossless = await asyncio.to_thread(get_lossless_enabled, update.effective_user.id)
+        lossless = (group["as_file"] if group is not None
+                    else await asyncio.to_thread(get_lossless_enabled, update.effective_user.id))
     token = _remember_delivery(context, platform, url, lossless)
     sent = await _reply_image(update, data, stem,
-                              reply_markup=_nudge_kb(lang, token, lossless),
+                              reply_markup=None if group is not None else _nudge_kb(lang, token, lossless),
                               lossless=lossless)
     filename = f"{stem}.{_image_extension(data)}"
     await asyncio.to_thread(delivery_cache.keep_bytes, update.effective_user.id, platform, url,
@@ -1656,11 +1707,13 @@ async def _send_media(update, context, items_with_paths, lang,
     the items were given, so that the delivery can be stored (sent_files.py); None
     if any of them is missing or is not the kind of file the form expects.
     """
+    group = _GROUP.get()
     caption = None
-    if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
+    if await _credit_wanted(update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
     if lossless is None:
-        lossless = await asyncio.to_thread(get_lossless_enabled, update.effective_user.id)
+        lossless = (group["as_file"] if group is not None
+                    else await asyncio.to_thread(get_lossless_enabled, update.effective_user.id))
     if probing is None:
         probing = video.ProbeRun()
 
@@ -1685,7 +1738,10 @@ async def _send_media(update, context, items_with_paths, lang,
     remembered = context.user_data.get("redeliver", {}).get(redeliver_token)
     if remembered is not None:
         remembered["photos"], remembered["items"] = photos, len(items_with_paths)
-    keyboard = _nudge_kb(lang, redeliver_token, lossless, photos=photos, items=len(items_with_paths))
+    # No buttons in a group chat: they act on the sender's own memory of the delivery, and
+    # a group has a dozen people who could tap them.
+    keyboard = (None if group is not None
+                else _nudge_kb(lang, redeliver_token, lossless, photos=photos, items=len(items_with_paths)))
     # See _reply_image: this is also reached from the redeliver button.
     message = update.effective_message
 
@@ -1827,7 +1883,7 @@ async def _resend_by_file_id(update, context, lang, status, platform: str, url: 
         if not fresh:
             try:
                 async with _lookups():
-                    verdict = await resolvers.lookup(platform, url)
+                    verdict = await resolvers.lookup(platform, _split_height(url)[0])
             except Exception as exc:
                 logger.warning("The post could not be looked up (%s)", type(exc).__name__)
                 verdict = "unknown"
@@ -1897,6 +1953,10 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
     cache is counted as a hit or a miss (counts only), a pasted link's is not.
     """
     lang = await i18n.get_lang(update.effective_user.id, context)
+    fetch_url, height, exact = _split_height(url)
+    group = _GROUP.get()
+    if lossless_override is None and group is not None:
+        lossless_override = group["as_file"]
     # A download outlasts the shutdown grace period, so starting one now would
     # end in silence. A few seconds' wait beats a lost file.
     refusal = await refuse_new_work(
@@ -1967,7 +2027,7 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
             await status.set(context.bot, i18n.t(lang, "download_short_on_space"))
             return False
         try:
-            resolved = await resolvers.resolve(platform, url)
+            resolved = await resolvers.resolve(platform, fetch_url, height=height, exact=exact)
         except resolvers.NothingWorked as exc:
             logger.info("no route worked for %s: %s", platform, exc)
             if exc.kind == "missing" and quiet_if_missing:
@@ -2070,9 +2130,11 @@ async def _large_download(update, context, status, lang, platform: str, url: str
     await status.set(context.bot, i18n.t(lang, "large_files_fetching", free=free, per=per))
     paths: list[str] = []
     held = _hold_disk(room)
+    fetch_url, height, exact = _split_height(url)
     try:
         try:
-            resolved = await resolvers.resolve(platform, url, max_mb=large_files.LARGE_MAX_MB)
+            resolved = await resolvers.resolve(platform, fetch_url, max_mb=large_files.LARGE_MAX_MB,
+                                               height=height, exact=exact)
             for item in resolved.items:
                 paths.append(await resolvers.download(item, max_mb=large_files.LARGE_MAX_MB))
         except (resolvers.NothingWorked, net.TooLarge) as exc:
@@ -2119,9 +2181,17 @@ async def _large_download(update, context, status, lang, platform: str, url: str
                 logger.warning("couldn't remove %s", path)
 
 
+async def _credit_wanted(user_id: int) -> bool:
+    """The "via @bot" line: the group's setting in a group chat, the person's own elsewhere."""
+    group = _GROUP.get()
+    if group is not None:
+        return group["credit"]
+    return await asyncio.to_thread(get_caption_enabled, user_id)
+
+
 async def _send_large(update, context, items_with_paths, lang, status=None) -> None:
     caption = None
-    if await asyncio.to_thread(get_caption_enabled, update.effective_user.id):
+    if await _credit_wanted(update.effective_user.id):
         caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
     probing = video.ProbeRun()
 
@@ -2239,12 +2309,18 @@ def _allowance_message(lang: str, allowance: dict) -> str:
 
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    detected = platforms.detect_platform(update.message.text)
+    detected = platforms.detect_platform(update.message.text or update.message.caption or "")
     if not detected:
         return
     platform, url = detected
+    # A group's quality cap (groups.py), on the platforms that go straight down the
+    # download path; Reddit and X read the post first, from the link as it is.
+    group = _GROUP.get()
+    if group is not None and group["quality"] and platform not in ("reddit", "twitter"):
+        url = _with_height(url, group["quality"], exact=False)
     # Another link: the person's last delivery is no longer wanted, and goes now.
-    # The same link instead gives it five minutes more. Before every check below,
+    # The same link instead gives it its time again (delivery_cache.LIFE_SECONDS,
+    # 10 minutes by default). Before every check below,
     # so that a link refused for any reason still counts as the latest one.
     found = delivery_cache.note_link(update.effective_user.id, platform, url)
     if found == delivery_cache.NOTED_AGAIN_CACHED:
@@ -2305,6 +2381,8 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _handle_reddit(update, context, url)
             elif platform == "twitter":
                 await _handle_twitter(update, context, url)
+            elif platform == "youtube" and _GROUP.get() is None:
+                await _offer_qualities(update, context, url)
             else:
                 await _resolve_and_send(update, context, platform, url)
 
@@ -2319,6 +2397,282 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # (_spawn_download's finally).
         if not spawned:
             _clear_in_flight(key, stamp)
+
+
+# ---------------------------------------------------------------------------
+# The quality picker
+# ---------------------------------------------------------------------------
+# The owner (2026-10-28): "If bot has options for the quality, for example when downloading a
+# high quality youtube video, it should ask the user in which size they want it", with a
+# screenshot of another bot's list of heights, each with its size, and a button each. For
+# MP3, trimming and the rest: "utilizing the converter bot would be good enough" -- a button
+# to ConvertBot, where the person sends the video.
+#
+# Offered for the one platform whose route reads every version a video has (yt-dlp); the
+# others send what their route gives. A choice that fits the free limit is ✅; one over it but
+# within the large-file limit is ⚡ (paid, and only where large files are set up); anything
+# bigger is not offered. With fewer than two choices nothing is asked: the download goes ahead.
+QUALITY_PREFIX = "ytq:"
+QUALITY_MEMORY = 5
+QUALITY_LOOKUP_TIMEOUT_S = float(os.environ.get("DBOT_QUALITY_LOOKUP_TIMEOUT", "25"))
+
+
+def _size_text(size: int) -> str:
+    return f"{max(1, round(size / large_files.MB))} MB"
+
+
+def quality_choices(options, free_mb: int, paid_mb: int) -> "list[tuple[int, int, bool]]":
+    """[(height, bytes, free)] of the options worth a button: free when it fits `free_mb`
+    (with the same margin the format picker keeps), paid up to `paid_mb` (0: none). Pure."""
+    chosen = []
+    for height, size in options:
+        if size <= free_mb * large_files.MB * video.SIZE_MARGIN:
+            chosen.append((height, size, True))
+        elif size <= paid_mb * large_files.MB * video.SIZE_MARGIN:
+            chosen.append((height, size, False))
+    return chosen
+
+
+async def _offer_qualities(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str) -> None:
+    """Ask which quality, or -- when there is nothing to choose between, or the versions
+    could not be read -- download as usual."""
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    refusal = await refuse_new_work(lang, update.effective_user.id, update.effective_chat.id)
+    if refusal:
+        await update.effective_message.reply_text(refusal)
+        return
+    status = await LiveMessage.reply_to(update.effective_message, i18n.t(lang, "fetching"))
+    found = None
+    try:
+        async with _lookups():
+            found = await asyncio.wait_for(asyncio.to_thread(video.list_qualities, url),
+                                           QUALITY_LOOKUP_TIMEOUT_S)
+    except Exception as exc:
+        # The download that follows tries every route and says what went wrong.
+        logger.info("No qualities to offer for a link (%s)", type(exc).__name__)
+    paid_mb = large_files.LARGE_MAX_MB if large_files.CONFIGURED else 0
+    choices = quality_choices((found or {}).get("options") or (), video.MAX_DOWNLOAD_MB, paid_mb)
+    if len(choices) < 2:
+        await _resolve_and_send(update, context, "youtube", url, status=status)
+        return
+
+    memory = context.user_data.setdefault("qualities", {})
+    while len(memory) >= QUALITY_MEMORY:
+        memory.pop(next(iter(memory)))
+    token = uuid.uuid4().hex[:10]
+    memory[token] = {"url": url, "heights": [height for height, _, _ in choices]}
+
+    lines = [f"{'✅' if free else '⚡'} {height}p: {_size_text(size)}" for height, size, free in choices]
+    text = i18n.t(lang, "quality_heading", title=(found.get("title") or "")[:200]) + "\n\n" + "\n".join(lines)
+    if not all(free for _, _, free in choices):
+        text += "\n\n" + i18n.t(lang, "quality_paid_note", free=video.MAX_DOWNLOAD_MB)
+    text += "\n\n" + i18n.t(lang, "quality_choose")
+    buttons = [InlineKeyboardButton(f"{'✅' if free else '⚡'} {height}p",
+                                    callback_data=f"{QUALITY_PREFIX}{token}:{height}")
+               for height, _, free in choices]
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    convert = sibling_bots_keyboard_row(BOT_NAME, only="convertbot")
+    if convert:
+        rows.append([InlineKeyboardButton(i18n.t(lang, "quality_more_button"), url=convert[0].url)])
+    await status.set(context.bot, text, reply_markup=InlineKeyboardMarkup(rows), **NO_PREVIEW)
+
+
+async def quality_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on the picker: that height, downloaded in the picker's place. One tap per
+    picker -- the link was counted against the allowance once, when it was sent."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    token, _, height = query.data[len(QUALITY_PREFIX):].partition(":")
+    entry = context.user_data.get("qualities", {}).pop(token, None)
+    if entry is None or not height.isdigit() or int(height) not in entry["heights"]:
+        await query.answer(i18n.t(lang, "quality_expired"), show_alert=True)
+        return
+    await query.answer()
+    url = _with_height(entry["url"], int(height))
+    # The person's latest link is this version of it, so the delivery is kept (delivery_cache).
+    delivery_cache.note_link(update.effective_user.id, "youtube", url)
+    status = LiveMessage.adopt(query.message)
+    await status.set(context.bot, i18n.t(lang, "quality_picked", height=height))
+
+    async def work():
+        await _resolve_and_send(update, context, "youtube", url, status=status)
+
+    _spawn_download(context, update, work)
+
+
+# ---------------------------------------------------------------------------
+# Group chats
+# ---------------------------------------------------------------------------
+# Added to a group, the bot downloads the links people post there and sends what it gets to
+# the chat, following the group's settings (groups.py). It sees those links only if it may
+# read the group's messages: as an admin, or with privacy mode turned off for it in
+# @BotFather. When it can do neither, its greeting says so.
+#
+# Everything from a group chat goes through group_router, in its own handler group before
+# the private-chat handlers, and stops there: none of the private chat's answers ("that
+# doesn't look like a link", the feedback prompt, ...) is ever said to a whole group.
+GROUP_TYPES = ("group", "supergroup")
+GROUP_COMMANDS = [
+    BotCommand("settings", "What I download here, and how"),
+    BotCommand("help", "How I work in a group"),
+]
+
+
+async def _group_settings(chat_id: int) -> dict:
+    return groups.normalize(await asyncio.to_thread(get_group_settings, chat_id))
+
+
+def _group_command(message) -> "str | None":
+    """The command a group message is ("settings"), "" for another bot's command
+    (/settings@OtherBot), or None for a message that is not a command."""
+    text = (message.text or "") if message is not None else ""
+    if not text.startswith("/"):
+        return None
+    name, _, addressee = text.split()[0][1:].partition("@")
+    if addressee and (not BOT_USERNAME or addressee.lower() != BOT_USERNAME.lower()):
+        return ""
+    return name.lower()
+
+
+async def _sees_group_messages(bot, chat_id: int) -> bool:
+    """Whether the links people post here reach the bot. True when it cannot tell."""
+    if getattr(bot, "can_read_all_group_messages", False):
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, bot.id)
+    except Exception:
+        return True
+    return member.status in ("administrator", "creator")
+
+
+async def _is_group_admin(bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    return member.status in ("administrator", "creator")
+
+
+async def _group_hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The greeting when the bot is added, and the answer to /start and /help in a group."""
+    user = update.effective_user
+    lang = await i18n.get_lang(user.id, context) if user is not None else "en"
+    chat_id = update.effective_chat.id
+    text = i18n.t(lang, "group_hello")
+    if not await _sees_group_messages(context.bot, chat_id):
+        text += "\n\n" + i18n.t(lang, "group_cant_see")
+    await context.bot.send_message(chat_id, text, **NO_PREVIEW)
+
+
+def _group_settings_view(lang: str, settings: dict) -> "tuple[str, InlineKeyboardMarkup]":
+    def button(label: str, action: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=groups.PREFIX + action)
+
+    names = {"instagram": "Instagram", "tiktok": "TikTok", "twitter": "X", "pinterest": "Pinterest",
+             "reddit": "Reddit", "youtube": i18n.t(lang, "group_other_videos")}
+    rows = [[button(i18n.t(lang, "group_on" if settings["on"] else "group_paused"), "on")]]
+    sites = [button(("✅ " if site in settings["platforms"] else "▫️ ") + names[site], f"p:{site}")
+             for site in groups.PLATFORMS]
+    rows += [sites[i:i + 2] for i in range(0, len(sites), 2)]
+    rows.append([button(("• " if settings["quality"] == q else "")
+                        + (i18n.t(lang, "group_quality_best") if q == 0 else f"{q}p"), f"q:{q}")
+                 for q in groups.QUALITIES])
+    rows.append([button(i18n.t(lang, "group_as_file" if settings["as_file"] else "group_as_video"), "as_file")])
+    rows.append([button(i18n.t(lang, "group_credit_on" if settings["credit"] else "group_credit_off"), "credit")])
+    rows.append([button(i18n.t(lang, "group_admins_only" if settings["admins_only"] else "group_anyone"),
+                        "admins")])
+    return i18n.t(lang, "group_settings_text", free=video.MAX_DOWNLOAD_MB), InlineKeyboardMarkup(rows)
+
+
+async def group_settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    text, markup = _group_settings_view(lang, await _group_settings(update.effective_chat.id))
+    await update.effective_message.reply_text(text, reply_markup=markup)
+
+
+async def group_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A tap on a group's settings. Checked again here, not only when the screen was drawn:
+    whoever taps may not be whoever sent /settings."""
+    query = update.callback_query
+    chat = update.effective_chat
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    parsed = groups.parse(query.data or "")
+    if parsed is None or chat is None or chat.type not in GROUP_TYPES:
+        await query.answer()
+        return
+    action, value = parsed
+    settings = await _group_settings(chat.id)
+    if groups.needs_admin(action, settings) and not await _is_group_admin(
+            context.bot, chat.id, update.effective_user.id):
+        await query.answer(i18n.t(lang, "group_admins_alert"), show_alert=True)
+        return
+    changed = groups.apply(settings, action, value)
+    if changed is None:
+        await query.answer()
+        return
+    note_active(context, update.effective_user)
+    await asyncio.to_thread(set_group_settings, chat.id, changed)
+    await query.answer(i18n.t(lang, "group_saved"))
+    text, markup = _group_settings_view(lang, changed)
+    try:
+        await query.edit_message_text(text, reply_markup=markup)
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def group_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every message from a group chat: /settings, /start and /help, links -- and silence for
+    everything else. Always ends the update here (ApplicationHandlerStop). An error is handed
+    to the error handler as a task of its own, so that it is reported like any other while
+    the update still stops here."""
+    message, chat, user = update.effective_message, update.effective_chat, update.effective_user
+    try:
+        command = _group_command(message)
+        if message is not None and message.migrate_from_chat_id:
+            # The group became a supergroup, which has an id of its own: its settings come along.
+            await asyncio.to_thread(move_group_settings, message.migrate_from_chat_id, chat.id)
+        elif command == "settings" and user is not None:
+            # Counted as having used the bot only for what they send to it: in a group the
+            # bot reads everybody's messages (shared_features.track_activity).
+            note_active(context, user)
+            await group_settings_command(update, context)
+        elif command in ("start", "help"):
+            if user is not None:
+                note_active(context, user)
+            await _group_hello(update, context)
+        elif command is None and user is not None:
+            text = (message.text or message.caption or "") if message is not None else ""
+            detected = platforms.detect_platform(text) if text else None
+            if detected is not None:
+                settings = await _group_settings(chat.id)
+                if settings["on"] and detected[0] in settings["platforms"]:
+                    note_active(context, user)
+                    token = _GROUP.set(settings)
+                    try:
+                        await handle_link(update, context)
+                    finally:
+                        _GROUP.reset(token)
+    except Exception as exc:
+        error = exc
+
+        async def report():
+            raise error
+
+        context.application.create_task(report(), update=update)
+    raise ApplicationHandlerStop
+
+
+async def bot_membership_changed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Added to a group: say hello and what it needs. Removed: forget the group's settings."""
+    change = update.my_chat_member
+    if change is None or change.chat.type not in GROUP_TYPES:
+        return
+    before, now = change.old_chat_member.status, change.new_chat_member.status
+    if now in ("left", "kicked"):
+        await asyncio.to_thread(forget_group, change.chat.id)
+    elif before in ("left", "kicked"):
+        await _group_hello(update, context)
 
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2373,7 +2727,8 @@ async def _post_init(application):
         application.job_queue.run_repeating(
             _sweep_delivery_cache, interval=DELIVERY_CACHE_SWEEP_SECONDS,
             first=DELIVERY_CACHE_SWEEP_SECONDS)
-    await lifecycle.optional("command menu", publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS))
+    await lifecycle.optional("command menu", publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS,
+                                                               group=GROUP_COMMANDS))
     await lifecycle.optional("profile text", publish_profile(application))
     if big_files.CONFIGURED:
         task = asyncio.get_running_loop().create_task(_check_big_files())
@@ -2456,8 +2811,15 @@ def main():
     # something to be typed, in which case it takes the answer and stops it
     # from also being treated as a link (see awaited_text_received's
     # docstring).
+    # Group chats first in the same handler group: python-telegram-bot runs the first
+    # handler that matches, so a group message reaches group_router and never the
+    # private-chat prompt-taker below it (see group_router).
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, group_router), group=-1)
     app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
                                    awaited_text_received), group=-1)
+    app.add_handler(ChatMemberHandler(bot_membership_changed, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(CallbackQueryHandler(group_settings_callback, pattern="^" + groups.PREFIX))
+    app.add_handler(CallbackQueryHandler(quality_chosen, pattern="^" + QUALITY_PREFIX))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -2538,7 +2900,8 @@ def main():
     # stops sending the rest rather than this process parsing and dropping it.
     app.run_polling(**lifecycle.polling_kwargs(
         timeout=POLL_TIMEOUT,
-        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY],
+        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY,
+                         Update.MY_CHAT_MEMBER],
     ))
 
 

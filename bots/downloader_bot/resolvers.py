@@ -874,7 +874,7 @@ async def _cobalt_one(host: str, url: str, platform: str, key: str | None) -> Re
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Api-Key {key}"
-    body = {"url": url, "videoQuality": COBALT_QUALITY, "filenameStyle": "basic"}
+    body = {"url": url, "videoQuality": _cobalt_quality(), "filenameStyle": "basic"}
     resp = await _post(host + "/", json=body, headers=headers, timeout=COBALT_INSTANCE_TIMEOUT_S)
     try:
         data = resp.json()
@@ -892,6 +892,21 @@ async def _cobalt_one(host: str, url: str, platform: str, key: str | None) -> Re
     if any(i.kind == "video" for i in items) and platform == "youtube":
         items = [i for i in items if i.kind == "video"]
     return Resolved(platform, "cobalt", items)
+
+
+# The heights cobalt takes for "videoQuality".
+COBALT_HEIGHTS = (144, 240, 360, 480, 720, 1080, 1440, 2160)
+
+
+def _cobalt_quality() -> str:
+    """COBALT_QUALITY, unless a height was asked for (_HEIGHT): then that height, or the
+    nearest one under it that cobalt knows. An exact height (the quality picker) asked of
+    cobalt gets that height when the video has it; cobalt has no way to refuse the others."""
+    asked = _HEIGHT.get()
+    if not asked or not asked[0]:
+        return COBALT_QUALITY
+    under = [h for h in COBALT_HEIGHTS if h <= asked[0]]
+    return str(under[-1] if under else COBALT_HEIGHTS[0])
 
 
 def _cobalt_provider(platform: str):
@@ -950,7 +965,9 @@ def _ytdlp_provider(platform: str):
         # left on disk and paid for in bandwidth -- unless it is told.
         stop = threading.Event()
         try:
-            path = await asyncio.to_thread(video.download_video, url, _WORK_DIR, _LIMIT_MB.get(), stop)
+            height, exact = _HEIGHT.get() or (None, False)
+            path = await asyncio.to_thread(video.download_video, url, _WORK_DIR, _LIMIT_MB.get(), stop,
+                                           height, exact)
         except asyncio.CancelledError:
             stop.set()
             raise
@@ -1041,6 +1058,10 @@ def _ordered(platform: str) -> list[tuple[str, object]]:
 # more. A context variable rather than an argument to every provider, because
 # only yt-dlp -- which downloads while it resolves -- has a use for it.
 _LIMIT_MB: contextvars.ContextVar = contextvars.ContextVar("download_limit_mb", default=None)
+# The picture height asked for, as (height, exact), or None for the best that fits: the
+# quality picker asks for one height exactly, a group's setting caps it. Only yt-dlp and
+# cobalt can choose, so, like _LIMIT_MB, a context variable rather than an argument.
+_HEIGHT: contextvars.ContextVar = contextvars.ContextVar("download_height", default=None)
 
 
 def _timeout_for(name: str) -> float:
@@ -1052,13 +1073,17 @@ def _timeout_for(name: str) -> float:
     return max(PROVIDER_TIMEOUT_S, YTDLP_TIMEOUT_S + over_mb * YTDLP_SECONDS_PER_MB)
 
 
-async def resolve(platform: str, url: str, max_mb: int | None = None) -> Resolved:
+async def resolve(platform: str, url: str, max_mb: int | None = None,
+                  height: "int | None" = None, exact: bool = False) -> Resolved:
     """Walk the chain until something produces media, with `max_mb` as the
-    ceiling for anything downloaded on the way."""
+    ceiling for anything downloaded on the way, and `height` the picture height
+    (see _HEIGHT)."""
     token = _LIMIT_MB.set(max_mb)
+    wanted = _HEIGHT.set((height, exact) if height else None)
     try:
         return await _resolve(platform, url)
     finally:
+        _HEIGHT.reset(wanted)
         _LIMIT_MB.reset(token)
 
 

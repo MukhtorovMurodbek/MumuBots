@@ -420,6 +420,14 @@ def attach_flood_gate(app, admin_ids=(), group: int = -3, exempt=None) -> None:
         user = update.effective_user
         if user is None or user.id in admins:
             return
+        if in_group_chat(update):
+            # Not counted in a group chat: most of what a person says there is
+            # not meant for the bot (DownloaderBot reads a whole group for its
+            # links), and a "please wait" about somebody's chatting would go to
+            # everybody in it. Their updates there still run one at a time,
+            # with at most PER_USER_WAITING_MAX waiting (PerUserUpdateProcessor),
+            # and a download still has its own limits.
+            return
         if exempt is not None:
             try:
                 if exempt(update):
@@ -1477,13 +1485,14 @@ async def publish_profile(application) -> None:
 # family is English by policy, and the owner is the one reader whose language
 # is not in question.
 
-def _menu_in(commands, language: str):
-    """`commands` with each description swapped for its `language` one.
+def _menu_in(commands, language: str, table_name: str = "COMMAND_MENU"):
+    """`commands` with each description swapped for its `language` one, from
+    i18n.COMMAND_MENU (or i18n.GROUP_COMMAND_MENU for the group-chat menu).
 
     Falls back per command, not per menu: an untranslated entry keeps its
     English text and the rest of the list is still translated.
     """
-    table = getattr(i18n, "COMMAND_MENU", {}).get(language) or {}
+    table = getattr(i18n, table_name, {}).get(language) or {}
     return [BotCommand(c.command, table.get(c.command) or c.description)
             for c in commands]
 
@@ -1541,7 +1550,8 @@ async def refresh_chat_menu(context, user_id: int, lang: "str | None") -> None:
     context.user_data[MENU_SIGNATURE_KEY] = _menu_signature(commands)
 
 
-# Scopes this code never writes. Telegram resolves a chat's menu by scope
+# Scopes this code never writes (except all-group-chats, for a bot that passes
+# publish_commands a group menu). Telegram resolves a chat's menu by scope
 # precedence -- a chat's own, then all-private-chats, then the default -- so
 # a menu left in one of these by anything else outranks the default the code
 # does write, and reading the default says everything is fine. That is what
@@ -1552,9 +1562,11 @@ _UNOWNED_SCOPES = (
 )
 
 
-async def publish_commands(application, public, admin_only=(), admin_ids=()) -> None:
+async def publish_commands(application, public, admin_only=(), admin_ids=(), group=()) -> None:
     """The default menu for everyone, in every language; the scopes the code
-    does not own, cleared; and the owner's chat, in the owner's language."""
+    does not own, cleared; and the owner's chat, in the owner's language.
+    `group`, for a bot that works in group chats (2.2.0: Sticker and
+    DownloaderBot), is the menu every group chat gets instead of being cleared."""
     logger = logging.getLogger(__name__)
     public = list(public)
     _MENU.update(public=public, admin_only=list(admin_only), admin_ids=set(admin_ids))
@@ -1571,9 +1583,15 @@ async def publish_commands(application, public, admin_only=(), admin_ids=()) -> 
             logger.warning("Could not publish the %s command menu.",
                            language or "default", exc_info=True)
 
+    group = list(group)
     for scope in _UNOWNED_SCOPES:
         for language in (None,) + tuple(i18n.SUPPORTED_LANGUAGES):
             try:
+                if group and scope is BotCommandScopeAllGroupChats:
+                    await application.bot.set_my_commands(
+                        group if language in (None, "en") else _menu_in(group, language, "GROUP_COMMAND_MENU"),
+                        scope=scope(), language_code=language)
+                    continue
                 await application.bot.delete_my_commands(scope=scope(), language_code=language)
             except Exception:
                 logger.debug("Could not clear the %s menu (%s).", scope.__name__,
@@ -2874,10 +2892,12 @@ def _with_logged_note(text: str, code: str, lang: str) -> str:
     itself and does not need a paragraph about logging under it.
     """
     note = i18n.t(lang, "problem_logged_note")
-    body = problems.strip_code(text)
+    body = problems.strip_code(text).rstrip()
     if note in body:
         return text
-    return f"{body}\n\n{note}{problems.code_line(code)}"
+    # Three short lines -- what happened, that it is saved, the code -- with no
+    # blank lines between them: the owner found the longer version too long.
+    return f"{body}\n{note}\n{problems.MARK}{code}"
 
 
 def _has_report(markup) -> bool:
@@ -3293,6 +3313,27 @@ async def _flush_activity_job(context) -> None:
         logging.getLogger(__name__).debug("Activity flush failed; will retry", exc_info=True)
 
 
+GROUP_CHAT_TYPES = ("group", "supergroup")
+
+
+def in_group_chat(update) -> bool:
+    chat = getattr(update, "effective_chat", None)
+    return chat is not None and chat.type in GROUP_CHAT_TYPES
+
+
+def note_active(context, user) -> None:
+    """Count `user` as somebody the bot served: the active-user counts (and
+    through them ManagerBot's people counts), the usage window's people, and
+    the clock that frees their cached state once they go quiet. track_activity
+    does it for every update from a private chat; in a group chat the bot's
+    own handlers call it for the people they actually serve."""
+    _activity_buffer.add(user.id)
+    if len(_usage_users) < 10000:
+        _usage_users.add(user.id)
+    context.user_data["_last_seen"] = time.time()
+    remember_chat_lang(user.id, context.user_data.get("lang"))
+
+
 async def track_activity(update, context) -> None:
     """Register as a TypeHandler(Update, track_activity, ...) in a group of
     its OWN, above every other group, so /status can report active users
@@ -3310,18 +3351,26 @@ async def track_activity(update, context) -> None:
     per-user cache with the time, which is what lets that same job drop the
     caches of people who have not been seen in a long while."""
     note_network_ok()
+    _count_tap(update)
+    user = update.effective_user
+    if in_group_chat(update):
+        # Most of a group's messages are not meant for the bot: DownloaderBot
+        # reads a whole group for its links. So they count nobody as having
+        # used it (its group handlers call note_active for the people they
+        # serve), and they do not bury its live messages: a progress message
+        # in a group is edited where it is, as a group bot's are, instead of
+        # being sent again under every reply and left behind half done.
+        if user:
+            note_usage_update(None)
+        return
     # Which message is newest in this chat, so a live message knows whether
     # it is still the last thing on screen. Before the user check on purpose:
     # it is a property of the chat, not of who sent it.
     live_message.note_update(update)
-    _count_tap(update)
-    user = update.effective_user
     if not user:
         return
-    _activity_buffer.add(user.id)
     note_usage_update(user.id)
-    context.user_data["_last_seen"] = time.time()
-    remember_chat_lang(user.id, context.user_data.get("lang"))
+    note_active(context, user)
 
     # A per-chat menu is frozen when it is set; see refresh_chat_menu. Only
     # people who have one are checked, and the signature is updated before the

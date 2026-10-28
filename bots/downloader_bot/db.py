@@ -5,6 +5,8 @@ tables; the only shared tables are `family.*`, which family_link.py owns.
 
 Owns:
 - per-user setting: whether downloaded videos get a credit caption
+- per-group settings, for the groups the bot is in (groups.py): one row per
+  group chat, holding only the switches, deleted when the bot leaves it
 - a Telegram Stars ledger + donation-reminder cooldown, for this bot's own
   /donate flow (see shared_features.py)
 
@@ -479,7 +481,60 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+        # A group chat's settings (groups.py), as JSON so a setting added later
+        # needs no new column. Keyed by the group's chat id; nothing about who
+        # is in it or who changed what.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_settings (
+                chat_id    BIGINT PRIMARY KEY,
+                settings   JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
         _note_plain_names(conn)
+        conn.commit()
+
+
+# ---------- group chats (groups.py) ----------
+
+def get_group_settings(chat_id: int):
+    """The stored settings of a group, as stored (groups.normalize makes them whole),
+    or None for a group that never changed any."""
+    with pooled_read() as conn:
+        row = conn.execute("SELECT settings FROM group_settings WHERE chat_id = %s", (chat_id,)).fetchone()
+        return row[0] if row else None
+
+
+def set_group_settings(chat_id: int, settings: dict) -> None:
+    from psycopg.types.json import Jsonb
+    with pooled() as conn:
+        conn.execute(
+            "INSERT INTO group_settings (chat_id, settings, updated_at) VALUES (%s, %s, now()) "
+            "ON CONFLICT (chat_id) DO UPDATE SET settings = excluded.settings, updated_at = now()",
+            (chat_id, Jsonb(settings)),
+        )
+        conn.commit()
+
+
+def forget_group(chat_id: int) -> None:
+    """The bot has left the group, or was removed: nothing of it is kept."""
+    with pooled() as conn:
+        conn.execute("DELETE FROM group_settings WHERE chat_id = %s", (chat_id,))
+        conn.commit()
+
+
+def move_group_settings(old_chat_id: int, new_chat_id: int) -> None:
+    """The group became a supergroup, under a new id: its settings go with it."""
+    with pooled() as conn:
+        conn.execute(
+            "INSERT INTO group_settings (chat_id, settings, updated_at) "
+            "SELECT %s, settings, updated_at FROM group_settings WHERE chat_id = %s "
+            "ON CONFLICT (chat_id) DO NOTHING",
+            (new_chat_id, old_chat_id),
+        )
+        conn.execute("DELETE FROM group_settings WHERE chat_id = %s", (old_chat_id,))
         conn.commit()
 
 

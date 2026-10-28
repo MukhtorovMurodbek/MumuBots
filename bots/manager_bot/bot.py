@@ -2245,15 +2245,18 @@ def routes_section(settings: dict, now: float) -> "list[str]":
 
 def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
                          feedback_note: "str | None" = None, routes: "dict | None" = None,
-                         now: "float | None" = None) -> str:
+                         now: "float | None" = None, people: "list | None" = None) -> str:
     """The message. Pure, so tests/test_reporting.py can read it without a
     database or a Telegram. `feedback` is what to show in full, and
     `feedback_note` a line to say instead when it has already gone out.
     `routes` is the route check's settings (see routes_section); None leaves
-    the section out."""
+    the section out. `people` is the lines of people_section, first under the
+    title; None leaves them out."""
     grouped = _group_problems(rows)
     signed = [row for row in rows if row.get("shared_at")]
-    lines = [f"🌙 <b>Problems, last {hours}h</b>"]
+    lines = [f"🌙 <b>Nightly report, last {hours}h</b>"]
+    if people:
+        lines += people
 
     urgent = grouped.get(problems.URGENT, {})
     if urgent:
@@ -2330,12 +2333,68 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
     return "\n".join(lines)
 
 
+# The people lines at the top of the nightly report (owner, 2026-10-28: "include the change in
+# total number of unique users and total number of unique users in the last 24 hours"). The
+# all-time figure is db.unique_people, the same count /users and the gift use; what the last
+# scheduled report counted is kept in ManagerBot's settings as two plain numbers, so the change
+# is "since the last nightly report". Nothing about who is kept.
+PEOPLE_AT_LAST_REPORT = "nightly:people"
+
+
+def people_section(total: "int | None", last_day: "int | None", complete: bool,
+                   before: "tuple | None") -> "list[str]":
+    """The report's people lines. Pure. `before` is (total, last 24h) at the last scheduled
+    report, or None before the first one."""
+    def change(now, then):
+        if now is None or then is None:
+            return ""
+        return f" ({now - then:+d} since the last report)"
+    total_text = "could not count" if total is None else str(total)
+    day_text = "could not count" if last_day is None else str(last_day)
+    if last_day is not None and not complete:
+        day_text += " (AnonBot left out: the data key does not open)"
+    return ["\n👥 <b>Unique users</b>",
+            f"  All bots, all time: {total_text}{change(total, before[0] if before else None)}",
+            f"  Last 24h: {day_text}{change(last_day, before[1] if before else None)}"]
+
+
+async def _people_report(remember: bool) -> "list[str]":
+    """people_section for now. `remember` (the scheduled report only) keeps tonight's numbers
+    for tomorrow's change; /nightly on demand only reads them."""
+    schemas = [b["schema"] for b in CHILDREN]
+    total = last_day = None
+    complete = True
+    try:
+        total = await asyncio.to_thread(db.unique_people, schemas)
+    except Exception:
+        logger.warning("Couldn't count the people for the nightly report", exc_info=True)
+    try:
+        last_day, complete = await asyncio.to_thread(
+            db.people_since, schemas, datetime.now(timezone.utc) - timedelta(hours=24))
+    except Exception:
+        logger.warning("Couldn't count the last day's people for the nightly report", exc_info=True)
+    before = None
+    try:
+        saved = await asyncio.to_thread(db.get_setting, PEOPLE_AT_LAST_REPORT)
+        if saved:
+            first, second = saved.split("|")[:2]
+            before = (int(first) if first else None, int(second) if second else None)
+    except Exception:
+        logger.debug("Couldn't read the last report's people counts", exc_info=True)
+    if remember and total is not None and last_day is not None and complete:
+        try:
+            await asyncio.to_thread(db.set_setting, PEOPLE_AT_LAST_REPORT, f"{total}|{last_day}")
+        except Exception:
+            logger.warning("Couldn't keep tonight's people counts", exc_info=True)
+    return people_section(total, last_day, complete, before)
+
+
 async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         rows = await asyncio.to_thread(
             family_link.recent_problem_reports_since, NIGHTLY_REPORT_HOURS)
     except Exception as exc:
-        await notify_owner(context, f"🌙 Nightly problem report failed: {html.escape(str(exc))}")
+        await notify_owner(context, f"🌙 Nightly report failed: {html.escape(str(exc))}")
         return
     # Whatever feedback nobody has been sent yet goes out here, in either
     # mode: in "nightly" that is all of it, and in "instant" it is only what
@@ -2351,12 +2410,13 @@ async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         logger.warning("Couldn't collect feedback for the nightly report", exc_info=True)
     routes = await asyncio.to_thread(family_link.settings_with_prefix, ROUTES_PREFIX)
-    text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, feedback, note, routes=routes)
+    people = await _people_report(remember=True)
+    text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, feedback, note, routes=routes, people=people)
     if feedback and len(text) > TELEGRAM_MAX_CHARS:
         # A long day of feedback goes in messages of its own rather than
         # pushing the problems past one message, where the cut could land
         # inside a tag and lose the whole report.
-        text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, routes=routes)
+        text = build_problem_report(rows, NIGHTLY_REPORT_HOURS, routes=routes, people=people)
         await _send_feedback(context, f"💬 <b>Feedback — {len(feedback)}</b> · read only, with "
                                       f"tonight's report", feedback)
     if len(text) <= TELEGRAM_MAX_CHARS:
@@ -2533,7 +2593,7 @@ async def feedback_mode_button(update: Update, context: ContextTypes.DEFAULT_TYP
                         parse_mode=ParseMode.HTML, reply_markup=_feedback_keyboard(mode))
 
 
-# The furthest back /problems will look, in hours (a week).
+# The furthest back /nightly will look, in hours (a week).
 PROBLEMS_MAX_HOURS = 168
 
 
@@ -2553,9 +2613,10 @@ async def nightly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if count:
             note = f"{count} feedback message(s) in the last {hours}h — /feedback to read them."
     except Exception:
-        logger.debug("Couldn't count feedback for /problems", exc_info=True)
+        logger.debug("Couldn't count feedback for /nightly", exc_info=True)
     routes = await asyncio.to_thread(family_link.settings_with_prefix, ROUTES_PREFIX)
-    text = build_problem_report(rows, hours, feedback_note=note, routes=routes)
+    people = await _people_report(remember=False)
+    text = build_problem_report(rows, hours, feedback_note=note, routes=routes, people=people)
     if len(text) > TELEGRAM_MAX_CHARS:
         await send_long(context, update.effective_chat.id,
                         re.sub(r"<[^>]+>", "", text), "problems.txt")
@@ -3013,9 +3074,9 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 <b>Is everything alright</b>
 /status — every bot: up/down, uptime, host, errors, users (with Refresh /
     Alerts / Ping buttons under it)
-/problems [hours] — what the bots showed people, laid out: urgent
-    listed, faults grouped, the rest by what kind of thing it was. The 22:00
-    report, on demand
+/nightly [hours] — the 22:00 nightly report, on demand: unique users,
+    then what the bots showed people, laid out: urgent listed, faults
+    grouped, the rest by what kind of thing it was
 /reports [n] [mine] — the latest problems, newest first, each with its
     incident code; mine: only those somebody attached their details to
 /report &lt;incident&gt; — one problem in full, with whoever volunteered to be named
@@ -3070,7 +3131,7 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Still works, not in the menu</b>
 Renamed in 1.7.0, with the old names kept so a habit does not break:
-/nightly → /problems · /finishupdates → /resume ·
+/problems → /nightly (its name from 1.7.0 to 2.2.0) · /finishupdates → /resume ·
 /errorlog, /botlog and /problemlog → /logs · /me → /status
 /crashtest &lt;bot&gt; makes a bot raise on purpose, to check the alert arrives
     (no bot named crashes ManagerBot itself)
@@ -3258,29 +3319,30 @@ Example: /logs convert 100 problems
 """
 
 
-# One sentence on /reports, for the problems page of /help: the same facts as its line in HELP.
+# One sentence on /reports, for the nightly page of /help: the same facts as its line in HELP.
 REPORTS_LINE = ("/reports [n] lists the latest problems, newest first, each with its "
                 "incident code; /reports mine only the ones somebody attached their "
                 "details to.")
 
 
-def _help_page_problems() -> str:
+def _help_page_nightly() -> str:
     default = NIGHTLY_REPORT_HOURS
     most = PROBLEMS_MAX_HOURS
     # MBOT_NIGHTLY_UTC left blank turns the daily report off.
     daily = (f"The same report arrives by itself every day at {NIGHTLY_REPORT_AT_UTC} UTC."
              if NIGHTLY_REPORT_AT_UTC else "The daily report is off (MBOT_NIGHTLY_UTC is blank).")
     reports_line = REPORTS_LINE
-    return f"""🩺 /problems — the 22:00 report, on demand
+    return f"""🌙 /nightly — the 22:00 nightly report, on demand
 
-/problems [hours]
+/nightly [hours]
 • hours: how far back, {default} if not said, from 1 to {most}.
-• What the bots showed people in that time, laid out: urgent ones listed, faults grouped, the rest by what kind of thing it was. A note says how many /feedback messages came in.
+• First the unique users: all bots, all time, and the last 24 hours, each with its change since the last scheduled report.
+• Then what the bots showed people in that time, laid out: urgent ones listed, faults grouped, the rest by what kind of thing it was. A note says how many /feedback messages came in.
 • Too long for one message: the start comes here, and the whole of it as problems.txt.
-• {daily} /nightly is the same command.
+• {daily} /problems is the same command.
 • One problem in full: /report <incident>. {reports_line}
 
-Example: /problems 72
+Example: /nightly 72
 """
 
 
@@ -3357,13 +3419,13 @@ HELP_PAGES = {
     "addcredit": _help_page_addcredit,
     "run": _help_page_run,
     "logs": _help_page_logs,
-    "problems": _help_page_problems,
+    "nightly": _help_page_nightly,
     "events": _help_page_events,
     "feedback": _help_page_feedback,
     "sql": _help_page_sql,
     "say": _help_page_say,
 }
-HELP_ALIASES = {"warn": "pause", "resume": "pause", "finishupdates": "pause", "nightly": "problems"}
+HELP_ALIASES = {"warn": "pause", "resume": "pause", "finishupdates": "pause", "problems": "nightly"}
 
 
 def help_page_name(context) -> "str | None":
@@ -3996,14 +4058,14 @@ BOT_COMMANDS = [
     #
     # Gone from here, still working, because they are second names: /me (its
     # own status, which /status already carries), /errorlog, /botlog and
-    # /problemlog (/logs asks which), /finishupdates (/resume). Not /nightly or
-    # /reports, which the owner looked for in the menu and did not find
-    # (2026-10-10): /nightly is the same report as /problems and is listed under
-    # the name he knows it by; and /reports: it is its own command, the raw list of recent
-    # problems with their incident codes, which /report <code> then opens. It
-    # was written off here as "/problems now" and so left out of the menu for
-    # three versions, while /report beside it was offered (found by the owner,
-    # 2026-10-10). And /crashtest, which makes a
+    # /problemlog (/logs asks which), /finishupdates (/resume), and since 2.2.0
+    # /problems, the nightly report's name from 1.7.0 (/nightly is its name
+    # again; the owner: "it fits better"). Not /reports, which the owner looked
+    # for in the menu and did not find (2026-10-10): it is its own command, the
+    # raw list of recent problems with their incident codes, which /report
+    # <code> then opens. It was written off here as "/problems now" and so left
+    # out of the menu for three versions, while /report beside it was offered
+    # (found by the owner, 2026-10-10). And /crashtest, which makes a
     # bot raise on purpose and page the owner -- a command a stray tap on the
     # menu should not be able to send. /help names every one of them.
     #
@@ -4012,8 +4074,7 @@ BOT_COMMANDS = [
     # command), and they were dropped in 1.7.0 as "reachable through /run",
     # which is how a command becomes one nobody is offered.
     BotCommand("status", "Every bot: up, version, errors, users"),
-    BotCommand("problems", "The 22:00 problems report, on demand"),
-    BotCommand("nightly", "The same report, under its old name"),
+    BotCommand("nightly", "The 22:00 nightly report, on demand"),
     BotCommand("feedback", "What people sent with /feedback"),
     BotCommand("reports", "Latest problems, each with its incident code"),
     BotCommand("report", "One problem in full, by its incident code"),
@@ -4191,10 +4252,10 @@ def main():
     app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(CommandHandler("reports", reports_command))
     app.add_handler(CommandHandler("report", report_command))
-    # /problems is the name; /nightly is what it was called when it was only
-    # the thing that ran at midnight, and still works. /reports is not a name
-    # for it: it is the raw list of recent problems with their incident codes.
-    app.add_handler(CommandHandler(["problems", "nightly"], nightly_command))
+    # /nightly is the name (again, since 2.2.0); /problems was its name from
+    # 1.7.0 until then, and still works. /reports is not a name for it: it is
+    # the raw list of recent problems with their incident codes.
+    app.add_handler(CommandHandler(["nightly", "problems"], nightly_command))
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("decode", decode_command))
     app.add_handler(CommandHandler("alerts", alerts_command))

@@ -6,11 +6,16 @@ tables; the only shared tables are `family.*`, which family_link.py owns.
 Owns:
 - per-user setting: chosen UI language (English/Uzbek/Russian)
 - which sticker sets belong to which user (for /mypacks, /addsticker picker)
-- co-editing: a share-link token per pack, and who has been granted add
-  access to a pack through that link
+- co-editing: a share-link token per pack (with how many editors it lets in
+  and until when), who has been granted add access to a pack, and the
+  @usernames its owner invited who have not used the bot yet
 - who created each pack (display name snapshot, for /whomade)
 - a Telegram Stars ledger + donation-reminder cooldown, for this bot's own
   /donate flow (see shared_features.py)
+- group chats (2.2.0, group_mode.py): whether each pack is public (shown and
+  open to add to in the groups its owner or a co-editor uses the bot in) or
+  private (the default), and which people have used the bot in which group,
+  for ACTIVITY_RETENTION_DAYS
 
 Postgres was chosen (over SQLite) so this survives an ephemeral cloud
 container redeploy -- see DEPLOY.md.
@@ -358,6 +363,22 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         )
         if _column(conn, "packs", "owner_sealed") is None:
             conn.execute("ALTER TABLE packs ADD COLUMN IF NOT EXISTS owner_sealed BYTEA")
+        # 2.2.0: private (the default, and every pack made before) or public in groups.
+        if _column(conn, "packs", "public") is None:
+            conn.execute("ALTER TABLE packs ADD COLUMN IF NOT EXISTS public BOOLEAN NOT NULL DEFAULT FALSE")
+        # Who has used the bot in which group chat, so a group's /packs can list
+        # the public packs of its own members (the Bot API cannot list a
+        # group's members). Pruned with activity_events; erased with the person.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_members (
+                chat_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (chat_id, user_id)
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS pack_editors (
@@ -373,6 +394,38 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             CREATE TABLE IF NOT EXISTS pack_share_tokens (
                 pack_name TEXT PRIMARY KEY,
                 token TEXT NOT NULL UNIQUE
+            )
+            """
+        )
+        # 2.2.0 (owner, 2026-10-28: "The link might be shared/leaked to a group too
+        # large"): a link lets in at most max_editors co-editors in all, and works for
+        # valid_days from when it was made (NULL: no limit). A link made before this
+        # gets the defaults from the moment this runs: 10 editors, a week.
+        if _column(conn, "pack_share_tokens", "max_editors") is None:
+            conn.execute("ALTER TABLE pack_share_tokens ADD COLUMN IF NOT EXISTS max_editors INTEGER "
+                         f"NOT NULL DEFAULT {DEFAULT_MAX_EDITORS}")
+        if _column(conn, "pack_share_tokens", "valid_days") is None:
+            conn.execute("ALTER TABLE pack_share_tokens ADD COLUMN IF NOT EXISTS valid_days INTEGER "
+                         f"DEFAULT {DEFAULT_VALID_DAYS}")
+        if _column(conn, "pack_share_tokens", "expires_at") is None:
+            conn.execute("ALTER TABLE pack_share_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ "
+                         f"DEFAULT (now() + interval '{DEFAULT_VALID_DAYS} days')")
+        # Whether the pack's co-editors may delete stickers (owner, 2026-10-28: "let the owner
+        # pick if they want to grant delete rights to the link"). Off for every link, old ones
+        # included: until the owner says otherwise, only the owner deletes.
+        if _column(conn, "pack_share_tokens", "editors_delete") is None:
+            conn.execute("ALTER TABLE pack_share_tokens ADD COLUMN IF NOT EXISTS editors_delete BOOLEAN "
+                         "NOT NULL DEFAULT FALSE")
+        # People the owner invited by @username who have not used the bot since:
+        # a keyed hash to find them by, and the name sealed for the owner's list.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pack_invites (
+                pack_name TEXT NOT NULL,
+                username_mark TEXT NOT NULL,
+                username_sealed BYTEA,
+                added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (pack_name, username_mark)
             )
             """
         )
@@ -620,53 +673,254 @@ def add_editor(pack_name: str, user_id: int) -> None:
         conn.commit()
 
 
-def get_coedit_view(pack_name: str) -> tuple[str, str | None, int]:
-    """(share token, pack title, number of co-editors) -- everything the
-    co-edit screen renders, on one connection. The screen used to fetch these
-    three one at a time, which was three round trips to draw one message."""
+DEFAULT_MAX_EDITORS = 10
+DEFAULT_VALID_DAYS = 7
+# The choices the co-edit screen cycles through.
+MAX_EDITORS_CHOICES = (3, 5, 10, 20, 50)
+VALID_DAYS_CHOICES = (1, 7, 30, None)
+# An invitation nobody has used is dropped after this many days.
+INVITE_KEEP_DAYS = 30
+INVITE_PURPOSE = "sticker.invite.username"
+
+
+def get_coedit_view(pack_name: str) -> dict:
+    """Everything the co-edit screen renders, on one connection, making the
+    pack's link (with the defaults) if it has none: {"token", "title",
+    "pack_id", "editors", "invited", "max_editors", "valid_days", "expires_at",
+    "editors_delete"}."""
     with pooled() as conn:
-        cur = conn.execute("SELECT token FROM pack_share_tokens WHERE pack_name = %s", (pack_name,))
-        row = cur.fetchone()
-        if row:
-            token = row[0]
-        else:
-            token = uuid.uuid4().hex
-            conn.execute(
-                "INSERT INTO pack_share_tokens (pack_name, token) VALUES (%s, %s)",
-                (pack_name, token),
-            )
-        cur = conn.execute(
-            "SELECT (SELECT title FROM packs WHERE name = %s), "
-            "(SELECT COUNT(*) FROM pack_editors WHERE pack_name = %s)",
-            (pack_name, pack_name),
+        conn.execute(
+            "INSERT INTO pack_share_tokens (pack_name, token, max_editors, valid_days, expires_at) "
+            "VALUES (%s, %s, %s, %s, now() + make_interval(days => %s)) ON CONFLICT (pack_name) DO NOTHING",
+            (pack_name, uuid.uuid4().hex, DEFAULT_MAX_EDITORS, DEFAULT_VALID_DAYS, DEFAULT_VALID_DAYS),
         )
-        title, editor_count = cur.fetchone()
+        row = conn.execute(
+            """
+            SELECT t.token, p.title, p.id,
+                   (SELECT COUNT(*) FROM pack_editors e WHERE e.pack_name = t.pack_name),
+                   (SELECT COUNT(*) FROM pack_invites i WHERE i.pack_name = t.pack_name),
+                   t.max_editors, t.valid_days, t.expires_at, t.editors_delete
+              FROM pack_share_tokens t LEFT JOIN packs p ON p.name = t.pack_name
+             WHERE t.pack_name = %s
+            """,
+            (pack_name,),
+        ).fetchone()
         conn.commit()
-        return token, title, editor_count
+    keys = ("token", "title", "pack_id", "editors", "invited", "max_editors", "valid_days", "expires_at",
+            "editors_delete")
+    return dict(zip(keys, row))
 
 
 def reset_share_token(pack_name: str) -> str:
-    """Generates a fresh token for the pack, invalidating the old link.
-    Does NOT remove already-granted editors -- it only stops the *old* link
-    from granting new access."""
+    """Generates a fresh token for the pack, invalidating the old link, valid
+    for the pack's period again from now. Does NOT remove already-granted
+    editors -- it only stops the *old* link from granting new access."""
     token = uuid.uuid4().hex
     with pooled() as conn:
         conn.execute(
             """
-            INSERT INTO pack_share_tokens (pack_name, token) VALUES (%s, %s)
-            ON CONFLICT (pack_name) DO UPDATE SET token = excluded.token
+            INSERT INTO pack_share_tokens (pack_name, token, max_editors, valid_days, expires_at)
+            VALUES (%(name)s, %(token)s, %(most)s, %(days)s, now() + make_interval(days => %(days)s))
+            ON CONFLICT (pack_name) DO UPDATE SET
+                token = excluded.token,
+                expires_at = CASE WHEN pack_share_tokens.valid_days IS NULL THEN NULL
+                                  ELSE now() + make_interval(days => pack_share_tokens.valid_days) END
             """,
-            (pack_name, token),
+            {"name": pack_name, "token": token, "most": DEFAULT_MAX_EDITORS, "days": DEFAULT_VALID_DAYS},
         )
         conn.commit()
     return token
 
 
-def get_pack_by_token(token: str) -> str | None:
+def set_link_valid_days(pack_name: str, days: "int | None") -> None:
+    """The link works for `days` from now (None: no limit)."""
+    get_coedit_view(pack_name)
+    with pooled() as conn:
+        conn.execute(
+            "UPDATE pack_share_tokens SET valid_days = %(days)s, expires_at = CASE WHEN %(days)s::int IS NULL "
+            "THEN NULL ELSE now() + make_interval(days => %(days)s::int) END WHERE pack_name = %(name)s",
+            {"days": days, "name": pack_name},
+        )
+        conn.commit()
+
+
+def set_max_editors(pack_name: str, most: int) -> None:
+    get_coedit_view(pack_name)
+    with pooled() as conn:
+        conn.execute("UPDATE pack_share_tokens SET max_editors = %s WHERE pack_name = %s", (most, pack_name))
+        conn.commit()
+
+
+def set_editors_delete(pack_name: str, allowed: bool) -> None:
+    """Whether the pack's co-editors -- through the link or invited -- may delete stickers."""
+    get_coedit_view(pack_name)
+    with pooled() as conn:
+        conn.execute("UPDATE pack_share_tokens SET editors_delete = %s WHERE pack_name = %s",
+                     (allowed, pack_name))
+        conn.commit()
+
+
+def join_by_token(token: str, user_id: int) -> "tuple[str, str | None]":
+    """Someone opened a co-edit link: (outcome, pack name). Outcomes: "invalid" (no such
+    link), "gone" (its pack is not known any more), "own" (the owner's own link), "already"
+    (an editor already), "expired", "full" (editors and pending invitations at the link's
+    limit), "joined". One transaction, the link's row locked, so two people opening it at
+    once cannot both take its last place."""
+    with pooled() as conn:
+        row = conn.execute(
+            "SELECT t.pack_name, p.user_id, t.max_editors, t.expires_at IS NOT NULL AND t.expires_at <= now() "
+            "FROM pack_share_tokens t LEFT JOIN packs p ON p.name = t.pack_name "
+            "WHERE t.token = %s FOR UPDATE OF t",
+            (token,),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return "invalid", None
+        pack_name, owner_id, most, expired = row
+        if owner_id is None:
+            conn.rollback()
+            return "gone", pack_name
+        if owner_id == user_id:
+            conn.rollback()
+            return "own", pack_name
+        if conn.execute("SELECT 1 FROM pack_editors WHERE pack_name = %s AND user_id = %s",
+                        (pack_name, user_id)).fetchone():
+            conn.rollback()
+            return "already", pack_name
+        if expired:
+            conn.rollback()
+            return "expired", pack_name
+        taken = conn.execute(
+            "SELECT (SELECT COUNT(*) FROM pack_editors WHERE pack_name = %(n)s) "
+            "     + (SELECT COUNT(*) FROM pack_invites WHERE pack_name = %(n)s)",
+            {"n": pack_name},
+        ).fetchone()[0]
+        if taken >= most:
+            conn.rollback()
+            return "full", pack_name
+        conn.execute(
+            "INSERT INTO pack_editors (pack_name, user_id, added_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (pack_name, user_id) DO NOTHING",
+            (pack_name, user_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        return "joined", pack_name
+
+
+def pack_name_by_id(pack_id: int) -> "str | None":
+    """The co-edit screen's buttons carry the pack's number, not its name: a name can be
+    48 characters, and Telegram allows a button 64."""
     with pooled_read() as conn:
-        cur = conn.execute("SELECT pack_name FROM pack_share_tokens WHERE token = %s", (token,))
-        row = cur.fetchone()
+        row = conn.execute("SELECT name FROM packs WHERE id = %s", (pack_id,)).fetchone()
         return row[0] if row else None
+
+
+def pack_editors(pack_name: str) -> "list[int]":
+    with pooled_read() as conn:
+        return [row[0] for row in conn.execute(
+            "SELECT user_id FROM pack_editors WHERE pack_name = %s ORDER BY added_at, user_id",
+            (pack_name,)).fetchall()]
+
+
+def remove_editor(pack_name: str, user_id: int) -> None:
+    with pooled() as conn:
+        conn.execute("DELETE FROM pack_editors WHERE pack_name = %s AND user_id = %s", (pack_name, user_id))
+        conn.commit()
+
+
+def shared_packs(user_id: int) -> "list[tuple[str, str]]":
+    """(name, title) of the packs this person co-edits, by title."""
+    with pooled_read() as conn:
+        return conn.execute(
+            "SELECT p.name, p.title FROM pack_editors e JOIN packs p ON p.name = e.pack_name "
+            "WHERE e.user_id = %s ORDER BY lower(p.title), p.name",
+            (user_id,),
+        ).fetchall()
+
+
+def _username_mark(username: str) -> str:
+    import vault
+    return vault.text_mark(username.lstrip("@").lower(), "sticker.invite")
+
+
+def invites_usable() -> bool:
+    """Invitations hold a name, so they need the data key."""
+    return _names_sealable()
+
+
+def add_invites(pack_name: str, usernames: "list[str]") -> "tuple[list[str], list[str]]":
+    """Invite these @usernames (already checked to look like usernames) to co-edit:
+    (invited, refused for the pack being at its limit). Editors and pending invitations
+    together stay within the link's max_editors. Refuses without the data key: the
+    names are kept sealed, or not at all."""
+    if not invites_usable():
+        raise RuntimeError("invitations need the data key")
+    view = get_coedit_view(pack_name)
+    room = view["max_editors"] - view["editors"] - view["invited"]
+    invited, full = [], []
+    with pooled() as conn:
+        for name in usernames:
+            mark = _username_mark(name)
+            if conn.execute("SELECT 1 FROM pack_invites WHERE pack_name = %s AND username_mark = %s",
+                            (pack_name, mark)).fetchone():
+                invited.append(name)
+                continue
+            if room <= 0:
+                full.append(name)
+                continue
+            conn.execute(
+                # clock_timestamp(), not now(): every row of one message would otherwise
+                # carry the same time, and the owner's list is in the order they were typed.
+                "INSERT INTO pack_invites (pack_name, username_mark, username_sealed, added_at) "
+                "VALUES (%s, %s, %s, clock_timestamp())",
+                (pack_name, mark, seal_name(name.lstrip("@"), INVITE_PURPOSE)),
+            )
+            room -= 1
+            invited.append(name)
+        conn.commit()
+    return invited, full
+
+
+def pack_invites(pack_name: str) -> "list[tuple[str, str]]":
+    """(mark, @username) of the pack's pending invitations, oldest first."""
+    with pooled_read() as conn:
+        rows = conn.execute(
+            "SELECT username_mark, username_sealed FROM pack_invites WHERE pack_name = %s "
+            "ORDER BY added_at, username_mark", (pack_name,)).fetchall()
+    return [(mark, open_name(sealed, INVITE_PURPOSE) or "?") for mark, sealed in rows]
+
+
+def remove_invite(pack_name: str, mark: str) -> None:
+    with pooled() as conn:
+        conn.execute("DELETE FROM pack_invites WHERE pack_name = %s AND username_mark = %s", (pack_name, mark))
+        conn.commit()
+
+
+def claim_invites(user_id: int, username: "str | None") -> "list[tuple[str, str]]":
+    """This person has used the bot: every pack that invited their @username makes them a
+    co-editor now, and the invitation goes. Returns (name, title) of those packs. A pack
+    they own is not joined, only its invitation dropped."""
+    if not username or not invites_usable():
+        return []
+    mark = _username_mark(username)
+    with pooled() as conn:
+        rows = conn.execute(
+            "DELETE FROM pack_invites i USING packs p WHERE i.username_mark = %s AND p.name = i.pack_name "
+            "RETURNING p.name, p.title, p.user_id",
+            (mark,),
+        ).fetchall()
+        joined = []
+        for name, title, owner_id in rows:
+            if owner_id == user_id:
+                continue
+            conn.execute(
+                "INSERT INTO pack_editors (pack_name, user_id, added_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT (pack_name, user_id) DO NOTHING",
+                (name, user_id, datetime.now(timezone.utc).isoformat()),
+            )
+            joined.append((name, title))
+        conn.commit()
+    return joined
 
 
 def delete_pack_records(name: str) -> None:
@@ -679,6 +933,115 @@ def delete_pack_records(name: str) -> None:
         conn.execute("DELETE FROM packs WHERE name = %s", (name,))
         conn.execute("DELETE FROM pack_editors WHERE pack_name = %s", (name,))
         conn.execute("DELETE FROM pack_share_tokens WHERE pack_name = %s", (name,))
+        conn.execute("DELETE FROM pack_invites WHERE pack_name = %s", (name,))
+        conn.commit()
+
+
+# ---------- public packs and group chats (group_mode.py) ----------
+
+def set_pack_public(name: str, public: bool) -> None:
+    with pooled() as conn:
+        conn.execute("UPDATE packs SET public = %s WHERE name = %s", (public, name))
+        conn.commit()
+
+
+def is_pack_public(name: str) -> bool:
+    with pooled_read() as conn:
+        row = conn.execute("SELECT public FROM packs WHERE name = %s", (name,)).fetchone()
+        return bool(row and row[0])
+
+
+def pack_access(name: str, user_id: int, chat_id: "int | None" = None) -> "dict | None":
+    """Whether user_id may add to (or retag stickers in) pack `name`, and delete
+    stickers from it, as {"owner_id", "title", "allowed", "can_delete"}; None for
+    a pack this bot does not know.
+
+    Allowed: its owner and its co-editors, anywhere. In a group chat
+    (`chat_id`), also anybody, when the pack is public and its owner or one of
+    its co-editors has used the bot in that group. Deleting: its owner, and its
+    co-editors when the owner allows it (set_editors_delete) -- never somebody
+    let in by a public pack, and in a group nobody at all (group_mode). One
+    round trip."""
+    with pooled_read() as conn:
+        row = conn.execute(
+            """
+            SELECT p.user_id, p.title,
+                   p.user_id = %(user)s
+                   OR EXISTS (SELECT 1 FROM pack_editors e
+                               WHERE e.pack_name = p.name AND e.user_id = %(user)s)
+                   OR (p.public AND %(chat)s::bigint IS NOT NULL AND EXISTS (
+                         SELECT 1 FROM group_members g
+                          WHERE g.chat_id = %(chat)s::bigint
+                            AND (g.user_id = p.user_id OR g.user_id IN (
+                                 SELECT e.user_id FROM pack_editors e WHERE e.pack_name = p.name)))),
+                   p.user_id = %(user)s
+                   OR (COALESCE(t.editors_delete, FALSE) AND EXISTS (
+                         SELECT 1 FROM pack_editors e WHERE e.pack_name = p.name AND e.user_id = %(user)s))
+            FROM packs p LEFT JOIN pack_share_tokens t ON t.pack_name = p.name
+            WHERE p.name = %(name)s
+            """,
+            {"user": user_id, "chat": chat_id, "name": name},
+        ).fetchone()
+    if row is None:
+        return None
+    return {"owner_id": row[0], "title": row[1], "allowed": bool(row[2]), "can_delete": bool(row[3])}
+
+
+GROUP_PACKS_MAX = 50
+
+
+def group_packs(chat_id: int) -> "list[tuple[str, str]]":
+    """(name, title) of the public packs whose owner or a co-editor has used
+    the bot in this group, by title."""
+    with pooled_read() as conn:
+        return conn.execute(
+            """
+            SELECT p.name, p.title FROM packs p
+             WHERE p.public AND (
+                   p.user_id IN (SELECT user_id FROM group_members WHERE chat_id = %(chat)s)
+                   OR EXISTS (SELECT 1 FROM pack_editors e
+                                JOIN group_members g ON g.user_id = e.user_id AND g.chat_id = %(chat)s
+                               WHERE e.pack_name = p.name))
+             ORDER BY lower(p.title), p.name
+             LIMIT %(most)s
+            """,
+            {"chat": chat_id, "most": GROUP_PACKS_MAX},
+        ).fetchall()
+
+
+def note_group_member(chat_id: int, user_id: int) -> None:
+    with pooled() as conn:
+        conn.execute(
+            "INSERT INTO group_members (chat_id, user_id, seen_at) VALUES (%s, %s, now()) "
+            "ON CONFLICT (chat_id, user_id) DO UPDATE SET seen_at = now()",
+            (chat_id, user_id),
+        )
+        conn.commit()
+
+
+def forget_group_member(chat_id: int, user_id: int) -> None:
+    with pooled() as conn:
+        conn.execute("DELETE FROM group_members WHERE chat_id = %s AND user_id = %s", (chat_id, user_id))
+        conn.commit()
+
+
+def forget_group(chat_id: int) -> None:
+    """The bot left the group, or was removed from it."""
+    with pooled() as conn:
+        conn.execute("DELETE FROM group_members WHERE chat_id = %s", (chat_id,))
+        conn.commit()
+
+
+def move_group(old_chat_id: int, new_chat_id: int) -> None:
+    """The group became a supergroup, under a new id: its members are noted there."""
+    with pooled() as conn:
+        conn.execute(
+            "INSERT INTO group_members (chat_id, user_id, seen_at) "
+            "SELECT %s, user_id, seen_at FROM group_members WHERE chat_id = %s "
+            "ON CONFLICT (chat_id, user_id) DO NOTHING",
+            (new_chat_id, old_chat_id),
+        )
+        conn.execute("DELETE FROM group_members WHERE chat_id = %s", (old_chat_id,))
         conn.commit()
 
 
@@ -819,6 +1182,16 @@ def prune_old_data() -> int:
             (ACTIVITY_RETENTION_DAYS,),
         )
         removed = cur.rowcount
+        cur = conn.execute(
+            "DELETE FROM group_members WHERE seen_at < now() - make_interval(days => %s)",
+            (ACTIVITY_RETENTION_DAYS,),
+        )
+        removed += cur.rowcount or 0
+        cur = conn.execute(
+            "DELETE FROM pack_invites WHERE added_at < now() - make_interval(days => %s)",
+            (INVITE_KEEP_DAYS,),
+        )
+        removed += cur.rowcount or 0
         conn.commit()
     return removed
 
@@ -850,7 +1223,7 @@ def erase_user(user_id: int) -> int:
         cur = conn.execute("SELECT name FROM packs WHERE user_id = %s", (user_id,))
         owned = [row[0] for row in cur.fetchall()]
         if owned:
-            for table in ("pack_share_tokens", "pack_editors"):
+            for table in ("pack_share_tokens", "pack_editors", "pack_invites"):
                 cur = conn.execute(f"DELETE FROM {table} WHERE pack_name = ANY(%s)", (owned,))
                 removed += cur.rowcount or 0
             cur = conn.execute("DELETE FROM packs WHERE user_id = %s", (user_id,))
@@ -859,7 +1232,7 @@ def erase_user(user_id: int) -> int:
         # takes nothing of the owner's with it.
         cur = conn.execute("DELETE FROM pack_editors WHERE user_id = %s", (user_id,))
         removed += cur.rowcount or 0
-        for table in ("user_settings", "donation_prompts", "activity_events"):
+        for table in ("user_settings", "donation_prompts", "activity_events", "group_members"):
             cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             removed += cur.rowcount or 0
         conn.execute(

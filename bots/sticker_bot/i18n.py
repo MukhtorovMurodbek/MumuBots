@@ -72,7 +72,7 @@ STRINGS = {
         "topup_failed": "⚠️ Your payment of {stars} ⭐ went through, but a problem on my side kept the ⚡ from reaching your balance. Nothing is lost: the owner has been told and will add it by hand. To follow up: /paysupport",
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded to you automatically, in full.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
         "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
+        "problem_logged_note": "Anonymous report is saved",
         "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
         "report_send": '📨 Send my details',
         "report_cancel": '✖️ Cancel',
@@ -105,17 +105,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
-        "privacy_stored": (
-            "• your Telegram user id, and the language you chose\n"
-            "• the packs you made here: each one's name and title, and the display name and "
-            "username you had at the time\n"
-            "• who you gave add-access to a pack, and the share links you created\n"
-            "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
-            "using it\n"
-            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
-            "• a record of any donation: the amount and Telegram's payment id\n"
-            "• whatever the bot is in the middle of doing with you, until it is finished"
-        ),
+        "privacy_stored": "• your Telegram user id, and the language you chose\n• the packs you made here: each one's name and title, and the display name and username you had at the time\n• who you gave add-access to a pack, the share links you created with their limits, and the @usernames you invited (sealed; until they use the bot, 30 days at most)\n• a timestamp each time you use the bot, so its owner can tell whether anyone is using it\n• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• a record of any donation: the amount and Telegram's payment id\n• which of your packs you made public, and that you used the bot in a group (that group and you), so the group's /packs can list your public packs: kept 90 days from your last use there, and dropped when you leave the group\n• whatever the bot is in the middle of doing with you, until it is finished",
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
             "Every error this bot shows anybody is written down by itself: the error code, an "
@@ -210,61 +200,14 @@ STRINGS = {
         "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
         "cancel_button_feedback": "💬 Feedback",
         "cancel_item_feedback": "the feedback I asked you for",
-        "help_brief": (
-            "How it works:\n"
-            "\n"
-            "• /newpack makes a sticker pack: send pictures, GIFs, videos or stickers, an emoji after each if you like, then /done.\n"
-            "• /addsticker adds to a pack you have; /mypacks lists them, with buttons to rename, share or delete one.\n"
-            "• /import copies stickers in from another Telegram pack or a WhatsApp export.\n"
-            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
-            "\n"
-            "Main commands: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Every command: the full guide, below or /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": "How it works:\n\n• /newpack makes a sticker pack: send pictures, GIFs, videos or stickers, an emoji after each if you like. Each is saved as it is added.\n• /addsticker adds to a pack you have; /mypacks lists them, with buttons to rename, share or delete one.\n• /import copies stickers in from another Telegram pack or a WhatsApp export.\n• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n\nMain commands: /newpack · /addsticker · /mypacks · /cancel\nEvery command: the full guide, below or /fullhelp.\n\n",
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
         "help_page_everything": "The full guide: /fullhelp",
         "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
-        "helppage_newpack": (
-            "🆕 /newpack — a new sticker pack\n"
-            "\n"
-            "1. Send /newpack, then the pack's title as a message (up to {title_max} characters; longer is cut). If Telegram refuses the title, start it with a letter.\n"
-            "2. Send what should become stickers, one per message: photos or image files, GIFs, videos, or stickers. The pack is made with the first one — no sticker, no pack.\n"
-            "3. Each sticker gets {emoji}. To change it, send emoji right after it (up to {emoji_max}): they replace the last sticker's emoji.\n"
-            "4. /done when you're finished, and I send the pack's link. /cancel stops.\n"
-            "\n"
-            "How each kind turns out:\n"
-            "• A photo, an image file or a static sticker becomes a static sticker, {side} px on its longer side.\n"
-            "• A GIF, a video or a video sticker becomes a video sticker: {side} px, the first {seconds} seconds, {fps} frames a second, no sound, under {kb} KB. If it can't be made that small, I say so and suggest our converter bot.\n"
-            "• Animated (.tgs) stickers can't be added.\n"
-            "• Many at once: a WhatsApp sticker pack (.zip or .wastickers), or /import from a Telegram pack.\n"
-            "\n"
-            "Example: /newpack, then \"Cat faces\", then three photos of your cat, then 😺, then /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — more stickers in a pack you have\n"
-            "\n"
-            "1. /addsticker lists your packs. Tap one, then \"➕ Add stickers\".\n"
-            "2. Send photos, GIFs, videos or stickers, just as for a new pack. Each gets {emoji}; emoji sent right after replace it.\n"
-            "3. /done when you're finished.\n"
-            "• Sending a sticker that is already in the pack takes it out. If it's the last one, I ask first, because that deletes the whole pack.\n"
-            "• Only packs made with this bot that are yours are listed. None yet? /newpack.\n"
-            "• /mypacks shows the same list. Each pack's menu can also rename it, let someone else edit it with you, or delete it.\n"
-            "\n"
-            "Example: /addsticker, tap \"Cat faces\", tap \"➕ Add stickers\", send a new photo, then /done."
-        ),
-        "helppage_import": (
-            "📥 /import — many stickers at once, from another pack\n"
-            "\n"
-            "It works while you are filling a pack: after /newpack and its title, or after \"➕ Add stickers\".\n"
-            "• /import followed by a public Telegram pack's link (t.me/addstickers/…) or its name copies its stickers into your pack, with their emoji. Up to {max} each time.\n"
-            "• Animated (.tgs) stickers are skipped, and I say how many.\n"
-            "• From WhatsApp: send the sticker pack's .zip or .wastickers file instead.\n"
-            "• Then keep sending more, or /done to finish.\n"
-            "\n"
-            "Example: /newpack, then \"Favourites\", then /import t.me/addstickers/SomePack"
-        ),
+        "helppage_newpack": '🆕 /newpack — a new sticker pack\n\n1. Send /newpack, then the pack\'s title as a message (up to {title_max} characters; longer is cut). If Telegram refuses the title, start it with a letter.\n2. Send what should become stickers, one per message: photos or image files, GIFs, videos, or stickers. The pack is made with the first one — no sticker, no pack.\n3. Each sticker gets {emoji}. To change it, send emoji right after it (up to {emoji_max}): they replace the last sticker\'s emoji.\n4. That\'s all: each sticker is saved as it is added, and the first one\'s answer has the pack\'s link. /cancel stops.\n\nHow each kind turns out:\n• A photo, an image file or a static sticker becomes a static sticker, {side} px on its longer side.\n• A GIF, a video or a video sticker becomes a video sticker: {side} px, the first {seconds} seconds, {fps} frames a second, no sound, under {kb} KB. If it can\'t be made that small, I say so and suggest our converter bot.\n• Animated (.tgs) stickers can\'t be added.\n• Many at once: a WhatsApp sticker pack (.zip or .wastickers), or /import from a Telegram pack.\n\nExample: /newpack, then "Cat faces", then three photos of your cat, then 😺.',
+        "helppage_addsticker": '➕ /addsticker — more stickers in a pack you have\n\n1. /addsticker lists your packs. Tap one, then "➕ Add stickers".\n2. Send photos, GIFs, videos or stickers, just as for a new pack. Each gets {emoji}; emoji sent right after replace it.\n• Send a sticker that is already in the pack, and I ask whether to add it again or remove it. Removing the last one deletes the whole pack, so I ask once more. In a pack someone shares with you, removing is offered only if its owner lets co-editors delete.\n• Only packs made with this bot that are yours are listed. None yet? /newpack.\n• /mypacks shows the same list. Each pack\'s menu can also rename it, let someone else edit it with you, or delete it.\n\nExample: /addsticker, tap "Cat faces", tap "➕ Add stickers", send a new photo.',
+        "helppage_import": '📥 /import — many stickers at once, from another pack\n\nIt works while you are filling a pack: after /newpack and its title, or after "➕ Add stickers".\n• /import followed by a public Telegram pack\'s link (t.me/addstickers/…) or its name copies its stickers into your pack, with their emoji. Up to {max} each time.\n• Animated (.tgs) stickers are skipped, and I say how many.\n• From WhatsApp: send the sticker pack\'s .zip or .wastickers file instead.\n• Then keep sending more whenever you like.\n\nExample: /newpack, then "Favourites", then /import t.me/addstickers/SomePack',
         "privacy_feedback_heading": "If you send /feedback:",
         "privacy_feedback": (
             "What you write reaches the person who runs these bots as a Telegram message, with "
@@ -283,7 +226,7 @@ STRINGS = {
             "Hey! I turn your images, GIFs, videos and stickers into Telegram sticker "
             "packs.\n\n"
         ),
-        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/done - finish editing a pack\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/done - close the pack you're filling and get its link (optional: everything is saved as you go)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
         "whomade_usage": "Usage: /whomade <pack name or t.me/addstickers link>",
         "whomade_not_found": (
             "I don't have a record of that pack — either it wasn't created "
@@ -293,11 +236,7 @@ STRINGS = {
         "coedit_link_invalid": "That co-editing link isn't valid — it may have been reset by the pack owner.",
         "coedit_pack_gone": "That pack doesn't seem to exist anymore.",
         "coedit_own_pack": "That's your own pack — use /mypacks to manage it.",
-        "coedit_joined_intro": (
-            "You've been added as a co-editor on \"{title}\"! Send images, GIFs, "
-            "videos, or static/video stickers to add them — default emoji is 😭, "
-            "send emoji right after to retag the last one. /done when finished."
-        ),
+        "coedit_joined_intro": 'You\'ve been added as a co-editor on "{title}"! Send images, GIFs, videos, or static/video stickers to add them — default emoji is 😭, send emoji right after to retag the last one. Each is saved right away; you\'ll find the pack in /mypacks.',
         "btn_new_pack": "➕ New pack",
         "btn_my_packs": "📁 My packs",
         "btn_help": "❓ Help",
@@ -311,16 +250,7 @@ STRINGS = {
         "btn_rename": "✏️ Rename",
         "btn_coedit": "👥 Co-edit",
         "btn_delete_pack": "🗑️ Delete pack",
-        "coedit_count_some": "{count} co-editor(s) so far.",
-        "coedit_count_none": "No co-editors yet.",
-        "coedit_message": (
-            "👥 Co-editing \"{title}\"\n\n"
-            "Link: {link}\n\n"
-            "Share it — anyone who opens it can add stickers to this pack "
-            "through the bot (they still get added under your ownership).\n\n"
-            "{editors_line}\n\n"
-            "Reset the link to stop it from granting access to anyone new."
-        ),
+        "coedit_message": '👥 Co-editing "{title}"\n\nLink: {link}\n{valid_line}\nCo-editors: {editors} of at most {max}{invited}\n\nWhoever opens the link while it is valid, until there are {max} co-editors, can add stickers to this pack (they go in under your ownership). Deleting stickers stays yours unless you allow it with 🗑 below. For a list nobody else can join through, add people by @username. A new link stops the old one; people already in stay until you remove them in 📋.',
         "btn_reset_link": "🔄 Reset link",
         "only_owner_coedit": "Only the pack owner can manage co-editing.",
         "link_reset_confirm": "Link reset — the old one no longer works.",
@@ -345,22 +275,13 @@ STRINGS = {
         "newpack_title_prompt": "What should the pack title be?",
         "title_empty": "That's empty — send an actual title for the pack.",
         "title_truncated": "Telegram caps pack titles at 64 characters — using \"{title}\".",
-        "editing_intro_new": (
-            "Send images, GIFs, videos, or static/video stickers — each one "
-            "is added with the default 😭 emoji. Send emoji right after to retag "
-            "the last one. /done when finished."
-        ),
+        "editing_intro_new": 'Send images, GIFs, videos, or static/video stickers — each one is added with the default 😭 emoji and saved right away. Send emoji right after to retag the last one.',
         "no_packs_for_add": "You don't have any packs yet. Use /newpack first.",
         "pick_pack_prompt": "Which pack? Tap it, then \"➕ Add stickers\".",
-        "editing_intro_add": (
-            "Send images, GIFs, videos, or static/video stickers to add — default "
-            "emoji is 😭, send emoji right after to retag the last one. /done when finished.\n\n"
-            "Tip: sending a sticker that's already in this pack removes it instead of "
-            "adding a duplicate."
-        ),
+        "editing_intro_add": "Send images, GIFs, videos, or static/video stickers to add — default emoji is 😭, send emoji right after to retag the last one. Each is saved right away.\n\nTip: send a sticker that's already in this pack, and I'll ask whether to add it again or remove it.",
+        "editing_intro_shared": "Send images, GIFs, videos, or static/video stickers to add — default emoji is 😭, send emoji right after to retag the last one. Each is saved right away.\n\nTip: a sticker that's already in this pack is not taken out: I ask whether to add it again. Only the pack's owner deletes stickers.",
         "status_verb_creating": "Creating",
         "status_verb_editing": "Editing",
-        "status_line": "📝 {verb} \"{title}\" — {count} sticker(s) added this session",
         "status_default_title": "this pack",
         "btn_delete_pack_yes": "🗑️ Yes, delete the pack",
         "btn_cancel": "Cancel",
@@ -370,11 +291,11 @@ STRINGS = {
         ),
         "remove_failed": "⚠️ Couldn't remove that sticker: {error}",
         "remove_success": "🗑️ That sticker was already in this pack — removed it.",
+        "remove_last_owner_only": "That's the only sticker left in this pack. Removing it would delete the whole pack, which only its owner can do.",
         "keep_pack": "Okay, kept the pack as-is.",
         "pack_deleted_empty": "🗑️ Pack deleted (it had no stickers left).",
         "pack_deleted_note": "❌ Pack deleted.",
         "image_process_failed": "Couldn't process that image: {error}",
-        "added_default_emoji": "Added {emoji} — send an emoji to retag it.",
         "last_attempt_failed": "⚠️ Last attempt failed — send another item to retry, or /cancel.",
         "converting_video": "Converting to a video sticker...",
         "video_convert_failed_redirect": (
@@ -383,10 +304,6 @@ STRINGS = {
             "same file over there 👇"
         ),
         "video_convert_generic_failed": "Couldn't convert that: {error}",
-        "added_video_default_emoji": (
-            "Added as a video sticker with default {emoji}. Send emoji "
-            "now to retag it, another image/GIF/video to keep going, or /done to finish."
-        ),
         "animated_not_supported": (
             "Animated (Lottie/.tgs) stickers aren't supported — send a static "
             "image, a GIF/video, or a static/video sticker instead."
@@ -401,7 +318,7 @@ STRINGS = {
         "import_summary_head": "Imported {added} sticker(s) from \"{source}\"",
         "import_summary_skipped": ", skipped {skipped} unsupported (animated/Lottie)",
         "import_summary_failed": ", {failed} failed",
-        "import_summary_tail": ". Keep sending more, or /done to finish.",
+        "import_summary_tail": '. Keep sending more whenever you like.',
         "done_standalone_hint": (
             "Nothing to finish — you aren't editing a pack right now. Start one "
             "with /newpack, or tap Add stickers on a pack from /mypacks."
@@ -412,7 +329,6 @@ STRINGS = {
         ),
         "whatsapp_reading": "Reading the WhatsApp sticker pack...",
         "whatsapp_summary_head": "Imported {added} sticker(s) from the WhatsApp pack",
-        "not_emoji_message": "Send an image/GIF/video/sticker to add, emoji to retag the last one, or /done.",
         "no_sticker_to_tag": "Add a sticker first, then send emoji to tag it.",
         "retagged_success": "Retagged as {emojis}.",
         "retag_failed": "Couldn't update the emoji: {error}",
@@ -467,6 +383,78 @@ STRINGS = {
         ),
         "import_bad_zip": "That doesn't look like a valid .zip/.wastickers file.",
         "import_zip_no_images": "No usable images found inside that zip.",
+        # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
+        "status_line_open": '📝 {verb} "{title}"',
+        "sticker_added_to": '✅ Added to “{title}” as #{n} with {emoji}. Reply to this with an emoji to change it.',
+        "emoji_target_unknown": "I can't tell which sticker that is any more. Reply to the sticker itself instead.",
+        "emoji_not_ours": "That sticker isn't from a pack made with this bot, so I can't change it.",
+        "emoji_usage": 'Reply to a sticker, or to my “Added” message, with /emoji and the emoji — for example /emoji 😎',
+        "emoji_send_reply": 'Reply to this message with the new emoji for that sticker.',
+        "already_in_pack": "This sticker is already in “{title}”. Add it again?\nOnly the pack's owner can delete stickers from it.",
+        "already_in_pack_owner": 'This sticker is already in “{title}”. Add it again, or remove it from the pack?',
+        "already_in_pack_group": "This sticker is already in “{title}”. Add it again?\nNothing is deleted in a group: only the pack's owner can delete its stickers.",
+        "btn_add_again": '➕ Add again',
+        "btn_dont_add": "✖ Don't add",
+        "btn_remove_it": '🗑 Remove it',
+        "remove_not_allowed": "You can't delete stickers from this pack: only its owner can.",
+        "dup_not_added": 'OK, not added.',
+        "dup_expired": 'That question has expired. Send the sticker again.',
+        "dup_not_yours": 'Only the person who sent it can answer.',
+        "btn_pack_private": '🔒 Private · tap to make it public in groups',
+        "btn_pack_public": '🌐 Public in groups · tap to make it private',
+        "pack_now_public": '🌐 “{title}” is public now. In groups where you use me, anyone can see it in /packs and add to it.',
+        "pack_now_private": '🔒 “{title}” is private now. Only you and its co-editors can add to it.',
+        "group_hello": "👋 Hi! I make Telegram sticker packs.\n\nHere in the group:\n• /packs — the packs you can add to here\n• reply to a picture, GIF, video or sticker with /add 2 (a number from /packs), or /add and a pack's link\n• reply to a sticker with /emoji 😎 to change its emoji (a reply to my “Added” message needs only the emoji)\n\nPacks are private unless their owner makes them public (in my chat: /mypacks → a pack → 🔒). To share a private pack, post its co-edit link here: whoever opens it can add to it.",
+        "group_packs_head": '📦 Packs you can add to here:',
+        "group_packs_tail": 'Reply to a picture with /add and the number.',
+        "group_packs_none": "No public packs here yet. To list one, its owner makes it public in my chat (/mypacks → the pack → 🔒) and sends /packs here once. A private pack's co-edit link, posted here, works too.",
+        "group_add_need_reply": 'Reply to a picture, GIF, video or sticker with /add.',
+        "group_add_which": 'Which pack? /add and its number from /packs, or its link.',
+        "group_pack_unknown": "I don't know that pack. Use a number from /packs, or the t.me/addstickers link of a pack made with me.",
+        "group_no_access": "🔒 You don't have access to “{title}”. Its owner can make it public, or post its co-edit link here.",
+        "group_adding": '⏳ Adding...',
+        "helppage_groups": "👥 In group chats\n\nAdd me to a group, then:\n• /packs lists the packs you can add to there, numbered.\n• Reply to a picture, GIF, video or sticker with /add 2 (the number), or /add and a pack's link. /add on its own uses the pack you last added to there. /add on a sticker that is already in the pack asks whether to add it again: nothing is deleted in a group.\n• To change a sticker's emoji, reply to it with /emoji 😎; a reply to my “Added” message needs only the emoji. (In a group I only react to commands and to replies to my own messages.) In my chat an emoji alone, as a reply to any sticker of your packs, does it too.\n\nWho can add: a pack's owner and its co-editors, anywhere. Public packs (/mypacks → a pack → 🔒/🌐) also take stickers from anybody in a group where their owner or a co-editor uses me. Private packs, the default, are not listed; post a pack's co-edit link in the group to let people in.",
+        "help_btn_groups": '👥 In groups',
+        # 2.2.0: /done optional; co-edit link limits and invitations.
+        "pack_created_link": '📦 Your pack is made: https://t.me/addstickers/{pack_name}',
+        "coedit_link_expired": "That co-editing link has expired. Ask the pack's owner for a new one.",
+        "coedit_link_full": 'That pack already has as many co-editors as its owner allows. Ask the owner to raise the limit.',
+        "coedit_removed_access": '🔒 You can no longer add to "{title}": its owner removed you.',
+        "invites_claimed": "👥 You were invited to add to {titles}. You'll find them in /mypacks.",
+        "your_packs_shared_note": '👥 — packs other people share with you.',
+        "co_period_1": '1 day',
+        "co_period_7": '1 week',
+        "co_period_30": '1 month',
+        "co_period_none": 'no limit',
+        "co_valid_forever": 'Valid: no time limit',
+        "co_valid_until": 'Valid until {date} ({left} left)',
+        "co_valid_expired": '⚠️ Expired on {date}: nobody new can join. Tap ⏳ to open it again, or make a new link.',
+        "co_left_days": '{n} days',
+        "co_left_hours": '{n} h',
+        "co_invited_count": ' (+{n} invited by @username)',
+        "btn_co_valid": '⏳ Link valid: {period}',
+        "btn_co_max": '👥 Max co-editors: {n}',
+        "btn_co_invite": '➕ Add by @username',
+        "btn_co_list": '📋 Who can add ({n})',
+        "co_valid_set": 'The link now works for {period}.',
+        "co_max_set": 'At most {n} co-editors.',
+        "btn_co_delete_off": '🗑 Co-editors can delete: no',
+        "btn_co_delete_on": '🗑 Co-editors can delete: yes',
+        "co_delete_set_on": 'Co-editors can now delete stickers: sending one that is already in the pack offers to remove it (never the last one).',
+        "co_delete_set_off": 'Only you can delete stickers now.',
+        "co_removed": 'Removed.',
+        "co_list_heading": '📋 Who can add to "{title}":',
+        "co_list_invited": "• @{username} — invited, hasn't used me yet",
+        "co_list_more": '…and {n} more.',
+        "co_list_empty": 'Nobody yet.',
+        "co_list_remove_hint": 'Tap ✖ to take someone out. Stickers they added stay.',
+        "invite_unavailable": "Adding by @username isn't available right now. Try again later, or use the link.",
+        "invite_prompt": 'Send the @usernames of the people who may add to "{title}", separated by spaces. Each one can add the next time they use me — in my chat or in a group. A person without a Telegram username can only join by the link. Invitations nobody uses go after 30 days. /cancel to stop.',
+        "invite_done": '✅ Invited: {names}.',
+        "invite_full": 'Not invited, the pack would have more than {max} co-editors: {names}. Raise the limit with 👥 first.',
+        "invite_bad": 'Not usernames: {names}',
+        "cancel_item_invite": 'the @usernames for "{title}"',
+        "cancel_button_invite": '👥 Inviting people',
     },
     "uz": {
         "whomade_someone": "ismini oshkor qilmagan kishi",
@@ -498,7 +486,7 @@ STRINGS = {
         "topup_failed": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin men tomondagi muammo tufayli ⚡ balansingizga tushmadi. Hech narsa yo'qolmaydi: egasiga xabar berildi, u qo'lda qo'shib qo'yadi. Murojaat uchun: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov sizga avtomatik ravishda to'liq qaytariladi.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
         "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
+        "problem_logged_note": "Anonim hisobot saqlandi",
         "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
         "report_send": "📨 Ma'lumotlarimni yuborish",
         "report_cancel": '✖️ Bekor qilish',
@@ -531,7 +519,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• shu bot orqali yaratgan to'plamlaringiz: har birining nomi va sarlavhasi, o'sha paytdagi ismingiz va foydalanuvchi nomingiz\n• to'plamlaringizga kimga qo'shish huquqi berganingiz va yaratgan havolalaringiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• shu bot orqali yaratgan to'plamlaringiz: har birining nomi va sarlavhasi, o'sha paytdagi ismingiz va foydalanuvchi nomingiz\n• to'plamlaringizga kimga qo'shish huquqi berganingiz, yaratgan havolalaringiz va ularning cheklovlari, taklif qilgan @username'laringiz (shifrlangan; ular botdan foydalanguncha, ko'pi bilan 30 kun)\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• qaysi to'plamlaringizni ochiq qilganingiz va botdan guruhda foydalanganingiz (o'sha guruh va siz) — guruhdagi /packs ochiq to'plamlaringizni ko'rsatishi uchun; u yerda oxirgi foydalanganingizdan keyin 90 kun saqlanadi va guruhdan chiqsangiz o'chiriladi\n• bot siz uchun bajarayotgan ish — u tugagunicha",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -579,61 +567,14 @@ STRINGS = {
         "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
         "cancel_button_feedback": "💬 Fikr-mulohaza",
         "cancel_item_feedback": "men so'ragan fikr-mulohaza",
-        "help_brief": (
-            "Bot qanday ishlaydi:\n"
-            "\n"
-            "• /newpack stiker to'plami yaratadi: rasm, GIF, video yoki stiker yuboring, xohlasangiz har biridan keyin emoji ham, so'ng /done.\n"
-            "• /addsticker mavjud to'plamga qo'shadi; /mypacks to'plamlaringiz ro'yxati — nomini o'zgartirish, ulashish yoki o'chirish tugmalari bilan.\n"
-            "• /import boshqa Telegram to'plamidan yoki WhatsApp eksportidan stikerlarni ko'chiradi.\n"
-            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
-            "\n"
-            "Asosiy buyruqlar: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": "Bot qanday ishlaydi:\n\n• /newpack stiker to'plami yaratadi: rasm, GIF, video yoki stiker yuboring, xohlasangiz har biridan keyin emoji ham. Har biri qo'shilishi bilan saqlanadi.\n• /addsticker mavjud to'plamga qo'shadi; /mypacks to'plamlaringiz ro'yxati — nomini o'zgartirish, ulashish yoki o'chirish tugmalari bilan.\n• /import boshqa Telegram to'plamidan yoki WhatsApp eksportidan stikerlarni ko'chiradi.\n• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n\nAsosiy buyruqlar: /newpack · /addsticker · /mypacks · /cancel\nBarcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n\n",
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
         "help_page_everything": "To'liq qo'llanma: /fullhelp",
         "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
-        "helppage_newpack": (
-            "🆕 /newpack — yangi stiker to'plami\n"
-            "\n"
-            "1. /newpack yuboring, keyin to'plamning nomini xabar qilib ({title_max} belgigacha; uzunrog'i qisqartiriladi). Telegram nomni qabul qilmasa, uni harf bilan boshlang.\n"
-            "2. Stikerga aylanadigan narsalarni har birini alohida xabarda yuboring: rasm yoki rasm-fayl, GIF, video yoki stiker. To'plam birinchisi bilan yaratiladi — stiker bo'lmasa, to'plam ham bo'lmaydi.\n"
-            "3. Har bir stikerga {emoji} beriladi. O'zgartirish uchun darhol keyin emoji yuboring ({emoji_max} tagacha): ular oxirgi stikerning emojisini almashtiradi.\n"
-            "4. Tugatgach /done — to'plam havolasini yuboraman. /cancel to'xtatadi.\n"
-            "\n"
-            "Har biri nimaga aylanadi:\n"
-            "• Rasm, rasm-fayl yoki oddiy stiker oddiy stikerga aylanadi, uzun tomoni {side} px.\n"
-            "• GIF, video yoki video-stiker video-stikerga aylanadi: {side} px, dastlabki {seconds} soniya, soniyasiga {fps} kadr, ovozsiz, {kb} KB dan kichik. Shunchalik kichraytirib bo'lmasa, aytaman va konvertor botimizni taklif qilaman.\n"
-            "• Animatsiyali (.tgs) stikerlarni qo'shib bo'lmaydi.\n"
-            "• Ko'pini birdan: WhatsApp stiker to'plami (.zip yoki .wastickers) yoki Telegram to'plamidan /import.\n"
-            "\n"
-            "Misol: /newpack, keyin \"Mushuk yuzlari\", keyin mushugingizning uchta rasmi, keyin 😺, keyin /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — mavjud to'plamingizga yangi stikerlar\n"
-            "\n"
-            "1. /addsticker to'plamlaringiz ro'yxatini chiqaradi. Birini bosing, keyin \"➕ Stiker qo'shish\".\n"
-            "2. Rasm, GIF, video yoki stikerlarni yangi to'plamdagidek yuboring. Har biriga {emoji} beriladi; darhol keyin yuborilgan emoji uni almashtiradi.\n"
-            "3. Tugatgach /done.\n"
-            "• To'plamda allaqachon bor stikerni yuborsangiz, u to'plamdan olib tashlanadi. Agar u oxirgisi bo'lsa, avval so'rayman, chunki bu butun to'plamni o'chiradi.\n"
-            "• Faqat shu bot orqali yaratilgan va sizniki bo'lgan to'plamlar ko'rsatiladi. Hali yo'qmi? /newpack.\n"
-            "• /mypacks ham shu ro'yxatni ko'rsatadi. Har bir to'plam menyusida uni qayta nomlash, boshqa birov bilan birga tahrirlash yoki o'chirish ham mumkin.\n"
-            "\n"
-            "Misol: /addsticker, \"Mushuk yuzlari\" ni bosing, \"➕ Stiker qo'shish\" ni bosing, yangi rasm yuboring, keyin /done."
-        ),
-        "helppage_import": (
-            "📥 /import — boshqa to'plamdan ko'p stikerni birdan\n"
-            "\n"
-            "To'plamni to'ldirayotganingizda ishlaydi: /newpack va nomidan keyin yoki \"➕ Stiker qo'shish\" dan keyin.\n"
-            "• /import va ochiq Telegram to'plamining havolasi (t.me/addstickers/…) yoki nomi uning stikerlarini emojilari bilan birga to'plamingizga ko'chiradi. Har safar {max} tagacha.\n"
-            "• Animatsiyali (.tgs) stikerlar o'tkazib yuboriladi va nechtasi ekanini aytaman.\n"
-            "• WhatsApp'dan: buning o'rniga stiker to'plamining .zip yoki .wastickers faylini yuboring.\n"
-            "• Keyin yana yuborishda davom eting yoki tugatish uchun /done.\n"
-            "\n"
-            "Misol: /newpack, keyin \"Sevimlilar\", keyin /import t.me/addstickers/SomePack"
-        ),
+        "helppage_newpack": '🆕 /newpack — yangi stiker to\'plami\n\n1. /newpack yuboring, keyin to\'plamning nomini xabar qilib ({title_max} belgigacha; uzunrog\'i qisqartiriladi). Telegram nomni qabul qilmasa, uni harf bilan boshlang.\n2. Stikerga aylanadigan narsalarni har birini alohida xabarda yuboring: rasm yoki rasm-fayl, GIF, video yoki stiker. To\'plam birinchisi bilan yaratiladi — stiker bo\'lmasa, to\'plam ham bo\'lmaydi.\n3. Har bir stikerga {emoji} beriladi. O\'zgartirish uchun darhol keyin emoji yuboring ({emoji_max} tagacha): ular oxirgi stikerning emojisini almashtiradi.\n4. Bo\'ldi: har bir stiker qo\'shilishi bilan saqlanadi, birinchisiga javobda to\'plam havolasi bor. /cancel to\'xtatadi.\n\nHar biri nimaga aylanadi:\n• Rasm, rasm-fayl yoki oddiy stiker oddiy stikerga aylanadi, uzun tomoni {side} px.\n• GIF, video yoki video-stiker video-stikerga aylanadi: {side} px, dastlabki {seconds} soniya, soniyasiga {fps} kadr, ovozsiz, {kb} KB dan kichik. Shunchalik kichraytirib bo\'lmasa, aytaman va konvertor botimizni taklif qilaman.\n• Animatsiyali (.tgs) stikerlarni qo\'shib bo\'lmaydi.\n• Ko\'pini birdan: WhatsApp stiker to\'plami (.zip yoki .wastickers) yoki Telegram to\'plamidan /import.\n\nMisol: /newpack, keyin "Mushuk yuzlari", keyin mushugingizning uchta rasmi, keyin 😺.',
+        "helppage_addsticker": '➕ /addsticker — mavjud to\'plamingizga yangi stikerlar\n\n1. /addsticker to\'plamlaringiz ro\'yxatini chiqaradi. Birini bosing, keyin "➕ Stiker qo\'shish".\n2. Rasm, GIF, video yoki stikerlarni yangi to\'plamdagidek yuboring. Har biriga {emoji} beriladi; darhol keyin yuborilgan emoji uni almashtiradi.\n• To\'plamda allaqachon bor stikerni yuborsangiz, uni yana qo\'shish yoki olib tashlashni so\'rayman. Oxirgisini olib tashlash butun to\'plamni o\'chiradi, shuning uchun yana bir bor so\'rayman. Siz bilan ulashilgan to\'plamda olib tashlash faqat egasi hammualliflarga o\'chirishga ruxsat bergan bo\'lsa taklif qilinadi.\n• Faqat shu bot orqali yaratilgan va sizniki bo\'lgan to\'plamlar ko\'rsatiladi. Hali yo\'qmi? /newpack.\n• /mypacks ham shu ro\'yxatni ko\'rsatadi. Har bir to\'plam menyusida uni qayta nomlash, boshqa birov bilan birga tahrirlash yoki o\'chirish ham mumkin.\n\nMisol: /addsticker, "Mushuk yuzlari" ni bosing, "➕ Stiker qo\'shish" ni bosing, yangi rasm yuboring.',
+        "helppage_import": '📥 /import — boshqa to\'plamdan ko\'p stikerni birdan\n\nTo\'plamni to\'ldirayotganingizda ishlaydi: /newpack va nomidan keyin yoki "➕ Stiker qo\'shish" dan keyin.\n• /import va ochiq Telegram to\'plamining havolasi (t.me/addstickers/…) yoki nomi uning stikerlarini emojilari bilan birga to\'plamingizga ko\'chiradi. Har safar {max} tagacha.\n• Animatsiyali (.tgs) stikerlar o\'tkazib yuboriladi va nechtasi ekanini aytaman.\n• WhatsApp\'dan: buning o\'rniga stiker to\'plamining .zip yoki .wastickers faylini yuboring.\n• Keyin xohlagan paytingizda yana yuborishingiz mumkin.\n\nMisol: /newpack, keyin "Sevimlilar", keyin /import t.me/addstickers/SomePack',
         "privacy_feedback_heading": "/feedback yuborsangiz:",
         "privacy_feedback": (
             "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
@@ -648,7 +589,7 @@ STRINGS = {
         "cancel_item_editing": "\"{title}\" ni tahrirlash",
         "cancel_button_editing": "📦 To'plamni tahrirlash",
         "start_intro": "Salom! Rasm, GIF, video va stikerlaringizdan Telegram stiker to'plamlari yasayman.\n\n",
-        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/done - to'plamni tahrirlashni yakunlash\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/done - to'ldirilayotgan to'plamni yopish va havolasini olish (ixtiyoriy: hammasi darhol saqlanadi)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
         "whomade_usage": "Qanday ishlatiladi: /whomade <to'plam nomi yoki t.me/addstickers havolasi>",
         "whomade_not_found": (
             "Bu to'plam haqida ma'lumotim yo'q — u shu bot orqali yaratilmagan "
@@ -658,7 +599,7 @@ STRINGS = {
         "coedit_link_invalid": "Bu havola yaroqsiz — ehtimol, to'plam egasi uni yangilagan.",
         "coedit_pack_gone": "Bu to'plam o'chirilganga o'xshaydi.",
         "coedit_own_pack": "Bu o'zingizning to'plamingiz — uni /mypacks orqali boshqaring.",
-        "coedit_joined_intro": 'Siz "{title}" to\'plamiga hammuallif bo\'ldingiz! Rasm, GIF, video yoki statik/video stiker yuboring — ular to\'plamga qo\'shiladi (standart emoji: 😭). Oxirgi stikerning emojisini o\'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.',
+        "coedit_joined_intro": 'Siz "{title}" to\'plamiga hammuallif bo\'ldingiz! Rasm, GIF, video yoki statik/video stiker yuboring — ular to\'plamga qo\'shiladi (standart emoji: 😭). Oxirgi stikerning emojisini o\'zgartirish uchun darhol emoji yuboring. Har biri darhol saqlanadi; to\'plamni /mypacks da topasiz.',
         "btn_new_pack": "➕ Yangi to'plam",
         "btn_my_packs": "📁 Mening to'plamlarim",
         "btn_help": "❓ Yordam",
@@ -672,9 +613,7 @@ STRINGS = {
         "btn_rename": "✏️ Nomini o'zgartirish",
         "btn_coedit": '👥 Birgalikda tahrirlash',
         "btn_delete_pack": "🗑️ To'plamni o'chirish",
-        "coedit_count_some": "Hozircha {count} ta hammuallif bor.",
-        "coedit_count_none": "Hali hammualliflar yo'q.",
-        "coedit_message": '👥 "{title}" — birgalikda tahrirlash\n\nHavola: {link}\n\nHavolani ulashing — uni ochgan har kim bot orqali bu to\'plamga stiker qo\'sha oladi (to\'plam baribir sizning nomingizda qoladi).\n\n{editors_line}\n\nYangi odamlar qo\'shilmasligi uchun havolani yangilashingiz mumkin.',
+        "coedit_message": '👥 "{title}" — birgalikda tahrirlash\n\nHavola: {link}\n{valid_line}\nHammualliflar: {editors} / ko\'pi bilan {max}{invited}\n\nHavola amal qilayotganda uni ochgan har kim, hammualliflar {max} taga yetguncha, bu to\'plamga stiker qo\'sha oladi (ular sizning nomingizdan qo\'shiladi). Quyidagi 🗑 bilan ruxsat bermaguningizcha stikerlarni faqat siz o\'chirasiz. Boshqa hech kim qo\'shila olmaydigan ro\'yxat uchun odamlarni @username orqali qo\'shing. Yangi havola eskisini to\'xtatadi; allaqachon qo\'shilganlar 📋 da olib tashlamaguningizcha qoladi.',
         "btn_reset_link": "🔄 Havolani yangilash",
         "only_owner_coedit": "Birgalikda tahrirlashni faqat to'plam egasi boshqara oladi.",
         "link_reset_confirm": "Havola yangilandi — eskisi endi ishlamaydi.",
@@ -696,29 +635,28 @@ STRINGS = {
         "newpack_title_prompt": "To'plamning nomi qanday bo'lsin?",
         "title_empty": "Nom bo'sh bo'lmasin — to'plam uchun nom yuboring.",
         "title_truncated": "Telegram to'plam nomini 64 belgigacha cheklaydi — \"{title}\" ishlatiladi.",
-        "editing_intro_new": "Rasm, GIF, video yoki statik/video stiker yuboring — har biri 😭 emojisi bilan qo'shiladi. Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.",
+        "editing_intro_new": "Rasm, GIF, video yoki statik/video stiker yuboring — har biri 😭 emojisi bilan qo'shiladi va darhol saqlanadi. Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring.",
         "no_packs_for_add": "Hali to'plamingiz yo'q. Avval /newpack yuboring.",
         "pick_pack_prompt": "Qaysi to'plam? Uni bosing, keyin \"➕ Stiker qo'shish\"ni tanlang.",
-        "editing_intro_add": "Qo'shish uchun rasm, GIF, video yoki statik/video stiker yuboring (standart emoji: 😭). Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.\n\nMaslahat: to'plamda allaqachon bor stikerni yuborsangiz, u ikkinchi marta qo'shilmaydi — aksincha, to'plamdan olib tashlanadi.",
+        "editing_intro_add": "Qo'shish uchun rasm, GIF, video yoki statik/video stiker yuboring (standart emoji: 😭). Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Har biri darhol saqlanadi.\n\nMaslahat: to'plamda allaqachon bor stikerni yuborsangiz, uni yana qo'shish yoki olib tashlashni so'rayman.",
+        "editing_intro_shared": "Qo'shish uchun rasm, GIF, video yoki statik/video stiker yuboring (standart emoji: 😭). Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Har biri darhol saqlanadi.\n\nMaslahat: to'plamda allaqachon bor stikerni yuborsangiz, u olib tashlanmaydi — uni yana qo'shish-qo'shmaslikni so'rayman. Stikerlarni faqat to'plam egasi o'chiradi.",
         "status_verb_creating": "Yaratilmoqda",
         "status_verb_editing": "Tahrirlanmoqda",
-        "status_line": "📝 \"{title}\" {verb} — shu seansda {count} ta stiker qo'shildi",
         "status_default_title": "bu to'plam",
         "btn_delete_pack_yes": "🗑️ Ha, to'plam o'chirilsin",
         "btn_cancel": "Bekor qilish",
         "remove_last_confirm": "Bu to'plamdagi oxirgi stiker — uni olib tashlasangiz, *butun to'plam* Telegram'dan o'chadi, chunki to'plam bo'sh bo'lolmaydi. Ishonchingiz komilmi?",
         "remove_failed": "⚠️ Bu stikerni olib tashlab bo'lmadi: {error}",
         "remove_success": "🗑️ Bu stiker to'plamda allaqachon bor edi — uni olib tashladim.",
+        "remove_last_owner_only": "Bu to'plamdagi oxirgi stiker. Uni olib tashlash butun to'plamni o'chiradi — buni faqat to'plam egasi qila oladi.",
         "keep_pack": "Yaxshi, to'plam o'zgarishsiz qoldirildi.",
         "pack_deleted_empty": "🗑️ To'plam o'chirildi (unda stiker qolmagan edi).",
         "pack_deleted_note": "❌ To'plam o'chirildi.",
         "image_process_failed": "Rasmni qayta ishlab bo'lmadi: {error}",
-        "added_default_emoji": "{emoji} bilan qo'shildi — boshqa emoji kerak bo'lsa, uni yuboring.",
         "last_attempt_failed": "⚠️ Oxirgi urinish muvaffaqiyatsiz tugadi — qayta urinish uchun boshqa narsa yuboring yoki /cancel qiling.",
         "converting_video": "Video stikerga aylantirilmoqda...",
         "video_convert_failed_redirect": "{error}\n\nBundan stiker yasab bo'lmaydi, lekin faylni boshqa formatga o'girish kerak bo'lsa, @ConvertBot yordam beradi — faylni o'sha yerga yuboring 👇",
         "video_convert_generic_failed": "Buni aylantirib bo'lmadi: {error}",
-        "added_video_default_emoji": "Video stiker {emoji} emojisi bilan qo'shildi. Emojini o'zgartirish uchun hozir boshqasini yuboring, davom etish uchun yana rasm/GIF/video yuboring yoki tugatish uchun /done ni bosing.",
         "animated_not_supported": (
             "Animatsion (Lottie/.tgs) stikerlar qo'llab-quvvatlanmaydi — buning "
             "o'rniga statik rasm, GIF/video yoki statik/video stiker yuboring."
@@ -729,7 +667,7 @@ STRINGS = {
         "import_summary_head": "\"{source}\" dan {added} ta stiker import qilindi",
         "import_summary_skipped": ", {skipped} ta qo'llab-quvvatlanmaydigani (animatsion/Lottie) o'tkazib yuborildi",
         "import_summary_failed": ", {failed} tasi muvaffaqiyatsiz tugadi",
-        "import_summary_tail": '. Yana yuborishingiz mumkin, tugatish uchun esa /done ni bosing.',
+        "import_summary_tail": '. Xohlagan paytingizda yana yuborishingiz mumkin.',
         "done_standalone_hint": (
             "Tugatadigan narsa yo'q — hozir hech qanday to'plamni tahrirlamayapsiz. "
             "/newpack bilan yangisini boshlang yoki /mypacks dagi to'plamda "
@@ -742,7 +680,6 @@ STRINGS = {
         ),
         "whatsapp_reading": "WhatsApp stiker to'plami o'qilmoqda...",
         "whatsapp_summary_head": "WhatsApp to'plamidan {added} ta stiker import qilindi",
-        "not_emoji_message": "Qo'shish uchun rasm/GIF/video/stiker yuboring, oxirgisini qayta belgilash uchun emoji yuboring, yoki /done ni bosing.",
         "no_sticker_to_tag": "Avval stiker qo'shing, keyin uni belgilash uchun emoji yuboring.",
         "retagged_success": "Emoji o'zgartirildi: {emojis}",
         "retag_failed": "Emojini yangilab bo'lmadi: {error}",
@@ -796,6 +733,78 @@ STRINGS = {
         ),
         "import_bad_zip": "Bu haqiqiy .zip/.wastickers fayliga o'xshamayapti.",
         "import_zip_no_images": "Bu zip ichida ishlatsa bo'ladigan rasm topilmadi.",
+        # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
+        "status_line_open": '📝 "{title}" {verb}',
+        "sticker_added_to": "✅ “{title}” to'plamiga #{n} sifatida {emoji} bilan qo'shildi. Emojini o'zgartirish uchun shu xabarga emoji bilan javob bering.",
+        "emoji_target_unknown": "Bu qaysi stiker ekanini endi aniqlay olmayman. Uning o'rniga stikerning o'ziga javob bering.",
+        "emoji_not_ours": "Bu stiker shu bot yaratgan to'plamdan emas, shuning uchun uni o'zgartira olmayman.",
+        "emoji_usage": "Stikerga yoki mening “Qo'shildi” xabarimga /emoji va emoji bilan javob bering — masalan, /emoji 😎",
+        "emoji_send_reply": "O'sha stiker uchun yangi emoji bilan shu xabarga javob bering.",
+        "already_in_pack": "Bu stiker “{title}” to'plamida allaqachon bor. Yana qo'shaymi?\nStikerlarni faqat to'plam egasi o'chira oladi.",
+        "already_in_pack_owner": "Bu stiker “{title}” to'plamida allaqachon bor. Yana qo'shaymi yoki to'plamdan olib tashlaymi?",
+        "already_in_pack_group": "Bu stiker “{title}” to'plamida allaqachon bor. Yana qo'shaymi?\nGuruhda hech narsa o'chirilmaydi: stikerlarni faqat to'plam egasi o'chira oladi.",
+        "btn_add_again": "➕ Yana qo'shish",
+        "btn_dont_add": "✖ Qo'shmaslik",
+        "btn_remove_it": '🗑 Olib tashlash',
+        "remove_not_allowed": "Bu to'plamdan stiker o'chira olmaysiz: buni faqat egasi qila oladi.",
+        "dup_not_added": "Mayli, qo'shilmadi.",
+        "dup_expired": "Bu savolning muddati o'tgan. Stikerni qaytadan yuboring.",
+        "dup_not_yours": 'Faqat uni yuborgan kishi javob bera oladi.',
+        "btn_pack_private": '🔒 Shaxsiy · guruhlarda ochiq qilish uchun bosing',
+        "btn_pack_public": '🌐 Guruhlarda ochiq · shaxsiy qilish uchun bosing',
+        "pack_now_public": "🌐 “{title}” endi ochiq. Meni ishlatadigan guruhlaringizda har kim uni /packs da ko'radi va unga qo'sha oladi.",
+        "pack_now_private": "🔒 “{title}” endi shaxsiy. Unga faqat siz va hammualliflar qo'sha oladi.",
+        "group_hello": "👋 Salom! Men Telegram stiker to'plamlarini yasayman.\n\nShu guruhda:\n• /packs — bu yerda qo'sha oladigan to'plamlar\n• rasm, GIF, video yoki stikerga /add 2 (/packs dagi raqam) yoki /add va to'plam havolasi bilan javob bering\n• emojisini o'zgartirish uchun stikerga /emoji 😎 bilan javob bering (mening “Qo'shildi” xabarimga faqat emojining o'zi yetadi)\n\nTo'plamlar egasi ochiq qilmaguncha shaxsiy bo'ladi (mening chatimda: /mypacks → to'plam → 🔒). Shaxsiy to'plamni ulashish uchun uning hammualliflik havolasini shu yerga yuboring: uni ochgan har kim qo'sha oladi.",
+        "group_packs_head": "📦 Bu yerda qo'sha oladigan to'plamlar:",
+        "group_packs_tail": 'Rasmga /add va raqam bilan javob bering.',
+        "group_packs_none": "Bu yerda hali ochiq to'plamlar yo'q. Ro'yxatga chiqishi uchun egasi uni mening chatimda ochiq qiladi (/mypacks → to'plam → 🔒) va bu yerda bir marta /packs yuboradi. Shaxsiy to'plamning hammualliflik havolasini shu yerga yuborish ham bo'ladi.",
+        "group_add_need_reply": 'Rasm, GIF, video yoki stikerga /add bilan javob bering.',
+        "group_add_which": "Qaysi to'plam? /add va /packs dagi raqami yoki havolasi.",
+        "group_pack_unknown": "Bu to'plamni bilmayman. /packs dagi raqamni yoki men yaratgan to'plamning t.me/addstickers havolasini ishlating.",
+        "group_no_access": "🔒 “{title}” to'plamiga ruxsatingiz yo'q. Egasi uni ochiq qilishi yoki hammualliflik havolasini shu yerga yuborishi mumkin.",
+        "group_adding": "⏳ Qo'shilmoqda...",
+        "helppage_groups": "👥 Guruhlarda\n\nMeni guruhga qo'shing, keyin:\n• /packs u yerda qo'sha oladigan to'plamlarni raqamlab chiqaradi.\n• Rasm, GIF, video yoki stikerga /add 2 (raqam) yoki /add va to'plam havolasi bilan javob bering. Faqat /add — o'sha yerda oxirgi qo'shgan to'plamingizga qo'shadi. To'plamda allaqachon bor stikerga /add yozsangiz, uni yana qo'shish-qo'shmaslikni so'rayman: guruhda hech narsa o'chirilmaydi.\n• Stiker emojisini o'zgartirish uchun unga /emoji 😎 bilan javob bering; mening “Qo'shildi” xabarimga faqat emojining o'zi yetadi. (Guruhda men faqat buyruqlarga va o'z xabarlarimga berilgan javoblarga munosabat bildiraman.) Mening chatimda to'plamlaringizdagi istalgan stikerga emojining o'zi bilan javob berish ham yetadi.\n\nKim qo'sha oladi: to'plam egasi va hammualliflari — hamma joyda. Ochiq to'plamlarga (/mypacks → to'plam → 🔒/🌐) egasi yoki hammuallifi meni ishlatadigan guruhdagi har kim qo'sha oladi. Shaxsiy to'plamlar (odatiy holat) ro'yxatda ko'rinmaydi; odamlarga ruxsat berish uchun hammualliflik havolasini guruhga yuboring.",
+        "help_btn_groups": '👥 Guruhlarda',
+        # 2.2.0: /done optional; co-edit link limits and invitations.
+        "pack_created_link": "📦 To'plamingiz tayyor: https://t.me/addstickers/{pack_name}",
+        "coedit_link_expired": "Bu hammualliflik havolasining muddati tugagan. To'plam egasidan yangisini so'rang.",
+        "coedit_link_full": "Bu to'plamda egasi ruxsat bergan miqdordagi hammualliflar allaqachon bor. Egasidan chegarani oshirishni so'rang.",
+        "coedit_removed_access": '🔒 Endi "{title}" to\'plamiga qo\'sha olmaysiz: egasi sizni olib tashladi.',
+        "invites_claimed": "👥 Sizni {titles} to'plamiga qo'shishga taklif qilishdi. Ularni /mypacks da topasiz.",
+        "your_packs_shared_note": "👥 — boshqalar siz bilan ulashgan to'plamlar.",
+        "co_period_1": '1 kun',
+        "co_period_7": '1 hafta',
+        "co_period_30": '1 oy',
+        "co_period_none": 'cheklovsiz',
+        "co_valid_forever": 'Amal qiladi: muddatsiz',
+        "co_valid_until": '{date} gacha amal qiladi ({left} qoldi)',
+        "co_valid_expired": "⚠️ Muddati {date} da tugagan: yangi odam qo'shila olmaydi. Qayta ochish uchun ⏳ ni bosing yoki yangi havola yarating.",
+        "co_left_days": '{n} kun',
+        "co_left_hours": '{n} soat',
+        "co_invited_count": ' (+{n} ta @username orqali taklif qilingan)',
+        "btn_co_valid": '⏳ Havola muddati: {period}',
+        "btn_co_max": "👥 Ko'pi bilan hammualliflar: {n}",
+        "btn_co_invite": "➕ @username orqali qo'shish",
+        "btn_co_list": "📋 Kim qo'sha oladi ({n})",
+        "co_valid_set": 'Havola endi {period} amal qiladi.',
+        "co_max_set": "Ko'pi bilan {n} ta hammuallif.",
+        "btn_co_delete_off": "🗑 Hammualliflar o'chira oladi: yo'q",
+        "btn_co_delete_on": "🗑 Hammualliflar o'chira oladi: ha",
+        "co_delete_set_on": "Endi hammualliflar stikerlarni o'chira oladi: to'plamda bor stikerni yuborsa, uni olib tashlash taklif qilinadi (oxirgisi bundan mustasno).",
+        "co_delete_set_off": "Endi stikerlarni faqat siz o'chira olasiz.",
+        "co_removed": 'Olib tashlandi.',
+        "co_list_heading": '📋 "{title}" ga kim qo\'sha oladi:',
+        "co_list_invited": '• @{username} — taklif qilingan, hali botni ishlatmagan',
+        "co_list_more": '…va yana {n} ta.',
+        "co_list_empty": "Hali hech kim yo'q.",
+        "co_list_remove_hint": "Kimnidir chiqarish uchun ✖ ni bosing. Ular qo'shgan stikerlar qoladi.",
+        "invite_unavailable": "@username orqali qo'shish hozir ishlamayapti. Keyinroq urinib ko'ring yoki havoladan foydalaning.",
+        "invite_prompt": '"{title}" ga qo\'sha oladigan odamlarning @username\'larini bo\'sh joy bilan ajratib yuboring. Har biri meni keyingi safar ishlatganda — mening chatimda yoki guruhda — qo\'sha oladi. Telegram username\'i yo\'q odam faqat havola orqali qo\'shila oladi. Ishlatilmagan takliflar 30 kundan keyin o\'chadi. To\'xtatish uchun /cancel.',
+        "invite_done": '✅ Taklif qilindi: {names}.',
+        "invite_full": "Taklif qilinmadi, to'plamda {max} tadan ortiq hammuallif bo'lib qoladi: {names}. Avval 👥 bilan chegarani oshiring.",
+        "invite_bad": 'Username emas: {names}',
+        "cancel_item_invite": '"{title}" uchun @username\'lar',
+        "cancel_button_invite": '👥 Odamlarni taklif qilish',
     },
     "ru": {
         "whomade_someone": "человек, который не раскрывает своё имя",
@@ -835,7 +844,7 @@ STRINGS = {
         "topup_failed": "⚠️ Ваш платёж на {stars} ⭐ прошёл, но из-за проблемы на моей стороне ⚡ не поступили на баланс. Ничего не потеряно: владелец уже знает и начислит их вручную. Уточнить: /paysupport",
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается вам автоматически и полностью.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
         "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
+        "problem_logged_note": 'Анонимный отчёт сохранён',
         "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
         "report_send": '📨 Отправить мои данные',
         "report_cancel": '✖️ Отмена',
@@ -868,17 +877,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
-        "privacy_stored": (
-            "• ваш числовой id в Telegram и выбранный язык\n"
-            "• паки, которые вы здесь собрали: имя и название каждого, а также имя и username, "
-            "которые были у вас в тот момент\n"
-            "• кому вы дали доступ на добавление в пак и какие ссылки создали\n"
-            "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
-            "ботом хоть кто-нибудь\n"
-            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
-            "• запись о пожертвовании: сумму и платёжный id Telegram\n"
-            "• то, что бот в этот момент для вас делает — пока не закончит"
-        ),
+        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• паки, которые вы здесь собрали: имя и название каждого, а также имя и username, которые были у вас в тот момент\n• кому вы дали доступ на добавление в пак, какие ссылки создали и их ограничения, и приглашённые вами @username (в зашифрованном виде; пока человек не воспользуется ботом, не дольше 30 дней)\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• запись о пожертвовании: сумму и платёжный id Telegram\n• какие из ваших паков вы открыли и что вы пользовались ботом в группе (эта группа и вы) — чтобы /packs в группе показывал ваши открытые паки; хранится 90 дней после последнего использования там и удаляется, когда вы выходите из группы\n• то, что бот в этот момент для вас делает — пока не закончит',
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
@@ -959,61 +958,14 @@ STRINGS = {
         "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
         "cancel_button_feedback": "💬 Отзыв",
         "cancel_item_feedback": "отзыв, который я просил написать",
-        "help_brief": (
-            "Как это устроено:\n"
-            "\n"
-            "• /newpack создаёт набор стикеров: присылайте картинки, GIF, видео или стикеры, после каждого можно эмодзи, в конце /done.\n"
-            "• /addsticker добавляет в уже готовый набор; /mypacks — список наборов с кнопками: переименовать, поделиться, удалить.\n"
-            "• /import копирует стикеры из другого набора Telegram или из экспорта WhatsApp.\n"
-            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
-            "\n"
-            "Основные команды: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Все команды — в полном руководстве: кнопка ниже или /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": 'Как это устроено:\n\n• /newpack создаёт набор стикеров: присылайте картинки, GIF, видео или стикеры, после каждого можно эмодзи. Каждый сохраняется сразу.\n• /addsticker добавляет в уже готовый набор; /mypacks — список наборов с кнопками: переименовать, поделиться, удалить.\n• /import копирует стикеры из другого набора Telegram или из экспорта WhatsApp.\n• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n\nОсновные команды: /newpack · /addsticker · /mypacks · /cancel\nВсе команды — в полном руководстве: кнопка ниже или /fullhelp.\n\n',
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
         "help_page_everything": "Полное руководство: /fullhelp",
         "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
-        "helppage_newpack": (
-            "🆕 /newpack — новый набор стикеров\n"
-            "\n"
-            "1. Отправьте /newpack, затем название набора сообщением (до {title_max} символов; длиннее — обрежу). Если Telegram не примет название, начните его с буквы.\n"
-            "2. Присылайте то, что станет стикерами, по одному в сообщении: фото или картинки файлом, GIF, видео или стикеры. Набор создаётся с первым стикером — нет стикера, нет набора.\n"
-            "3. Каждый стикер получает {emoji}. Чтобы сменить, сразу после него пришлите эмодзи (до {emoji_max}): они заменят эмодзи последнего стикера.\n"
-            "4. /done, когда закончите, — я пришлю ссылку на набор. /cancel — прервать.\n"
-            "\n"
-            "Во что что превращается:\n"
-            "• Фото, картинка файлом или обычный стикер — обычный стикер, {side} px по длинной стороне.\n"
-            "• GIF, видео или видеостикер — видеостикер: {side} px, первые {seconds} с, {fps} кадров в секунду, без звука, меньше {kb} КБ. Если так ужать не выйдет, я скажу и предложу наш бот-конвертер.\n"
-            "• Анимированные стикеры (.tgs) добавить нельзя.\n"
-            "• Много сразу: набор стикеров WhatsApp (.zip или .wastickers) или /import из набора Telegram.\n"
-            "\n"
-            "Пример: /newpack, потом «Кошачьи морды», потом три фото вашей кошки, потом 😺, потом /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — добавить стикеры в ваш набор\n"
-            "\n"
-            "1. /addsticker покажет ваши наборы. Нажмите нужный, затем «➕ Добавить стикеры».\n"
-            "2. Присылайте фото, GIF, видео или стикеры — так же, как для нового набора. Каждый получает {emoji}; эмодзи, присланные сразу после, его заменят.\n"
-            "3. /done, когда закончите.\n"
-            "• Если прислать стикер, который уже есть в наборе, он из набора уберётся. Если он последний, я сначала спрошу — это удалит весь набор.\n"
-            "• В списке только ваши наборы, созданные через этого бота. Ещё нет? /newpack.\n"
-            "• /mypacks показывает тот же список. В меню набора его можно ещё переименовать, дать кому-то редактировать вместе с вами или удалить.\n"
-            "\n"
-            "Пример: /addsticker, нажмите «Кошачьи морды», затем «➕ Добавить стикеры», пришлите новое фото, потом /done."
-        ),
-        "helppage_import": (
-            "📥 /import — много стикеров сразу из другого набора\n"
-            "\n"
-            "Работает, пока вы наполняете набор: после /newpack и названия или после «➕ Добавить стикеры».\n"
-            "• /import и ссылка на открытый набор Telegram (t.me/addstickers/…) или его имя копирует его стикеры в ваш набор вместе с эмодзи. До {max} за раз.\n"
-            "• Анимированные стикеры (.tgs) пропускаются, и я скажу, сколько.\n"
-            "• Из WhatsApp: вместо этого пришлите файл набора .zip или .wastickers.\n"
-            "• Дальше присылайте ещё или /done, чтобы закончить.\n"
-            "\n"
-            "Пример: /newpack, потом «Избранное», потом /import t.me/addstickers/SomePack"
-        ),
+        "helppage_newpack": '🆕 /newpack — новый набор стикеров\n\n1. Отправьте /newpack, затем название набора сообщением (до {title_max} символов; длиннее — обрежу). Если Telegram не примет название, начните его с буквы.\n2. Присылайте то, что станет стикерами, по одному в сообщении: фото или картинки файлом, GIF, видео или стикеры. Набор создаётся с первым стикером — нет стикера, нет набора.\n3. Каждый стикер получает {emoji}. Чтобы сменить, сразу после него пришлите эмодзи (до {emoji_max}): они заменят эмодзи последнего стикера.\n4. Это всё: каждый стикер сохраняется сразу, а в ответе на первый — ссылка на набор. /cancel — прервать.\n\nВо что что превращается:\n• Фото, картинка файлом или обычный стикер — обычный стикер, {side} px по длинной стороне.\n• GIF, видео или видеостикер — видеостикер: {side} px, первые {seconds} с, {fps} кадров в секунду, без звука, меньше {kb} КБ. Если так ужать не выйдет, я скажу и предложу наш бот-конвертер.\n• Анимированные стикеры (.tgs) добавить нельзя.\n• Много сразу: набор стикеров WhatsApp (.zip или .wastickers) или /import из набора Telegram.\n\nПример: /newpack, потом «Кошачьи морды», потом три фото вашей кошки, потом 😺.',
+        "helppage_addsticker": '➕ /addsticker — добавить стикеры в ваш набор\n\n1. /addsticker покажет ваши наборы. Нажмите нужный, затем «➕ Добавить стикеры».\n2. Присылайте фото, GIF, видео или стикеры — так же, как для нового набора. Каждый получает {emoji}; эмодзи, присланные сразу после, его заменят.\n• Если прислать стикер, который уже есть в наборе, я спрошу, добавить его ещё раз или убрать. Если он последний, спрошу ещё раз — его удаление удалит весь набор. В наборе, которым с вами поделились, убрать предложу, только если владелец разрешил соавторам удалять.\n• В списке только ваши наборы, созданные через этого бота. Ещё нет? /newpack.\n• /mypacks показывает тот же список. В меню набора его можно ещё переименовать, дать кому-то редактировать вместе с вами или удалить.\n\nПример: /addsticker, нажмите «Кошачьи морды», затем «➕ Добавить стикеры», пришлите новое фото.',
+        "helppage_import": '📥 /import — много стикеров сразу из другого набора\n\nРаботает, пока вы наполняете набор: после /newpack и названия или после «➕ Добавить стикеры».\n• /import и ссылка на открытый набор Telegram (t.me/addstickers/…) или его имя копирует его стикеры в ваш набор вместе с эмодзи. До {max} за раз.\n• Анимированные стикеры (.tgs) пропускаются, и я скажу, сколько.\n• Из WhatsApp: вместо этого пришлите файл набора .zip или .wastickers.\n• Дальше присылайте ещё, когда захотите.\n\nПример: /newpack, потом «Избранное», потом /import t.me/addstickers/SomePack',
         "privacy_feedback_heading": "Если вы отправляете /feedback:",
         "privacy_feedback": (
             "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
@@ -1030,7 +982,7 @@ STRINGS = {
             "Здравствуйте! Я превращаю ваши изображения, GIF, видео и стикеры в наборы "
             "стикеров Telegram.\n\n"
         ),
-        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/done - закончить редактирование набора\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/done - закрыть заполняемый набор и получить ссылку (необязательно: всё сохраняется сразу)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "whomade_usage": "Использование: /whomade <имя набора или ссылка t.me/addstickers>",
         "whomade_not_found": (
             "У меня нет записи об этом наборе — либо он не был создан через этого "
@@ -1040,12 +992,7 @@ STRINGS = {
         "coedit_link_invalid": "Эта ссылка для совместного редактирования недействительна — возможно, владелец набора сбросил её.",
         "coedit_pack_gone": "Похоже, этого набора больше не существует.",
         "coedit_own_pack": "Это ваш собственный набор — используйте /mypacks, чтобы им управлять.",
-        "coedit_joined_intro": (
-            "Вас добавили как соредактора набора «{title}»! Отправляйте изображения, "
-            "GIF, видео или статические/видео-стикеры, чтобы добавить их — эмодзи по "
-            "умолчанию 😭, отправьте эмодзи сразу после, чтобы переметить последний. "
-            "По завершении — /done."
-        ),
+        "coedit_joined_intro": 'Вас добавили как соредактора набора «{title}»! Отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их — эмодзи по умолчанию 😭, отправьте эмодзи сразу после, чтобы переметить последний. Каждый сохраняется сразу; набор найдётся в /mypacks.',
         "btn_new_pack": "➕ Новый набор",
         "btn_my_packs": "📁 Мои наборы",
         "btn_help": "❓ Помощь",
@@ -1059,16 +1006,7 @@ STRINGS = {
         "btn_rename": "✏️ Переименовать",
         "btn_coedit": "👥 Совместное редактирование",
         "btn_delete_pack": "🗑️ Удалить набор",
-        "coedit_count_some": "Пока {count} соредактор(ов).",
-        "coedit_count_none": "Пока нет соредакторов.",
-        "coedit_message": (
-            "👥 Совместное редактирование «{title}»\n\n"
-            "Ссылка: {link}\n\n"
-            "Поделитесь ей — любой, кто её откроет, сможет добавлять стикеры в этот "
-            "набор через бота (они всё равно будут добавляться от вашего имени).\n\n"
-            "{editors_line}\n\n"
-            "Сбросьте ссылку, чтобы она больше не давала доступ новым людям."
-        ),
+        "coedit_message": '👥 Совместное редактирование «{title}»\n\nСсылка: {link}\n{valid_line}\nСоавторы: {editors} из максимум {max}{invited}\n\nКто откроет ссылку, пока она действует и пока соавторов меньше {max}, сможет добавлять стикеры в этот набор (они добавляются от вашего имени). Удалять стикеры можете только вы, пока не разрешите это кнопкой 🗑 ниже. Для списка, в который больше никто не попадёт, добавьте людей по @username. Новая ссылка отключает старую; уже добавленные остаются, пока вы не уберёте их в 📋.',
         "btn_reset_link": "🔄 Сбросить ссылку",
         "only_owner_coedit": "Совместным редактированием может управлять только владелец набора.",
         "link_reset_confirm": "Ссылка сброшена — старая больше не работает.",
@@ -1093,23 +1031,13 @@ STRINGS = {
         "newpack_title_prompt": "Каким будет название набора?",
         "title_empty": "Это пусто — отправьте настоящее название для набора.",
         "title_truncated": "Telegram ограничивает название набора 64 символами — используется «{title}».",
-        "editing_intro_new": (
-            "Отправляйте изображения, GIF, видео или статические/видео-стикеры — "
-            "каждый добавляется с эмодзи по умолчанию 😭. Отправьте эмодзи сразу "
-            "после, чтобы переметить последний. По завершении — /done."
-        ),
+        "editing_intro_new": 'Отправляйте изображения, GIF, видео или статические/видео-стикеры — каждый добавляется с эмодзи по умолчанию 😭 и сразу сохраняется. Отправьте эмодзи сразу после, чтобы переметить последний.',
         "no_packs_for_add": "У вас пока нет наборов. Сначала используйте /newpack.",
         "pick_pack_prompt": "Какой набор? Нажмите на него, затем «➕ Добавить стикеры».",
-        "editing_intro_add": (
-            "Отправляйте изображения, GIF, видео или статические/видео-стикеры, "
-            "чтобы добавить их — эмодзи по умолчанию 😭, отправьте эмодзи сразу "
-            "после, чтобы переметить последний. По завершении — /done.\n\n"
-            "Совет: если отправить стикер, который уже есть в этом наборе, он будет "
-            "удалён, а не добавлен повторно."
-        ),
+        "editing_intro_add": 'Отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их — эмодзи по умолчанию 😭, отправьте эмодзи сразу после, чтобы переметить последний. Каждый сохраняется сразу.\n\nСовет: если отправить стикер, который уже есть в этом наборе, я спрошу, добавить его ещё раз или убрать.',
+        "editing_intro_shared": 'Отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их — эмодзи по умолчанию 😭, отправьте эмодзи сразу после, чтобы переметить последний. Каждый сохраняется сразу.\n\nСовет: стикер, который уже есть в этом наборе, не удаляется — я спрошу, добавить ли его ещё раз. Удалять стикеры может только владелец набора.',
         "status_verb_creating": "Создание",
         "status_verb_editing": "Редактирование",
-        "status_line": "📝 {verb} «{title}» — за эту сессию добавлено {count} стикер(ов)",
         "status_default_title": "этот набор",
         "btn_delete_pack_yes": "🗑️ Да, удалить набор",
         "btn_cancel": "Отмена",
@@ -1119,11 +1047,11 @@ STRINGS = {
         ),
         "remove_failed": "⚠️ Не удалось удалить этот стикер: {error}",
         "remove_success": "🗑️ Этот стикер уже был в наборе — я его удалил.",
+        "remove_last_owner_only": 'Это последний стикер в наборе. Его удаление удалит весь набор, а это может сделать только владелец.',
         "keep_pack": "Хорошо, набор оставлен как есть.",
         "pack_deleted_empty": "🗑️ Набор удалён (в нём не осталось стикеров).",
         "pack_deleted_note": "❌ Набор удалён.",
         "image_process_failed": "Не удалось обработать это изображение: {error}",
-        "added_default_emoji": "Добавлено {emoji} — отправьте эмодзи, чтобы переметить.",
         "last_attempt_failed": "⚠️ Последняя попытка не удалась — отправьте другой файл, чтобы попробовать снова, или /cancel.",
         "converting_video": "Преобразование в видео-стикер...",
         "video_convert_failed_redirect": (
@@ -1132,11 +1060,6 @@ STRINGS = {
             "отправьте тот же файл туда 👇"
         ),
         "video_convert_generic_failed": "Не удалось это преобразовать: {error}",
-        "added_video_default_emoji": (
-            "Добавлено как видео-стикер с эмодзи {emoji} по умолчанию. Отправьте "
-            "эмодзи сейчас, чтобы переметить, ещё одно изображение/GIF/видео, чтобы "
-            "продолжить, или /done, чтобы закончить."
-        ),
         "animated_not_supported": (
             "Анимированные (Lottie/.tgs) стикеры не поддерживаются — отправьте "
             "вместо этого статичное изображение, GIF/видео или "
@@ -1152,7 +1075,7 @@ STRINGS = {
         "import_summary_head": "Импортировано {added} стикер(ов) из «{source}»",
         "import_summary_skipped": ", пропущено {skipped} неподдерживаемых (анимированные/Lottie)",
         "import_summary_failed": ", {failed} не удалось",
-        "import_summary_tail": ". Можете отправлять ещё, или /done, чтобы закончить.",
+        "import_summary_tail": '. Присылайте ещё, когда захотите.',
         "done_standalone_hint": (
             "Нечего завершать — сейчас вы не редактируете набор. "
             "Начните новый через /newpack или нажмите «Добавить стикеры» "
@@ -1165,7 +1088,6 @@ STRINGS = {
         ),
         "whatsapp_reading": "Чтение набора стикеров WhatsApp...",
         "whatsapp_summary_head": "Импортировано {added} стикер(ов) из набора WhatsApp",
-        "not_emoji_message": "Отправьте изображение/GIF/видео/стикер, чтобы добавить, эмодзи, чтобы переметить последний, или /done.",
         "no_sticker_to_tag": "Сначала добавьте стикер, затем отправьте эмодзи, чтобы его пометить.",
         "retagged_success": "Переметено как {emojis}.",
         "retag_failed": "Не удалось обновить эмодзи: {error}",
@@ -1222,6 +1144,78 @@ STRINGS = {
         ),
         "import_bad_zip": "Это не похоже на настоящий файл .zip/.wastickers.",
         "import_zip_no_images": "Внутри этого zip-файла не найдено пригодных изображений.",
+        # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
+        "status_line_open": '📝 {verb} «{title}»',
+        "sticker_added_to": '✅ Добавлено в «{title}» как №{n} с {emoji}. Ответьте на это сообщение эмодзи, чтобы его поменять.',
+        "emoji_target_unknown": 'Я уже не могу понять, какой это стикер. Ответьте лучше на сам стикер.',
+        "emoji_not_ours": 'Этот стикер не из пака, созданного этим ботом, поэтому изменить его я не могу.',
+        "emoji_usage": 'Ответьте на стикер или на моё сообщение «Добавлено» командой /emoji с эмодзи — например, /emoji 😎',
+        "emoji_send_reply": 'Ответьте на это сообщение новым эмодзи для этого стикера.',
+        "already_in_pack": 'Этот стикер уже есть в «{title}». Добавить его ещё раз?\nУдалять стикеры из набора может только его владелец.',
+        "already_in_pack_owner": 'Этот стикер уже есть в «{title}». Добавить его ещё раз или убрать из набора?',
+        "already_in_pack_group": 'Этот стикер уже есть в «{title}». Добавить его ещё раз?\nВ группе ничего не удаляется: удалять стикеры набора может только его владелец.',
+        "btn_add_again": '➕ Добавить ещё раз',
+        "btn_dont_add": '✖ Не добавлять',
+        "btn_remove_it": '🗑 Убрать',
+        "remove_not_allowed": 'Удалять стикеры из этого набора вы не можете: это может только его владелец.',
+        "dup_not_added": 'Хорошо, не добавляю.',
+        "dup_expired": 'Этот вопрос устарел. Пришлите стикер ещё раз.',
+        "dup_not_yours": 'Ответить может только тот, кто его прислал.',
+        "btn_pack_private": '🔒 Личный · нажмите, чтобы открыть в группах',
+        "btn_pack_public": '🌐 Открыт в группах · нажмите, чтобы сделать личным',
+        "pack_now_public": '🌐 «{title}» теперь открыт. В группах, где вы мной пользуетесь, его видят в /packs и могут в него добавлять.',
+        "pack_now_private": '🔒 «{title}» теперь личный. Добавлять в него можете только вы и соавторы.',
+        "group_hello": '👋 Привет! Я делаю стикерпаки для Telegram.\n\nЗдесь, в группе:\n• /packs — паки, в которые можно добавлять здесь\n• ответьте на картинку, GIF, видео или стикер командой /add 2 (номер из /packs) или /add со ссылкой на пак\n• ответьте на стикер командой /emoji 😎, чтобы поменять его эмодзи (на моё «Добавлено» достаточно ответить самим эмодзи)\n\nПаки личные, пока владелец не откроет их (у меня в чате: /mypacks → пак → 🔒). Чтобы поделиться личным паком, отправьте сюда ссылку для соавторов: кто её откроет, сможет добавлять.',
+        "group_packs_head": '📦 Паки, в которые можно добавлять здесь:',
+        "group_packs_tail": 'Ответьте на картинку командой /add и номером.',
+        "group_packs_none": 'Открытых паков здесь пока нет. Чтобы пак появился, владелец открывает его у меня в чате (/mypacks → пак → 🔒) и один раз отправляет здесь /packs. Можно и отправить сюда ссылку для соавторов личного пака.',
+        "group_add_need_reply": 'Ответьте командой /add на картинку, GIF, видео или стикер.',
+        "group_add_which": 'В какой пак? /add и его номер из /packs или ссылка.',
+        "group_pack_unknown": 'Я не знаю этот пак. Используйте номер из /packs или ссылку t.me/addstickers на пак, созданный мной.',
+        "group_no_access": '🔒 У вас нет доступа к «{title}». Владелец может открыть пак или отправить сюда ссылку для соавторов.',
+        "group_adding": '⏳ Добавляю...',
+        "helppage_groups": '👥 В группах\n\nДобавьте меня в группу, затем:\n• /packs показывает пронумерованные паки, в которые там можно добавлять.\n• Ответьте на картинку, GIF, видео или стикер командой /add 2 (номер) или /add со ссылкой на пак. Просто /add — в пак, в который вы добавляли там в последний раз. /add на стикер, который уже есть в паке, спросит, добавить ли его ещё раз: в группе ничего не удаляется.\n• Чтобы поменять эмодзи стикера, ответьте на него командой /emoji 😎; на моё «Добавлено» достаточно ответить самим эмодзи. (В группе я реагирую только на команды и на ответы на мои сообщения.) У меня в чате хватит и одного эмодзи в ответ на любой стикер ваших паков.\n\nКто может добавлять: владелец пака и соавторы — везде. В открытые паки (/mypacks → пак → 🔒/🌐) может добавлять любой участник группы, где мной пользуется владелец или соавтор. Личные паки (по умолчанию) в списке не видны; чтобы пустить людей, отправьте в группу ссылку для соавторов.',
+        "help_btn_groups": '👥 В группах',
+        # 2.2.0: /done optional; co-edit link limits and invitations.
+        "pack_created_link": '📦 Набор создан: https://t.me/addstickers/{pack_name}',
+        "coedit_link_expired": 'Срок этой ссылки для соавторов истёк. Попросите у владельца набора новую.',
+        "coedit_link_full": 'В этом наборе уже столько соавторов, сколько разрешил владелец. Попросите его поднять предел.',
+        "coedit_removed_access": '🔒 Вы больше не можете добавлять в «{title}»: владелец убрал вас.',
+        "invites_claimed": '👥 Вас пригласили добавлять в {titles}. Они в /mypacks.',
+        "your_packs_shared_note": '👥 — наборы, которыми с вами поделились.',
+        "co_period_1": '1 день',
+        "co_period_7": '1 неделя',
+        "co_period_30": '1 месяц',
+        "co_period_none": 'без срока',
+        "co_valid_forever": 'Действует: без срока',
+        "co_valid_until": 'Действует до {date} (осталось {left})',
+        "co_valid_expired": '⚠️ Истекла {date}: новые люди не присоединятся. Нажмите ⏳, чтобы открыть снова, или сделайте новую ссылку.',
+        "co_left_days": '{n} дн.',
+        "co_left_hours": '{n} ч',
+        "co_invited_count": ' (+{n} приглашено по @username)',
+        "btn_co_valid": '⏳ Ссылка действует: {period}',
+        "btn_co_max": '👥 Максимум соавторов: {n}',
+        "btn_co_invite": '➕ Добавить по @username',
+        "btn_co_list": '📋 Кто может добавлять ({n})',
+        "co_valid_set": 'Теперь ссылка действует: {period}.',
+        "co_max_set": 'Не больше {n} соавторов.',
+        "btn_co_delete_off": '🗑 Соавторы могут удалять: нет',
+        "btn_co_delete_on": '🗑 Соавторы могут удалять: да',
+        "co_delete_set_on": 'Теперь соавторы могут удалять стикеры: если прислать стикер, который уже есть в наборе, я предложу его убрать (кроме последнего).',
+        "co_delete_set_off": 'Теперь удалять стикеры можете только вы.',
+        "co_removed": 'Убрано.',
+        "co_list_heading": '📋 Кто может добавлять в «{title}»:',
+        "co_list_invited": '• @{username} — приглашён, ещё не заходил ко мне',
+        "co_list_more": '…и ещё {n}.',
+        "co_list_empty": 'Пока никого.',
+        "co_list_remove_hint": 'Нажмите ✖, чтобы убрать человека. Добавленные им стикеры останутся.',
+        "invite_unavailable": 'Добавление по @username сейчас недоступно. Попробуйте позже или используйте ссылку.',
+        "invite_prompt": 'Отправьте @username людей, которые смогут добавлять в «{title}», через пробел. Каждый сможет добавлять, как только в следующий раз воспользуется мной — у меня в чате или в группе. Человек без username в Telegram может войти только по ссылке. Неиспользованные приглашения удаляются через 30 дней. /cancel — отмена.',
+        "invite_done": '✅ Приглашены: {names}.',
+        "invite_full": 'Не приглашены — соавторов стало бы больше {max}: {names}. Сначала поднимите предел кнопкой 👥.',
+        "invite_bad": 'Это не username: {names}',
+        "cancel_item_invite": '@username для «{title}»',
+        "cancel_button_invite": '👥 Приглашение людей',
     },
 }
 
@@ -1281,7 +1275,8 @@ COMMAND_MENU = {
         "addsticker": "To'plamingizga stiker qo'shish",
         "mypacks": "To'plamlaringiz",
         "import": "Boshqa to'plamdan stikerlarni ko'chirish",
-        "done": "Tahrirlayotgan to'plamni yakunlash",
+        "done": "To'ldirilayotgan to'plamni yopish (ixtiyoriy)",
+        "emoji": "Stikerga javob: emojisini o'zgartirish",
         "whomade": "To'plamni kim yaratgan — stikerini yuboring",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
@@ -1299,7 +1294,8 @@ COMMAND_MENU = {
         "addsticker": "Добавить стикеры в ваш пак",
         "mypacks": "Ваши паки",
         "import": "Скопировать стикеры из другого пака",
-        "done": "Завершить пак, который вы редактируете",
+        "done": "Закрыть пак, который вы заполняете (необязательно)",
+        "emoji": "Ответ на стикер: сменить эмодзи",
         "whomade": "Кто сделал пак — пришлите его стикер",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
@@ -1311,4 +1307,12 @@ COMMAND_MENU = {
         "terms": "Для чего можно пользоваться ботом",
         "deletemydata": "Удалить всё, что я о вас храню",
     },
+}
+
+# The group-chat menu (group_mode.GROUP_COMMANDS), in the other two languages.
+GROUP_COMMAND_MENU = {
+    "uz": {"packs": "Bu yerda qo'sha oladigan to'plamlar", "add": "Rasmga javob: to'plamga qo'shish",
+           "emoji": "Stikerga javob: emojisini o'zgartirish", "help": "Guruhda qanday ishlayman"},
+    "ru": {"packs": "Паки, в которые можно добавлять здесь", "add": "Ответ на картинку: добавить в пак",
+           "emoji": "Ответ на стикер: сменить эмодзи", "help": "Как я работаю в группе"},
 }

@@ -4,20 +4,23 @@ Not a full grapheme-cluster-aware emoji parser (ZWJ sequences like family emoji
 will split into parts) -- good enough for single emoji / simple combos, which is
 the common case for tagging stickers.
 """
-import re
+import unicodedata
 
 DEFAULT_EMOJI = "\U0001F62D"  # 😭
-_HAS_LETTER_OR_DIGIT = re.compile(r"[A-Za-z0-9]")
 _VARIATION_SELECTOR = "\uFE0F"
 MAX_LEN = 16
 MAX_EMOJI_PER_STICKER = 20
 
 
 def looks_like_emoji_message(text: str) -> bool:
+    """Only emoji: no letters or digits of any script ("ok", "да" and "rahmat" are words,
+    not emoji), and at least one symbol -- or a character drawn as emoji, which the variation
+    selector after it says (‼️, ↔️). Punctuation alone ("?", "...") is not emoji either.
+    Since 2.2.0 this also decides whether a reply in a group is meant to retag a sticker."""
     text = text.strip()
-    if not text or len(text) > MAX_LEN:
+    if not text or len(text) > MAX_LEN or any(c.isalnum() for c in text):
         return False
-    return not _HAS_LETTER_OR_DIGIT.search(text)
+    return _VARIATION_SELECTOR in text or any(unicodedata.category(c) == "So" for c in text)
 
 
 def split_emoji(text: str) -> list[str]:

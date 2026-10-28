@@ -802,6 +802,45 @@ def _active_by_day(conn, bots: "list[tuple[str, str]]", everyone: "list[str]", f
     return found
 
 
+def people_since(schemas: "list[str]", since) -> "tuple[int, bool]":
+    """(unique people across `schemas` with activity since `since`, whether that is complete).
+    For the nightly report's "last 24 hours", which is a window and not whole days. Each real
+    person once: AnonBot's pseudonyms are opened as in _active_by_day. Without the data key they
+    cannot be, so they are left out and the answer says it is short. Nothing is stored."""
+    import family_link
+    import vault
+    if not schemas:
+        return 0, True
+    with_key = family_link.vault_usable()
+    not_people = set(family_link._GIFT_NOT_PEOPLE)
+    people: set = set()
+    complete = True
+    with pooled_read() as conn:
+        sealed = {row[0] for row in conn.execute(
+            "SELECT table_schema FROM information_schema.columns WHERE table_schema = ANY(%s) "
+            "AND table_name = 'user_settings' AND column_name = 'user_sealed'", (schemas,),
+        ).fetchall()}
+        for schema in sorted(_existing_tables(conn, schemas, "activity_events")):
+            seen = {row[0] for row in conn.execute(
+                f'SELECT DISTINCT user_id FROM "{schema}".activity_events WHERE occurred_at >= %s',
+                (since,),
+            ).fetchall()}
+            pseudonyms = {u for u in seen if vault.is_pseudonym(u)}
+            real = {}
+            if pseudonyms and schema in sealed:
+                if with_key:
+                    # One that does not open has no seal beside it any more: somebody who
+                    # has since erased their data, and is not counted, rightly.
+                    real = _real_ids_of(conn, schema, pseudonyms)
+                else:
+                    complete = False
+            for user_id in seen:
+                person = real.get(user_id, user_id)
+                if person > 0 and person not in not_people:
+                    people.add(person)
+    return len(people), complete
+
+
 def _counts(by_day: dict, days) -> dict:
     union: dict = {}
     for day in days:

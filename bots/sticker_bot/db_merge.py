@@ -54,6 +54,11 @@ PLAIN_TABLES = [
     {"name": "user_settings", "key": ("user_id",),
      "cols": ["user_id", "language"]},
 ]
+# 2.2.0's additions are left out on purpose, and the source may predate them:
+# a merged pack arrives private (packs.public's default) with a link that has
+# the default limits from the moment it is merged; group_members is, like the
+# activity below, only who was seen lately; and pack_invites last 30 days.
+#
 # activity_events (per-update telemetry backing /status's active-user counts)
 # is deliberately NOT merged here -- it's high-volume, has no real natural
 # key (occurred_at is a timestamp, not an identity), and has zero value

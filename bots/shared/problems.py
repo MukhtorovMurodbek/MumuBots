@@ -34,9 +34,10 @@ MARK = "🆔 "
 CODE_RE = re.compile(r"^[A-Z]{2}(?:-[A-Z0-9]+)+$")
 INCIDENT_RE = re.compile(r"^[A-HJ-NP-Z2-9]{6}$")
 _INCIDENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-# At the very end of a message, after a blank line -- possibly inside closing
+# At the very end of a message, on a line of its own (after a blank line, or
+# straight under the short "report saved" note) -- possibly inside closing
 # HTML tags, for the policy messages that are sent as HTML.
-_AT_END = re.compile(r"\n\n🆔 ([A-Z]{2}(?:-[A-Z0-9]+)+)(?:</[a-z]+>)*\s*$")
+_AT_END = re.compile(r"\n\n?🆔 ([A-Z]{2}(?:-[A-Z0-9]+)+)(?:</[a-z]+>)*\s*$")
 
 EVERY_PUBLIC_BOT = "every public bot"
 

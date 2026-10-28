@@ -1,13 +1,15 @@
-"""The last few downloads (PER_USER, default 3), each kept for LIFE_SECONDS (default
-30 minutes), so the buttons under them and the same link sent again are answered
+"""The last download (PER_USER, default 1), kept for LIFE_SECONDS (default 10
+minutes), so the buttons under it and the same link sent again are answered
 without fetching the post a second time.
 
 What the owner asked (2026-10-12): after a download is delivered, keep the files a
 few minutes; if the person taps the button under it ("get it as a file", "get it
 compressed") or sends the same link again, send the kept files instead of going to
 the site again; delete them as soon as the person sends a different link; every
-re-use starts the clock again. LEGAL.md and /privacy say so. (Since 2.2.0 up to
-PER_USER deliveries are kept per person, and another link no longer drops them.)
+re-use starts the clock again. LEGAL.md and /privacy say so. (2.2.0 keeps up to
+PER_USER deliveries per person, which another link does not drop; the owner set it to
+the last one, for 10 minutes, on 2026-10-28 -- so with the default, a different link
+pushes the previous delivery out, as it did before 2.2.0.)
 
 Entries are per person, keyed by (platform, url) exactly as _resolve_and_send was
 given them. It holds the files and nothing else: no link text outside the key, no
@@ -66,7 +68,7 @@ def _env_int(name: str, default: int, unreadable: "int | None" = None) -> int:
 # How long a delivery is kept, from the last time it was used. 0: no cache at all.
 # Something that is not a whole number ("off") is 0 too, not the default: whoever
 # typed it meant no.
-LIFE_SECONDS = _env_int("DBOT_CACHE_SECONDS", 1800, unreadable=0)
+LIFE_SECONDS = _env_int("DBOT_CACHE_SECONDS", 600, unreadable=0)
 # However often it is used, a kept delivery goes this long after it was kept. The
 # terms promise that a post removed at the platform stops being sent within 12 hours
 # (sent_files.CONFIRM_HOURS for the file-id store); every copy of the link restarts
@@ -77,7 +79,7 @@ MAX_LIFE_SECONDS = 12 * 60 * 60
 ENTRY_MAX_MB = _env_int("DBOT_CACHE_ENTRY_MAX_MB", 100)
 TOTAL_MAX_MB = _env_int("DBOT_CACHE_MAX_MB", 400)
 # How many deliveries one person may have kept at once; the least recently used goes first.
-PER_USER = max(1, _env_int("DBOT_CACHE_PER_USER", 3))
+PER_USER = max(1, _env_int("DBOT_CACHE_PER_USER", 1))
 
 # A person's latest link is remembered this long, or until they send another, even
 # when the cache's own life is shorter: a link that waited for a slot and then

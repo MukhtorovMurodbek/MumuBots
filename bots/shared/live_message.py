@@ -83,8 +83,9 @@ def note_incoming(chat_id: int, message_id: int) -> None:
 
 
 def note_update(update) -> None:
-    """Called for every update, from the same place each bot already counts
-    active users (track_activity, group=-1, before any real handler).
+    """Called for every update from a private chat, from the same place each
+    bot already counts active users (track_activity, before any real handler).
+    Not for group chats, where a progress message is edited where it is.
 
     Deliberately only update.message: a callback query carries the *bot's*
     own message -- the one holding the button that was tapped -- and counting

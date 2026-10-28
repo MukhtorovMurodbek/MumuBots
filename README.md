@@ -2,9 +2,11 @@
 
 A family of five Telegram bots that share one codebase, one Docker image and one Postgres database:
 
-- **StickerBot**: turns pictures, GIFs, videos and other stickers into Telegram sticker packs.
+- **StickerBot**: turns pictures, GIFs, videos and other stickers into Telegram sticker packs, in a private chat or
+  in a group (reply to a picture with `/add`).
 - **ConvertBot**: converts files between formats: images, RAW photos, documents, spreadsheets, archives, video, and text recognition (OCR).
-- **DownloaderBot**: downloads media from Instagram, TikTok, Twitter/X, Pinterest and Reddit links.
+- **DownloaderBot**: downloads media from Instagram, TikTok, Twitter/X, Pinterest and Reddit links, in a private chat
+  or, added to a group, from the links posted there.
 - **AnonBot**: anonymous-question inboxes.
 - **ManagerBot**: the operator's control panel: status, usage, problem reports, broadcasts, backups, restarts.
 

@@ -13,3 +13,4 @@ scripts
 docs
 *.md
 .railway
+.pytest_cache
