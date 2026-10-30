@@ -133,6 +133,7 @@ from db import (
     record_relay_and_touch,
     record_anon_relays,
     mark_follower_opened,
+    cancel_unopened_conversation,
     regenerate_anon_link,
     set_anon_blocked,
     set_anon_link_paused,
@@ -360,6 +361,14 @@ def _follower_keyboard(conversation_id: int, lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _follow_cancel_keyboard(conversation_id: int, lang: str) -> InlineKeyboardMarkup:
+    """Under the line a link tap opens with, for a guest who changes their
+    mind. It comes off once their first message has gone."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(i18n.t(lang, "follow_cancel_button"), callback_data=f"aq_fcancel:{conversation_id}")]]
+    )
+
+
 # ---------- /start (also handles someone tapping an inbox link: /start q_<token>) ----------
 
 async def _continue_start(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, args):
@@ -544,6 +553,7 @@ async def start_follow_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         # that is not supposed to reach a guest stays one edit away from
         # doing so again.
         text=i18n.t(lang, "follow_link_started"),
+        reply_markup=_follow_cancel_keyboard(conv["id"], lang),
     )
     live_message.bump(opening.chat_id, opening.message_id)
     # Registered as a relay target so the guest's *first* message has
@@ -554,6 +564,28 @@ async def start_follow_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await asyncio.to_thread(
         record_anon_relays, follower.id, [opening.message_id], conv["id"]
     )
+
+
+async def follow_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The opening line's Cancel button. The line changes at once; the
+    conversation is taken away behind it, and if a first message beat the tap
+    to it the line is put back as it was."""
+    query = update.callback_query
+    conversation_id = int(query.data.split(":", 1)[1])
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    await query.answer()
+    _, cancelled = await asyncio.gather(
+        query.edit_message_text(i18n.t(lang, "follow_link_cancelled")),
+        asyncio.to_thread(cancel_unopened_conversation, conversation_id, update.effective_user.id),
+        return_exceptions=True,
+    )
+    if cancelled is not True:
+        if isinstance(cancelled, Exception):
+            logger.error("Cancelling conversation %s failed: %r", conversation_id, cancelled)
+        try:
+            await query.edit_message_text(i18n.t(lang, "follow_link_started"))
+        except BadRequest:
+            pass
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1500,12 +1532,18 @@ async def _deliver_follower_message(update: Update, context: ContextTypes.DEFAUL
         sent[-1].message_id, message.message_id,
     )
 
+    opening_line = None
     if active.get("follower_first_msg_at") is None:
-        await asyncio.to_thread(mark_follower_opened, active["id"])
+        opening_line = await asyncio.to_thread(mark_follower_opened, active["id"], message.chat_id)
 
     # One confirmation per album, not one per photo.
     if not quiet:
         await message.reply_text(i18n.t(follower_lang, "sent_confirmation"))
+    if opening_line:
+        try:
+            await context.bot.edit_message_reply_markup(message.chat_id, opening_line, reply_markup=None)
+        except BadRequest:
+            pass
     # No donation nudge on this side. A guest did not choose this bot -- they
     # tapped somebody's link -- and asking them to fund it is asking the
     # wrong person. The owner is nudged instead, once per conversation; see
@@ -2192,6 +2230,7 @@ def main():
     app.add_handler(CallbackQueryHandler(archive_command_callback, pattern=r"^aq_archcmd:"))
     app.add_handler(CallbackQueryHandler(conversation_jump_callback, pattern=r"^aq_jump:"))
     app.add_handler(CallbackQueryHandler(reply_button_callback, pattern=r"^aq_reply:"))
+    app.add_handler(CallbackQueryHandler(follow_cancel_callback, pattern=r"^aq_fcancel:"))
     app.add_handler(CallbackQueryHandler(block_callback, pattern=r"^aq_block:"))
     app.add_handler(CallbackQueryHandler(unblock_from_conversation_callback, pattern=r"^aq_unblockc:"))
     app.add_handler(CallbackQueryHandler(unblock_from_list_callback, pattern=r"^aq_unblockg:"))

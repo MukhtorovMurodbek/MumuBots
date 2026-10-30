@@ -1330,16 +1330,52 @@ def record_relay_and_touch(
         conn.commit()
 
 
-def mark_follower_opened(conversation_id: int) -> None:
+def mark_follower_opened(conversation_id: int, chat_id: int) -> int | None:
     """Records that the guest has now sent their opening message, which is
-    what spends this conversation's one exemption from the reply rule."""
+    what spends this conversation's one exemption from the reply rule.
+
+    Returns the conversation's opening line in the guest's chat (the smallest
+    relay id there, as in first_relay_message), so its Cancel button can come
+    off -- answered in the same round trip rather than a second one."""
     with pooled() as conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE anon_conversations SET follower_first_msg_at = %s "
-            "WHERE id = %s AND follower_first_msg_at IS NULL",
-            (datetime.now(timezone.utc).isoformat(), conversation_id),
+            "WHERE id = %s AND follower_first_msg_at IS NULL "
+            "RETURNING (SELECT min(message_id) FROM anon_relay "
+            "           WHERE chat_id = %s AND conversation_id = %s)",
+            (datetime.now(timezone.utc).isoformat(), conversation_id,
+             vault.pseudonym(chat_id), conversation_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row[0] if row else None
+
+
+def cancel_unopened_conversation(conversation_id: int, follower_user_id: int) -> bool:
+    """The Cancel button under the line a link tap opens with. Only a
+    conversation nothing was said in can be cancelled, and then it goes
+    entirely: the row, the opening line's relay row (so replying to the
+    "Cancelled" line sends nothing) and the routing state (so the next
+    un-replied message is not taken as an opening one). The owner was never
+    told about it, so there is nothing on their side to undo. Returns False
+    when something was already sent."""
+    with pooled() as conn:
+        cur = conn.execute(
+            "DELETE FROM anon_conversations "
+            "WHERE id = %s AND follower_user_id = %s AND follower_first_msg_at IS NULL "
+            "AND last_follower_msg_id IS NULL AND last_owner_msg_id IS NULL",
+            (conversation_id, vault.pseudonym(follower_user_id)),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False
+        conn.execute("DELETE FROM anon_relay WHERE conversation_id = %s", (conversation_id,))
+        conn.execute(
+            "DELETE FROM anon_follower_state WHERE follower_user_id = %s AND conversation_id = %s",
+            (vault.pseudonym(follower_user_id), conversation_id),
         )
         conn.commit()
+        return True
 
 
 def count_owner_conversations(owner_user_id: int) -> int:

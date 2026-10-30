@@ -39,17 +39,13 @@ STRINGS = {
         # ---- shared keys (same name in every bot's i18n.py) ----
         "sibling_blurb": "Also part of this bot family, see below \U0001f447",
         "donation_nudge": (
-            "💙 If this bot's been useful: hosting/API costs are covered by whoever's "
-            "running it, and /donate is a totally optional way to help keep it alive. "
-            "No pressure either way!"
+            "💙 Find this bot useful? /donate helps pay for hosting. Totally optional."
         ),
         "donate_unknown_currency": 'Unknown currency "{currency}" — try xtr or usd.',
         "donate_currency_not_configured": "{currency} donations aren't set up on this bot yet — try Stars instead.",
         "donate_invalid_amount": "That's not a valid amount — try e.g. /donate 500 or /donate 5 usd.",
         "donate_prompt": (
-            "Thank you for contributing — it goes directly toward this bot's "
-            "hosting and API costs. Choose an amount below, or Custom to enter "
-            "your own (you can also send /donate <number> [usd] directly)."
+            "Thank you! It goes toward hosting costs. Pick an amount, or Custom for your own."
         ),
         "donate_custom_button": "✏️ Custom {symbol}",
         "donate_too_many_stars": "That's a lot of stars! Keep it under {max} ⭐ per donation.",
@@ -73,15 +69,15 @@ STRINGS = {
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded to you automatically, in full.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
         "report_button": '🐞 Add my details',
         "problem_logged_note": "Anonymous report is saved",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
+        "report_disclaimer": "📨 Add your details to this report?\n\nAlready saved, without you: the bot, error code {code}, incident {incident}, the time and the version.\n\nSend adds your Telegram ID, @username, language, and whether this is a private chat or a group. Never your messages or files.\n\nIt helps find your case in the logs. Your choice.",
         "report_send": '📨 Send my details',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
-        "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_sent": "✅ Thank you — added to incident {incident}.",
+        "report_already": "Your details are already on incident {incident}.",
+        "report_cancelled": "Cancelled — nothing about you was sent.",
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
-        "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
+        "crash_notice": "⚠️ Something went wrong on my side, so that wasn't done. Please try again.",
         "sandbox_notice": "🧪 Test mode — no real Stars were charged for this.",
         "balance_header": "⚡ Your balance: {balance}",
         "balance_totals": "Paid {paid} ⭐ in total · credited {credited} ⚡ · spent {spent} ⚡",
@@ -213,17 +209,13 @@ STRINGS = {
         "cancel_item_anon_session": "the anonymous chat you had open — tap the link again to start a new one",
         "cancel_button_anon_session": "💬 The anonymous chat you're in",
         "feedback_ask": (
-            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
-            "problem, anything — write it in one message, as a reply to this one.\n"
-            "\n"
-            "Only they read it, and they can't write back: it is sent without your name or id. "
-            "/cancel to stop."
+            "💬 What would you like to tell the person who runs these bots? Reply to this message.\n\nIt's sent without your name, so they can't answer. /cancel to stop."
         ),
         "feedback_placeholder": "Your feedback",
-        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
-        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
-        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
-        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "feedback_text_only": "Please send text as a reply to this message, or /cancel.",
+        "feedback_thanks": "✅ Thank you — sent anonymously.",
+        "feedback_limit": "That's {per_day} today, the daily limit. Thank you — write again tomorrow.",
+        "feedback_failed": "Not sent — something went wrong on my side. Please try again later.",
         "cancel_button_feedback": "💬 Feedback",
         "cancel_item_feedback": "the feedback I asked you for",
         "privacy_feedback_heading": "If you send /feedback:",
@@ -236,76 +228,36 @@ STRINGS = {
         # ---- anon_bot-specific keys ----
         "start_greeting": "Hey! This bot runs anonymous-question inboxes.\n\n",
         "help_brief": (
-            "How it works:\n"
-            "\n"
-            "• Your own inbox: /link gives you a permanent link to post anywhere. Whoever taps it "
-            "can write to you right here, and you never see who they are.\n"
-            "• Answering: reply to the message you're answering — swipe it, or press and hold it "
-            "and choose Reply. Every answer has to be a reply; it's how I know which conversation "
-            "it belongs to.\n"
-            "• Someone else's link: tap it and write. Your first message goes straight through, "
-            "and your name stays hidden.\n"
-            "• Reactions: react to a message in a conversation and the other person sees the same "
-            "reaction, shown as mine. Standard emoji only — Telegram Premium ones don't go "
-            "through.\n"
-            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
-            "\n"
-            "Main commands: /link · /conversations · /cancel\n"
-            "Every command and every reaction: the full guide, below or /fullhelp.\n"
-            "\n"
+            "How it works:\n\n• /link gives you a permanent link. Whoever taps it can write to you here anonymously.\n• To answer, reply to their message (swipe it).\n• Got someone's link? Tap it and write.\n• Reactions reach the other person (standard emoji only).\n• Ideas or problems: /feedback\n\nMain commands: /link · /conversations · /cancel\nEverything else: the full guide, below or /fullhelp.\n\n"
         ),
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
         "help_page_everything": "The full guide: /fullhelp",
         "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
         "helppage_link": (
-            "🔗 /link — your anonymous inbox link\n"
-            "\n"
-            "/link shows your link and whether it is taking messages. Post it anywhere: whoever opens it can write to you here, and you never see who they are. Each time someone opens it, a new conversation starts.\n"
-            "Under it:\n"
-            "• ⏸️ Pause: no new conversations until you resume; the ones already going still work. Also /pause and /resume.\n"
-            "• 🔄 New link: the old link stops starting conversations; the ones already going still work, and a paused inbox stays paused. Also /newlink.\n"
-            "• Two counts: how many different guests have written to you, across how many conversations. Also /stats.\n"
-            "The link stays the same until you make a new one.\n"
-            "\n"
-            "Example: send /link, copy the link, and put it in your Instagram bio."
+            "🔗 /link — your anonymous inbox link\n\nPost it anywhere: whoever opens it can write to you here anonymously. Each open starts a new conversation. The link stays the same until you make a new one.\nButtons under it:\n• ⏸️ Pause: no new conversations until you resume (/pause, /resume).\n• 🔄 New link: the old one stops starting conversations (/newlink).\n• Counts of guests and conversations (/stats).\nCurrent conversations keep working either way.\n\nExample: send /link and put the link in your Instagram bio."
         ),
         "helppage_which": (
-            "❓ /which — which conversation is this message from?\n"
-            "\n"
-            "Reply to any message in this chat with /which: swipe the message, or press and hold it and choose Reply.\n"
-            "• You, the inbox's owner: I say its conversation's number. It works for your own replies too, for the later photos of an album, and for each part of a long message.\n"
-            "• A guest: I point to where that conversation starts.\n"
-            "Handy when several conversations are mixed together in the chat.\n"
-            "\n"
-            "Example: reply to a message with /which, and I answer: \"{example}\""
+            "❓ /which — which conversation is this message from?\n\nReply to any message here with /which.\n• Inbox owner: I say the conversation's number.\n• Guest: I point to where it starts.\n\nExample: \"{example}\""
         ),
-        "reactions_update_note": "🆕 You can now react to messages here — the other person sees your reaction, shown as mine. Send /help to see more.",
+        "reactions_update_note": "🆕 You can now react to messages here — the other person sees it. /help for more.",
         "gift_ad": "🎉 Mumu bots have passed {users} unique users, so we decided to give out {amount} ⚡ of free credit! You can claim it and use it in {download} and {convert}.\n\n<i>To claim it, send any message to either bot: the gift is added automatically. Claim it by {claim_by}; once claimed, it lasts {days} days.</i>",
         "reaction_not_passed": "⚠️ The other person won't see that reaction — only standard emoji are passed on.",
         "reaction_one_only": "⚠️ The other person sees only your newest reaction — one per message is passed on.",
-        "help_text": "Two ways to use this bot:\n\nGet your own inbox — /link gives you a permanent link. Post it anywhere public (bio, channel, story, wherever). Anyone who taps it can send you an anonymous message right here in this chat — you won't see who they are.\nAnswer by replying to the message — swipe it, or press and hold it and choose Reply. That is how I know which conversation your answer belongs to, so it is required rather than optional: one public link means several people can be mid-conversation with you at once, and a message that doesn't say which thread it answers could reach the wrong one. Your answer shows up on their end as a real reply too.\n\nGot sent someone else's link? Tap it and write — your first message goes straight through, with your identity hidden. After that, reply to the message you're answering, exactly as the other side does. Tapping the same link again later starts a brand-new conversation, it won't continue the old one.\n\nReactions: react to a message in a conversation and the other person sees the same reaction on their copy. It shows beside my picture, not yours, so it gives nothing away. Change it or take it off and that carries over too. One reaction per message gets through, and only these:\n{reactions}\n⚠️ NOTE: Telegram Premium reactions (custom emoji) can NOT be passed on — the other person won't see them.\n\nCommands:\n/link - get your inbox link\n/conversations - your conversations, open and archived\n/which - send it as a reply to any message: which conversation is that?\n/newlink, /pause, /resume - also buttons on the /link screen\n/blocked - review who you've blocked\n/stats - the counts, which are on the /link screen too\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/archive - send it as a reply to a message to archive that conversation (every row in /conversations has the button too)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_text": "Two ways to use this bot:\n\nYour own inbox — /link gives you a permanent link. Post it anywhere (bio, channel, story). Whoever taps it can message you here anonymously.\nTo answer, reply to their message: swipe it, or press and hold it and choose Reply. Every answer must be a reply, so it reaches the right conversation.\n\nSomeone else's link — tap it and write. Your first message goes straight through; after that, reply to the message you're answering. Tapping the link again starts a new conversation.\n\nReactions: react to a message and the other person sees the same reaction, shown as mine. One per message, only these:\n{reactions}\n⚠️ Telegram Premium (custom emoji) reactions can NOT be passed on.\n\nCommands:\n/link - your inbox link\n/conversations - your conversations, open and archived\n/which - reply with it to a message: which conversation is it from?\n/archive - reply with it to a message to archive that conversation\n/newlink, /pause, /resume - also buttons under /link\n/blocked - who you've blocked\n/stats - your counts\n/cancel - stop something I'm waiting for\n/feedback - write to whoever runs these bots (anonymous)\n/donate - help pay for hosting (optional)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/en, /uz, /rus - switch language (or /language)\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - start over\n/fullhelp - this guide (/help - the short one)\n\n⚠️ Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn.\n\n",
         "follow_link_invalid": "That link isn't valid — it may have been reset by whoever shared it. Ask them for a fresh one.",
-        "follow_link_own": "That's your own inbox link — messaging yourself would just be a note to self! Share it with other people instead: /link",
+        "follow_link_own": "That's your own link — share it with others: /link",
         "follow_link_blocked": "You're not able to message this person.",
         "follow_link_paused": "This person isn't accepting new anonymous messages right now — try again later.",
         "follow_link_started": (
-            "You're messaging someone anonymously — they'll see your message but not who you are\n"
-            "\n"
-            "Just type your first message below. After that, reply to the message you're "
-            "answering — swipe it, or press and hold it and choose Reply — so your words always "
-            "land in the right conversation.\n"
-            "\n"
-            "Tapping this link again later starts a brand-new conversation, separate from this "
-            "one — and this one keeps working: reply to any message in it whenever you like."
+            "You're writing to someone anonymously — they won't see who you are.\n\nType your first message below. After that, reply to (swipe) the message you're answering."
         ),
+        "follow_cancel_button": "✖️ Cancel",
+        "follow_link_cancelled": "Cancelled.",
         "link_status_paused": "paused — not accepting new conversations",
         "link_status_active": "accepting messages",
         "link_message": (
-            "Your anonymous-inbox link ({status}):\n"
-            "{url}\n\n"
-            "Copy it and post it anywhere — anyone who opens it can message "
-            "you here without you seeing who they are."
+            "Your anonymous inbox link ({status}):\n{url}\n\nPost it anywhere — whoever opens it can message you here anonymously."
         ),
         "link_button_pause": "⏸️ Pause",
         "link_button_resume": "▶️ Resume",
@@ -313,13 +265,12 @@ STRINGS = {
         "anonlink_no_link_yet": "No link yet — send /link first.",
         "anonlink_paused_answer": "Paused.",
         "anonlink_resumed_answer": "Resumed.",
-        "anonlink_newlink_answer": "New link generated — the old one no longer starts new conversations.",
+        "anonlink_newlink_answer": "New link made — the old one no longer starts conversations.",
         "newlink_message": "New link (the old one no longer starts new conversations):\n{url}",
         "pause_message": (
-            "Paused — your link won't start new conversations until /resume. Conversations "
-            "already in progress still work normally."
+            "Paused — no new conversations until /resume. Current ones still work."
         ),
-        "resume_message": "Resumed — your link is accepting new conversations again.",
+        "resume_message": "Resumed — your link takes new conversations again.",
         "stats_message": "{followers} distinct guest(s) have messaged you, across {conversations} conversation(s) total.",
         # ---- /conversations: the owner's own view of their own inbox ----
         "convs_title": "\U0001f4e5 Your inbox",
@@ -327,11 +278,10 @@ STRINGS = {
         "convs_summary": "{open} open \u00b7 {archived} archived",
         "convs_summary_blocked": "{open} open \u00b7 {archived} archived \u00b7 {blocked} blocked (see /blocked)",
         "convs_empty_open": (
-            "Nothing open right now. /link is your inbox link \u2014 anyone who taps it can write to you."
+            "Nothing open right now. Share your /link to get messages."
         ),
         "convs_empty_archived": (
-            "Nothing archived yet. Archive a conversation from its own card once you are done with it; "
-            "it comes back on its own if anything else arrives in it."
+            "Nothing archived yet."
         ),
         "convs_row_button": "#{conv_number} \u00b7 {when}",
         "convs_show_archived": "\U0001f5c4 Archived",
@@ -345,24 +295,21 @@ STRINGS = {
         "conv_jump_button": "\u2934\ufe0f Go to the start",
         "conv_archive_button": "\U0001f5c4 Archive",
         "conv_unarchive_button": "\u21a9\ufe0f Unarchive",
-        "conv_archived_answer": "Archived \u2014 out of your open list until something arrives in it.",
+        "conv_archived_answer": "Archived — it comes back if they write again.",
         "conv_unarchived_answer": "Back in your open list.",
         "conv_gone": "That conversation is no longer on record.",
         "jump_bookmark": (
-            "\U0001f4cd Conversation #{conv_number} starts here. Reply to this message to write in it."
+            "📍 Conversation #{conv_number} starts here. Reply to this to write in it."
         ),
         "jump_no_anchor": (
-            "I can't point at the start of conversation #{conv_number} any more \u2014 a message stops "
-            "being kept as a reply anchor after {days} days of silence in its conversation."
+            "I can't find the start of conversation #{conv_number} any more — it was silent for over {days} days."
         ),
         # ---- /which: which conversation does this message belong to ----
         "which_needs_reply": (
-            "Reply to a message with /which and I'll say which conversation it belongs to. Swipe the "
-            "message, or press and hold it and choose Reply."
+            "Reply to a message with /which and I'll say which conversation it's from."
         ),
         "which_unknown": (
-            "That message isn't in any conversation open here. It may be one of your own, "
-            "or one whose conversation has been archived."
+            "That message isn't in an open conversation (it may be yours, or archived)."
         ),
         "which_owner": "That message is in conversation #{conv_number}.",
         "which_follower": "That message is in the conversation that starts here.",
@@ -383,10 +330,9 @@ STRINGS = {
         "not_your_conversation": "Not your conversation.",
         "blocked_answer": "Blocked.",
         "unblock_button_labelled": "↩️ Unblock conversation #{conv_number}",
-        "too_fast": "You're sending those faster than I can pass them on — give it about {seconds} second(s) and try again.",
+        "too_fast": "Too fast — wait {seconds} s and try again.",
         "edit_not_relayed": (
-            "I'd already passed that message on, so the edit didn't reach them — they "
-            "still have what you first wrote. Reply to it again with the correction."
+            "Edits don't go through — they still see your original message. Send the correction as a new reply."
         ),
         "unblocked_answer": "Unblocked.",
         "delivery_blocked": "Your message couldn't be delivered.",
@@ -394,34 +340,22 @@ STRINGS = {
         "incoming_header": "\U0001f4e9 Conversation #{conv_number}",
         "incoming_header_follower": "\U0001f4ec New message",
         "delivery_forbidden": (
-            "Couldn't deliver that — this bot can't message someone who hasn't started "
-            "it themselves, and this person hasn't yet. Your message was not sent."
+            "Not sent — this person hasn't started the bot yet."
         ),
         "delivery_failed": "Couldn't deliver that message: {error}",
         "sent_confirmation": "Sent ✅",
         "reply_no_match": "Your message was not sent — I couldn't match that reply to a conversation.",
         "must_reply": (
-            "Your message was not sent — it didn't say which conversation it answers.\n"
-            "\n"
-            "Reply to the message quoted above and it goes there. Swipe it, or press and hold it "
-            "and choose Reply."
+            "Not sent. Reply to the message above (swipe it) to send it there."
         ),
         "reply_button_hint": (
-            "Swipe this message to the right to reply to it — or press and hold it, then choose "
-            "Reply. That is how I know which conversation your answer belongs to."
+            "Swipe this message to the right, or press and hold it and choose Reply."
         ),
         "must_reply_opening": (
-            "Your message was not sent yet — the conversation you opened hasn't started.\n"
-            "\n"
-            "Reply to the message quoted above and that becomes your first message to them. Swipe "
-            "it, or press and hold it and choose Reply."
+            "Not sent yet. Reply to the message above (swipe it) to make this your first message."
         ),
         "must_reply_ambiguous": (
-            "Your message was not sent — it didn't say which conversation it answers, and more "
-            "than one is open in this chat, so I would have to guess who to send it to.\n"
-            "\n"
-            "Reply to the message you're answering: swipe it, or press and hold it and choose "
-            "Reply."
+            "Not sent — several conversations are open here. Reply to the message you're answering (swipe it)."
         ),
         "restarting_send_again": (
             "🔄 I'm being updated right now — give me a few seconds and send that again."
@@ -435,28 +369,19 @@ STRINGS = {
         "reply_failed": "Couldn't deliver your reply: {error}",
         "delivered_confirmation": "Delivered ↩️",
         "reply_stale": (
-            "That message isn't in any conversation open here, so your message was not sent.\n"
-            "\n"
-            "Reply to one of the messages I delivered here instead — swipe it, or press and "
-            "hold it and choose Reply."
+            "Not sent — that message isn't in an open conversation. Reply to a message I delivered here."
         ),
-        "generic_nudge": "Not sure what this is for — if someone sent you a link, tap that first. Want your own inbox? Send /link.",
+        "generic_nudge": "Got a link from someone? Tap it first. Want your own inbox? /link",
         "export_removed": "📦 /export has been removed: the bot now keeps less about your conversations. Your messages stay in your Telegram chat.",
         "archive_needs_reply": (
-            "Reply to a message from the conversation you want to archive and send /archive "
-            "again — swipe the message, or press and hold it and choose Reply. Or open "
-            "/conversations and pick one from the list."
+            "Reply to a message from the conversation with /archive, or pick one in /conversations."
         ),
         "archive_not_owner": (
-            "Archiving is for the person whose inbox this is — it files a conversation out of "
-            "their list, and you don't have one."
+            "Only an inbox owner can archive conversations."
         ),
         "archive_already": "Conversation #{conv_number} is already archived.",
         "archive_confirm": (
-            "Archive conversation #{conv_number}?\n"
-            "\n"
-            "It moves out of your open list. Nothing is deleted and the other person is never "
-            "told, and if they write again the conversation comes straight back."
+            "Archive conversation #{conv_number}?\n\nNothing is deleted and they aren't told. It comes back if they write again."
         ),
         "archive_button_yes": "🗂 Archive #{conv_number}",
         "archive_button_no": "Keep it open",
@@ -468,11 +393,11 @@ STRINGS = {
         "maintenance_note": "🔧 AnonBot qisqa ta'mirlash uchun yopiq. Suhbatlaringiz joyida, lekin hozir yuborilgan xabarlar yetkazilmaydi va saqlanmaydi. Iltimos, birozdan keyin qayta yozing.",
         "flood_wait": 'Juda tez yuboryapsiz — {seconds} soniyacha kutib, keyin davom eting.',
         "sibling_blurb": 'Oilamizdagi boshqa botlar pastda 👇',
-        "donation_nudge": "💙 Bot sizga foydali bo'lgan bo'lsa: server va API xarajatlarini botni yuritayotgan odam o'z hisobidan qoplaydi. /donate orqali bunga hissa qo'shishingiz mumkin — bu mutlaqo ixtiyoriy.",
+        "donation_nudge": "💙 Bot foydali bo'ldimi? /donate server xarajatlariga yordam beradi. Mutlaqo ixtiyoriy.",
         "donate_unknown_currency": '"{currency}" degan valyuta yo\'q — xtr yoki usd deb yozing.',
         "donate_currency_not_configured": "Bu botda hozircha {currency} bilan xayriya qilib bo'lmaydi — Stars'dan foydalaning.",
         "donate_invalid_amount": "Miqdor noto'g'ri — masalan, /donate 500 yoki /donate 5 usd deb yozing.",
-        "donate_prompt": "Hissangiz uchun rahmat — u to'g'ridan-to'g'ri botning server va API xarajatlariga ketadi. Quyidagi miqdorlardan birini tanlang yoki o'zingiz yozish uchun «Boshqa»ni bosing (/donate <son> [usd] deb ham yuborishingiz mumkin).",
+        "donate_prompt": "Rahmat! Bu server xarajatlariga ketadi. Miqdorni tanlang yoki o'zingiz yozish uchun «Boshqa»ni bosing.",
         "donate_custom_button": "✏️ Boshqa {symbol}",
         "donate_too_many_stars": "Bu juda ko'p! Bir martalik xayriya {max} ⭐ dan oshmasin.",
         "donate_out_of_range": "{currency} bilan xayriya {lo} dan {hi} {symbol} gacha bo'lishi kerak.",
@@ -495,15 +420,15 @@ STRINGS = {
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov sizga avtomatik ravishda to'liq qaytariladi.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
         "report_button": "🐞 Ma'lumotlarimni qo'shish",
         "problem_logged_note": "Anonim hisobot saqlandi",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
+        "report_disclaimer": "📨 Bu xabarga ma'lumotlaringizni qo'shasizmi?\n\nSizsiz saqlangan: bot, xato kodi {code}, hodisa {incident}, vaqt va versiya.\n\n«Yuborish» Telegram ID, @username, til va chat shaxsiy yoki guruh ekanini qo'shadi. Xabarlaringiz va fayllaringiz hech qachon qo'shilmaydi.\n\nBu sizning holatingizni loglardan topishga yordam beradi. Tanlov sizda.",
         "report_send": "📨 Ma'lumotlarimni yuborish",
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
-        "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
+        "report_already": "Ma'lumotlaringiz {incident} hodisasida allaqachon bor.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
-        "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
+        "crash_notice": "⚠️ Men tomonda xatolik yuz berdi, shuning uchun bajarilmadi. Qaytadan urinib ko'ring.",
         "sandbox_notice": '🧪 Test rejimi — haqiqiy Stars yechilmadi.',
         "balance_header": "⚡ Balansingiz: {balance}",
         "balance_totals": "Jami {paid} ⭐ to'landi · {credited} ⚡ qo'shildi · {spent} ⚡ sarflandi",
@@ -554,17 +479,13 @@ STRINGS = {
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
         "feedback_ask": (
-            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
-            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
-            "\n"
-            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
-            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Shu xabarga javob qilib yozing.\n\nXabar ismingizsiz yuboriladi, shuning uchun sizga javob yoza olmaydi. To'xtatish: /cancel"
         ),
         "feedback_placeholder": "Fikringiz",
-        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
-        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
-        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
-        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "feedback_text_only": "Shu xabarga javob qilib matn yuboring yoki /cancel.",
+        "feedback_thanks": "✅ Rahmat — anonim yuborildi.",
+        "feedback_limit": "Bugun {per_day} ta bo'ldi, bu kunlik chegara. Rahmat — ertaga yana yozing.",
+        "feedback_failed": "Yuborilmadi — men tomonda xatolik yuz berdi. Keyinroq qayta urinib ko'ring.",
         "cancel_button_feedback": "💬 Fikr-mulohaza",
         "cancel_item_feedback": "men so'ragan fikr-mulohaza",
         "privacy_feedback_heading": "/feedback yuborsangiz:",
@@ -578,84 +499,52 @@ STRINGS = {
         "cancel_button_anon_session": "💬 Siz turgan anonim suhbat",
         "start_greeting": "Salom! Bu bot anonim savol-javob qutilarini boshqaradi.\n\n",
         "help_brief": (
-            "Bot qanday ishlaydi:\n"
-            "\n"
-            "• O'z qutingiz: /link sizga doimiy havola beradi — uni istalgan joyga joylang. "
-            "Havolani ochgan har kim sizga shu yerda yoza oladi, kimligi esa sizga ko'rinmaydi.\n"
-            "• Javob berish: javob berayotgan xabaringizni o'ngga suring yoki uni bosib turib "
-            "«Javob berish»ni tanlang. Har bir javob shunday yozilishi shart — javob qaysi "
-            "suhbatga tegishli ekanini shundan bilaman.\n"
-            "• Birovning havolasi: uni oching va yozing. Birinchi xabaringiz darhol yetib boradi, "
-            "kimligingiz esa yashirin qoladi.\n"
-            "• Reaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz ham xuddi "
-            "shuni ko'radi — u mening nomimdan chiqadi. Faqat oddiy emojilar o'tadi, Telegram "
-            "Premium reaksiyalari o'tmaydi.\n"
-            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
-            "\n"
-            "Asosiy buyruqlar: /link · /conversations · /cancel\n"
-            "Barcha buyruqlar va reaksiyalar: to'liq qo'llanmada — pastdagi tugma yoki "
-            "/fullhelp.\n"
-            "\n"
+            "Bot qanday ishlaydi:\n\n• /link sizga doimiy havola beradi. Uni bosgan har kim sizga shu yerda anonim yoza oladi.\n• Javob berish uchun xabarga javob qiling (o'ngga suring).\n• Birovning havolasi keldimi? Uni bosing va yozing.\n• Reaksiyalar ikkinchi tomonga yetib boradi (faqat oddiy emoji).\n• Taklif yoki muammo: /feedback\n\nAsosiy buyruqlar: /link · /conversations · /cancel\nQolgani: to'liq qo'llanma, pastda yoki /fullhelp.\n\n"
         ),
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
         "help_page_everything": "To'liq qo'llanma: /fullhelp",
         "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
         "helppage_link": (
-            "🔗 /link — anonim qutingiz havolasi\n"
-            "\n"
-            "/link havolangizni va u xabar qabul qilayotganini ko'rsatadi. Uni istalgan joyga joylang: uni ochgan har kim sizga shu yerda yoza oladi, siz esa kimligini hech qachon ko'rmaysiz. Har safar kimdir uni ochganda yangi suhbat boshlanadi.\n"
-            "Ostida:\n"
-            "• ⏸️ To'xtatish: davom ettirmaguningizcha yangi suhbatlar boshlanmaydi; boshlangan suhbatlar ishlayveradi. Yana: /pause va /resume.\n"
-            "• 🔄 Yangi havola: eski havola endi suhbat boshlamaydi; boshlanganlari ishlayveradi, pauzadagi quti pauzada qoladi. Yana: /newlink.\n"
-            "• Ikki son: sizga nechta turli mehmon yozgani va jami nechta suhbatda. Yana: /stats.\n"
-            "Yangisini yaratmaguningizcha havola o'zgarmaydi.\n"
-            "\n"
-            "Misol: /link yuboring, havolani nusxalang va Instagram bio'ingizga qo'ying."
+            "🔗 /link — anonim qutingiz havolasi\n\nUni istalgan joyga joylang: ochgan har kim sizga shu yerda anonim yoza oladi. Har ochilishda yangi suhbat boshlanadi. Yangisini yaratmaguningizcha havola o'zgarmaydi.\nOstidagi tugmalar:\n• ⏸️ To'xtatish: qayta yoqmaguningizcha yangi suhbat yo'q (/pause, /resume).\n• 🔄 Yangi havola: eskisi endi suhbat boshlamaydi (/newlink).\n• Mehmonlar va suhbatlar soni (/stats).\nBoshlangan suhbatlar har holda ishlayveradi.\n\nMisol: /link yuboring va havolani Instagram bio'ngizga qo'ying."
         ),
         "helppage_which": (
-            "❓ /which — bu xabar qaysi suhbatdan?\n"
-            "\n"
-            "Chatdagi istalgan xabarga /which bilan javob bering: xabarni suring yoki bosib turing va \"Javob berish\" ni tanlang.\n"
-            "• Siz, quti egasi: suhbatning raqamini aytaman. Bu o'z javoblaringiz, albomning keyingi rasmlari va uzun xabarning har bir qismi uchun ham ishlaydi.\n"
-            "• Mehmon: o'sha suhbat qayerdan boshlanganini ko'rsataman.\n"
-            "Chatda bir nechta suhbat aralashib ketganda qulay.\n"
-            "\n"
-            "Misol: xabarga /which bilan javob bering, men shunday javob beraman: \"{example}\""
+            "❓ /which — bu xabar qaysi suhbatdan?\n\nShu yerdagi istalgan xabarga /which bilan javob qiling.\n• Quti egasi: suhbat raqamini aytaman.\n• Mehmon: suhbat boshlangan joyni ko'rsataman.\n\nMisol: \"{example}\""
         ),
-        "reactions_update_note": "🆕 Endi bu yerda xabarlarga reaksiya qo'yishingiz mumkin — suhbatdoshingiz uni mening nomimdan ko'radi. Batafsil: /help",
+        "reactions_update_note": "🆕 Endi bu yerda xabarlarga reaksiya qoldirish mumkin — ikkinchi tomon uni ko'radi. Batafsil: /help",
         "gift_ad": "🎉 Mumu botlarida {users} dan ortiq foydalanuvchi bo'ldi, shuning uchun hammaga {amount} ⚡ bepul kredit berishga qaror qildik! Uni {download} va {convert} botlarida olib, ishlatishingiz mumkin.\n\n<i>Olish uchun ikki botdan biriga istalgan xabar yuboring: sovg'a avtomatik qo'shiladi. Uni {claim_by} gacha oling; olingandan keyin {days} kun amal qiladi.</i>",
         "reaction_not_passed": "⚠️ Suhbatdoshingiz bu reaksiyani ko'rmaydi — faqat oddiy emojilar yetkaziladi.",
         "reaction_one_only": "⚠️ Suhbatdoshingiz faqat oxirgi reaksiyangizni ko'radi — har bir xabarga bittasi yetkaziladi.",
-        "help_text": "Bu botdan ikki xil foydalanish mumkin:\n\nO'z qutingizni oching — /link sizga doimiy havola beradi. Uni istalgan ochiq joyga joylang (bio, kanal, story — qayerda bo'lsa ham). Havolani ochgan har kim sizga shu chatning o'zida anonim xabar yubora oladi — kimligi sizga ko'rinmaydi.\nJavob berish uchun xabarni o'ngga suring yoki uni bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman, shuning uchun bu shart: havola ochiq joyda turgani uchun bir vaqtda bir nechta odam sizga yozayotgan bo'lishi mumkin, qaysi suhbatga javob ekani ko'rsatilmagan xabar esa boshqa odamga borib qolishi mumkin. Javobingiz ularga ham haqiqiy javob sifatida ko'rinadi.\n\nSizga boshqa birovning havolasini yuborishdimi? Uni bosing va yozing — birinchi xabaringiz kimligingiz yashirilgan holda darhol yetib boradi. Undan keyin xuddi qarshi tomon kabi, javob berayotgan xabaringizga javob tarzida yozing. Keyinroq havolani yana bossangiz, eski suhbat davom etmaydi — yangisi boshlanadi.\n\nReaksiyalar: suhbatdagi xabarga reaksiya qo'ysangiz, suhbatdoshingiz o'zidagi nusxada xuddi shu reaksiyani ko'radi. U sizning emas, mening rasmim yonida chiqadi, shuning uchun hech narsani oshkor qilmaydi. Reaksiyani almashtirsangiz yoki olib tashlasangiz, u tomonda ham shunday bo'ladi. Har bir xabarga bitta reaksiya o'tadi va faqat quyidagilar:\n{reactions}\n⚠️ DIQQAT: Telegram Premium reaksiyalari (maxsus emojilar) suhbatdoshingizga O'TMAYDI — u ularni ko'rmaydi.\n\nBuyruqlar:\n/link - qutingiz havolasini olish\n/conversations - suhbatlaringiz: ochiqlari va arxivdagilari\n/which - istalgan xabarga javob qilib yuboring: u qaysi suhbatdan ekanini aytaman\n/newlink, /pause, /resume - bular /link ekranida tugma sifatida ham bor\n/blocked - bloklanganlar ro'yxati\n/stats - qisqa statistika; u /link ekranida ham bor\n/donate - server xarajatlariga hissa qo'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivga o'tadi (/conversations ichidagi har bir suhbatda ham shu tugma bor)\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "help_text": "Botdan ikki xil foydalanish mumkin:\n\nO'z qutingiz — /link sizga doimiy havola beradi. Uni istalgan joyga joylang (bio, kanal, story). Uni bosgan har kim sizga shu yerda anonim yoza oladi.\nJavob berish uchun xabarga javob qiling: o'ngga suring yoki bosib turib «Javob berish»ni tanlang. Har bir javob shunday yozilishi shart, shunda u to'g'ri suhbatga boradi.\n\nBirovning havolasi — uni bosing va yozing. Birinchi xabaringiz darhol yetib boradi; keyin javob berayotgan xabaringizga javob qiling. Havolani yana bossangiz, yangi suhbat boshlanadi.\n\nReaksiyalar: xabarga reaksiya qoldirsangiz, ikkinchi tomon ham xuddi shu reaksiyani ko'radi, men nomimdan. Har bir xabarga bittadan, faqat quyidagilar:\n{reactions}\n⚠️ Telegram Premium (maxsus emoji) reaksiyalari o'tkazilMAYDI.\n\nBuyruqlar:\n/link - quti havolangiz\n/conversations - suhbatlaringiz, ochiq va arxivdagi\n/which - xabarga javob qilib yuboring: u qaysi suhbatdan?\n/archive - xabarga javob qilib yuboring: o'sha suhbat arxivlanadi\n/newlink, /pause, /resume - /link ostidagi tugmalar ham bor\n/blocked - bloklaganlaringiz\n/stats - hisoblaringiz\n/cancel - men kutayotgan narsani to'xtatish\n/feedback - botlarni yuritayotgan odamga yozish (anonim)\n/donate - server xarajatlariga yordam (ixtiyoriy)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/privacy - siz haqingizda nimalar saqlanadi\n/terms - botdan nima uchun foydalanish mumkin\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - boshidan boshlash\n/fullhelp - shu qo'llanma (/help - qisqasi)\n\n⚠️ To'lovlar qaytarilmaydi — Stars qaytarilMAYDI, ⚡ kreditni yechib olib BO'LMAYDI.\n\n",
         "follow_link_invalid": "Bu havola yaroqsiz — uni ulashgan kishi qayta tiklagan bo'lishi mumkin. Ulardan yangisini so'rang.",
-        "follow_link_own": "Bu o'zingizning havolangiz — o'zingizga yozsangiz, shunchaki eslatma bo'lib qoladi! Havolani boshqalarga ulashing: /link",
+        "follow_link_own": "Bu o'zingizning havolangiz — uni boshqalarga ulashing: /link",
         "follow_link_blocked": 'Bu odamga xabar yubora olmaysiz.',
         "follow_link_paused": "Bu odam hozircha yangi anonim xabarlar qabul qilmayapti — keyinroq urinib ko'ring.",
-        "follow_link_started": "Siz anonim yozyapsiz — xabaringizni ko'rishadi, lekin kimligingizni bilishmaydi.\n\nBirinchi xabaringizni pastga yozing. Keyingi xabarlarda esa javob berayotgan xabarni belgilang — uni o'ngga suring yoki bosib turib «Javob berish»ni tanlang — shunda gapingiz doim to'g'ri suhbatga tushadi.\n\nKeyinroq bu havolani yana bossangiz, alohida yangi suhbat boshlanadi, bu suhbat esa ochiqligicha qoladi: undagi istalgan xabarga xohlagan paytda javob berishingiz mumkin.",
+        "follow_link_started": "Siz kimgadir anonim yozyapsiz — kimligingizni ko'rishmaydi.\n\nBirinchi xabaringizni pastga yozing. Keyin javob berayotgan xabaringizga javob qiling (o'ngga suring).",
+        "follow_cancel_button": "✖️ Bekor qilish",
+        "follow_link_cancelled": "Bekor qilindi.",
         "link_status_paused": "to'xtatilgan — yangi suhbatlar qabul qilinmaydi",
         "link_status_active": 'xabarlar qabul qilinmoqda',
-        "link_message": "Anonim qutingiz havolasi ({status}):\n{url}\n\nUni nusxalab, istalgan joyga joylang — havolani ochgan har kim sizga shu yerda kimligini ko'rsatmay xabar yubora oladi.",
+        "link_message": "Anonim qutingiz havolasi ({status}):\n{url}\n\nUni istalgan joyga joylang — ochgan har kim sizga shu yerda anonim yoza oladi.",
         "link_button_pause": "⏸️ To'xtatish",
         "link_button_resume": '▶️ Qayta yoqish',
         "link_button_newlink": "🔄 Yangi havola",
         "anonlink_no_link_yet": "Hali havola yo'q — avval /link yuboring.",
         "anonlink_paused_answer": "To'xtatildi.",
         "anonlink_resumed_answer": 'Qayta yoqildi.',
-        "anonlink_newlink_answer": "Yangi havola yaratildi — eski havola endi yangi suhbat boshlamaydi.",
+        "anonlink_newlink_answer": "Yangi havola yaratildi — eskisi endi suhbat boshlamaydi.",
         "newlink_message": "Yangi havola (eskisi endi yangi suhbat boshlamaydi):\n{url}",
-        "pause_message": "To'xtatildi — /resume yubormaguningizcha havolangiz orqali yangi suhbat boshlanmaydi. Boshlangan suhbatlar esa odatdagidek davom etadi.",
-        "resume_message": 'Qayta yoqildi — havolangiz orqali yana yangi suhbatlar boshlash mumkin.',
+        "pause_message": "To'xtatildi — /resume yubormaguningizcha yangi suhbat boshlanmaydi. Boshlanganlari ishlayveradi.",
+        "resume_message": "Qayta yoqildi — havolangiz yana yangi suhbatlarni qabul qiladi.",
         "stats_message": 'Sizga {followers} nafar mehmon yozgan, jami {conversations} ta suhbat.',
         # ---- /conversations ----
         "convs_title": '📥 Qutingiz',
         "convs_title_archived": "\U0001f5c4 Arxivlangan suhbatlar",
         "convs_summary": "{open} ta ochiq \u00b7 {archived} ta arxivda",
         "convs_summary_blocked": "{open} ta ochiq \u00b7 {archived} ta arxivda \u00b7 {blocked} ta bloklangan (/blocked)",
-        "convs_empty_open": "Hozircha ochiq suhbat yo'q. Havolangizni /link orqali oling — uni bosgan har kim sizga yoza oladi.",
+        "convs_empty_open": "Hozircha ochiq suhbat yo'q. Xabar olish uchun /link havolangizni ulashing.",
         "convs_empty_archived": (
-            "Arxivda hali hech narsa yo'q. Suhbat tugagach, uni o'z kartasidan arxivga qo'shing; "
-            "unga yangi xabar kelsa, o'zi qaytadi."
+            "Arxivda hali hech narsa yo'q."
         ),
         "convs_row_button": "#{conv_number} \u00b7 {when}",
         "convs_show_archived": "\U0001f5c4 Arxiv",
@@ -669,21 +558,19 @@ STRINGS = {
         "conv_jump_button": "\u2934\ufe0f Boshiga o'tish",
         "conv_archive_button": "\U0001f5c4 Arxivga",
         "conv_unarchive_button": "\u21a9\ufe0f Arxivdan chiqarish",
-        "conv_archived_answer": "Arxivga qo'shildi \u2014 yangi xabar kelmaguncha ochiqlar ro'yxatida ko'rinmaydi.",
+        "conv_archived_answer": "Arxivlandi — yana yozishsa, qaytib keladi.",
         "conv_unarchived_answer": "Ochiqlar ro'yxatiga qaytdi.",
         "conv_gone": "Bu suhbat haqida endi ma'lumot yo'q.",
         "jump_bookmark": (
-            "\U0001f4cd #{conv_number}-suhbat shu yerdan boshlanadi. Unda yozish uchun shu xabarga javob bering."
+            "📍 #{conv_number}-suhbat shu yerdan boshlanadi. Unda yozish uchun shu xabarga javob qiling."
         ),
-        "jump_no_anchor": "#{conv_number}-suhbatning boshini endi ko'rsata olmayman — {days} kun yozishilmagan suhbatlarning xabarlariga javob berish imkoni saqlanmaydi.",
+        "jump_no_anchor": "#{conv_number}-suhbat boshini endi topolmayman — u {days} kundan ortiq jim turgan.",
         # ---- /which ----
         "which_needs_reply": (
-            "Xabarga javob tarzida /which yuboring \u2014 u qaysi suhbatga tegishli ekanini aytaman. "
-            "Xabarni suring yoki bosib turib \u00abJavob berish\u00bb ni tanlang."
+            "Xabarga /which bilan javob qiling — u qaysi suhbatdan ekanini aytaman."
         ),
         "which_unknown": (
-            "Bu xabar bu yerda ochiq suhbatlarning hech biriga tegishli emas. U sizniki "
-            "bo'lishi yoki suhbati arxivlangan bo'lishi mumkin."
+            "Bu xabar ochiq suhbatlarning hech birida yo'q (o'zingizniki yoki arxivdagi bo'lishi mumkin)."
         ),
         "which_owner": "Bu xabar #{conv_number}-suhbatga tegishli.",
         "which_follower": "Bu xabar shu yerdan boshlanadigan suhbatga tegishli.",
@@ -704,21 +591,21 @@ STRINGS = {
         "not_your_conversation": "Bu sizning suhbatingiz emas.",
         "blocked_answer": "Bloklandi.",
         "unblock_button_labelled": "↩️ #{conv_number}-suhbatni blokdan chiqarish",
-        "too_fast": "Juda tez yuboryapsiz — {seconds} soniyacha kutib, qayta urinib ko'ring.",
-        "edit_not_relayed": "Bu xabar allaqachon yetkazilgan, shuning uchun tahrir qarshi tomonga bormadi — ularda eski matn turibdi. Tuzatilgan matnni o'sha xabarga javob qilib qaytadan yuboring.",
+        "too_fast": "Juda tez — {seconds} soniya kutib, qayta urinib ko'ring.",
+        "edit_not_relayed": "Tahrirlar yetib bormaydi — ular asl xabaringizni ko'rishadi. Tuzatishni yangi javob qilib yuboring.",
         "unblocked_answer": "Blokdan chiqarildi.",
         "delivery_blocked": "Xabaringiz yetkazilmadi.",
         "inbox_gone": "Bu quti endi mavjud emas.",
         "incoming_header": "\U0001f4e9 #{conv_number}-suhbat",
         "incoming_header_follower": "\U0001f4ec Yangi xabar",
-        "delivery_forbidden": "Xabaringiz yuborilmadi — bot faqat o'zini ishga tushirgan odamlarga yoza oladi, bu odam esa botni hali ishga tushirmagan.",
+        "delivery_forbidden": "Yuborilmadi — bu odam hali botni ishga tushirmagan.",
         "delivery_failed": "Bu xabarni yetkazib bo'lmadi: {error}",
         "sent_confirmation": "Yuborildi ✅",
         "reply_no_match": "Xabaringiz yuborilmadi — bu javobni biror suhbatga moslab bo'lmadi.",
-        "must_reply": "Xabaringiz yuborilmadi — unda qaysi suhbatga javob ekani ko'rsatilmagan.\n\nYuqoridagi xabarga javob tarzida yozing, shunda u o'sha suhbatga boradi: xabarni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
-        "reply_button_hint": "Javob berish uchun xabarni o'ngga suring yoki bosib turib «Javob berish»ni tanlang. Shunda javobingiz qaysi suhbatga tegishli ekanini bilaman.",
-        "must_reply_opening": "Xabaringiz hali yuborilmadi — siz ochgan suhbat hali boshlanmagan.\n\nYuqoridagi xabarga javob tarzida yozing — bu ularga birinchi xabaringiz bo'ladi. Xabarni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
-        "must_reply_ambiguous": "Xabaringiz yuborilmadi — unda qaysi suhbatga javob ekani ko'rsatilmagan, bu chatda esa bir nechta suhbat ochiq, kimga yuborishni taxmin qilolmayman.\n\nJavob berayotgan xabarni belgilang: uni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
+        "must_reply": "Yuborilmadi. Yuqoridagi xabarga javob qiling (o'ngga suring), shunda u o'sha yerga boradi.",
+        "reply_button_hint": "Bu xabarni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
+        "must_reply_opening": "Hali yuborilmadi. Yuqoridagi xabarga javob qiling (o'ngga suring) — bu birinchi xabaringiz bo'ladi.",
+        "must_reply_ambiguous": "Yuborilmadi — bu yerda bir nechta suhbat ochiq. Javob berayotgan xabaringizga javob qiling (o'ngga suring).",
         "restarting_send_again": '🔄 Bot hozir yangilanmoqda — bir necha soniyadan keyin qaytadan yuboring.',
         "update_soon_try_later": "🔧 Bot tez orada yangilanadi, shuning uchun yangi ishni boshlab bo'lmaydi — taxminan {minutes} daqiqadan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
         "update_soon_try_later_soon": "🔧 Bot hozir yangilanmoqda, shuning uchun yangi ishni boshlab bo'lmaydi — birozdan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
@@ -728,21 +615,16 @@ STRINGS = {
         "reply_forbidden": "Javobingizni yetkazib bo'lmadi — ular sizni bloklagan yoki botni tark etgan bo'lishi mumkin.",
         "reply_failed": "Javobingizni yetkazib bo'lmadi: {error}",
         "delivered_confirmation": "Yetkazildi ↩️",
-        "reply_stale": "Xabaringiz yuborilmadi — javob bergan xabaringiz hech bir ochiq suhbatga tegishli emas. Men shu yerga yetkazgan xabarlardan biriga javob tarzida yozing: uni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
-        "generic_nudge": "Bu nima uchunligini tushunmadim — agar sizga kimdir havola yuborgan bo'lsa, avval o'shani bosing. O'z qutingiz kerakmi? /link yuboring.",
+        "reply_stale": "Yuborilmadi — bu xabar ochiq suhbatda emas. Men shu yerga yetkazgan xabarlardan biriga javob qiling.",
+        "generic_nudge": "Kimdandir havola oldingizmi? Avval uni bosing. O'z qutingiz kerakmi? /link",
         "export_removed": "📦 /export olib tashlandi: bot endi suhbatlaringiz haqida kamroq ma'lumot saqlaydi. Xabarlaringiz Telegram chatingizda qoladi.",
         "archive_needs_reply": (
-            "Arxivlamoqchi bo'lgan suhbatdagi xabarga javob tarzida /archive yuboring — "
-            "xabarni suring yoki bosib turib «Javob berish» ni tanlang. Yoki /conversations "
-            "ni ochib ro'yxatdan tanlang."
+            "Suhbatdagi xabarga /archive bilan javob qiling yoki /conversations dan tanlang."
         ),
-        "archive_not_owner": "Suhbatni faqat quti egasi arxivlay oladi — bu uning ro'yxatidan suhbatni olib qo'yadi, sizda esa bunday ro'yxat yo'q.",
+        "archive_not_owner": "Suhbatlarni faqat quti egasi arxivlay oladi.",
         "archive_already": "#{conv_number}-suhbat allaqachon arxivlangan.",
         "archive_confirm": (
-            "#{conv_number}-suhbat arxivlansinmi?\n"
-            "\n"
-            "U ochiq ro'yxatingizdan chiqadi. Hech narsa o'chirilmaydi, suhbatdoshingizga "
-            "aytilmaydi, va u yana yozsa suhbat darhol qaytadi."
+            "#{conv_number}-suhbat arxivlansinmi?\n\nHech narsa o'chirilmaydi va ularga aytilmaydi. Yana yozishsa, qaytib keladi."
         ),
         "archive_button_yes": "🗂 #{conv_number} ni arxivlash",
         "archive_button_no": "Ochiq qolsin",
@@ -755,17 +637,13 @@ STRINGS = {
         "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
         "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
-            "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
-            "кто его запустил, а /donate — это совершенно необязательный способ помочь "
-            "ему остаться на плаву. Никакого давления в любом случае!"
+            "💙 Бот полезен? /donate помогает оплачивать хостинг. Совершенно необязательно."
         ),
         "donate_unknown_currency": 'Неизвестная валюта "{currency}" — попробуйте xtr или usd.',
         "donate_currency_not_configured": "Пожертвования в {currency} на этом боте пока не настроены — попробуйте Stars.",
         "donate_invalid_amount": "Это некорректная сумма — попробуйте, например, /donate 500 или /donate 5 usd.",
         "donate_prompt": (
-            "Спасибо за вклад — эти средства идут прямо на хостинг и API этого "
-            "бота. Выберите сумму ниже или нажмите «Другое», чтобы ввести свою "
-            "(также можно сразу отправить /donate <число> [usd])."
+            "Спасибо! Это идёт на хостинг. Выберите сумму или «Другое», чтобы ввести свою."
         ),
         "donate_custom_button": "✏️ Другое {symbol}",
         "donate_too_many_stars": "Это очень много звёзд! Пусть будет меньше {max} ⭐ за одно пожертвование.",
@@ -789,15 +667,15 @@ STRINGS = {
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается вам автоматически и полностью.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
         "report_button": '🐞 Добавить мои данные',
         "problem_logged_note": 'Анонимный отчёт сохранён',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
+        "report_disclaimer": "📨 Добавить ваши данные к этому отчёту?\n\nУже сохранено без вас: бот, код ошибки {code}, инцидент {incident}, время и версия.\n\n«Отправить» добавит ваш Telegram ID, @username, язык и то, личный это чат или группа. Никогда — ваши сообщения или файлы.\n\nЭто помогает найти ваш случай в логах. Решать вам.",
         "report_send": '📨 Отправить мои данные',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
-        "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_sent": "✅ Спасибо — добавлено к инциденту {incident}.",
+        "report_already": "Ваши данные уже есть в инциденте {incident}.",
+        "report_cancelled": "Отменено — ничего о вас не отправлено.",
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
-        "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
+        "crash_notice": "⚠️ Что-то пошло не так с моей стороны, поэтому это не сделано. Попробуйте ещё раз.",
         "sandbox_notice": "🧪 Тестовый режим — настоящие Stars не списывались.",
         "balance_header": "⚡ Ваш баланс: {balance}",
         "balance_totals": "Всего оплачено {paid} ⭐ · начислено {credited} ⚡ · потрачено {spent} ⚡",
@@ -911,17 +789,13 @@ STRINGS = {
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
         "feedback_ask": (
-            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
-            "напишите одним сообщением в ответ на это.\n"
-            "\n"
-            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
-            "имени и id. Остановить: /cancel"
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Ответьте на это сообщение.\n\nОно уходит без вашего имени, поэтому ответить вам не смогут. Остановить: /cancel"
         ),
         "feedback_placeholder": "Ваш отзыв",
-        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
-        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
-        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
-        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "feedback_text_only": "Отправьте текст в ответ на это сообщение или /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено анонимно.",
+        "feedback_limit": "Сегодня уже {per_day} — это дневной предел. Спасибо — напишите завтра.",
+        "feedback_failed": "Не отправлено — что-то пошло не так с моей стороны. Попробуйте позже.",
         "cancel_button_feedback": "💬 Отзыв",
         "cancel_item_feedback": "отзыв, который я просил написать",
         "privacy_feedback_heading": "Если вы отправляете /feedback:",
@@ -934,76 +808,36 @@ STRINGS = {
         "cancel_button_anon_session": "💬 Анонимный чат, в котором вы",
         "start_greeting": "Здравствуйте! Этот бот управляет анонимными почтовыми ящиками для вопросов.\n\n",
         "help_brief": (
-            "Как это устроено:\n"
-            "\n"
-            "• Свой ящик: /link даёт постоянную ссылку — разместите её где угодно. Любой, кто по "
-            "ней перейдёт, сможет написать вам сюда, а вы не увидите, кто это.\n"
-            "• Ответы: отвечайте на конкретное сообщение — смахните его вправо или нажмите и "
-            "удерживайте, затем «Ответить». Так нужно отвечать всегда: по ответу я понимаю, к "
-            "какой беседе он относится.\n"
-            "• Чужая ссылка: перейдите по ней и напишите. Первое сообщение уйдёт сразу, а ваше "
-            "имя останется скрытым.\n"
-            "• Реакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же, от "
-            "моего имени. Только обычные эмодзи: реакции Telegram Premium не передаются.\n"
-            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
-            "\n"
-            "Основные команды: /link · /conversations · /cancel\n"
-            "Все команды и все реакции — в полном руководстве: кнопка ниже или /fullhelp.\n"
-            "\n"
+            "Как это устроено:\n\n• /link даёт постоянную ссылку. Любой, кто по ней перейдёт, сможет анонимно написать вам сюда.\n• Чтобы ответить, ответьте на сообщение (смахните его).\n• Прислали чужую ссылку? Перейдите по ней и напишите.\n• Реакции доходят до собеседника (только обычные эмодзи).\n• Идеи или проблемы: /feedback\n\nОсновные команды: /link · /conversations · /cancel\nВсё остальное: полное руководство, ниже или /fullhelp.\n\n"
         ),
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
         "help_page_everything": "Полное руководство: /fullhelp",
         "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
         "helppage_link": (
-            "🔗 /link — ссылка на ваш анонимный ящик\n"
-            "\n"
-            "/link показывает вашу ссылку и принимает ли она сообщения. Разместите её где угодно: любой, кто её откроет, сможет написать вам здесь, а вы никогда не увидите, кто это. Каждый раз, когда кто-то её открывает, начинается новая беседа.\n"
-            "Под ней:\n"
-            "• ⏸️ Пауза: новых бесед не будет, пока не возобновите; уже идущие продолжают работать. Ещё: /pause и /resume.\n"
-            "• 🔄 Новая ссылка: старая перестаёт начинать беседы; уже идущие работают, а ящик на паузе так и остаётся на паузе. Ещё: /newlink.\n"
-            "• Два числа: сколько разных гостей вам написали и в скольких беседах. Ещё: /stats.\n"
-            "Ссылка не меняется, пока вы не сделаете новую.\n"
-            "\n"
-            "Пример: отправьте /link, скопируйте ссылку и поставьте её в био Instagram."
+            "🔗 /link — ссылка на ваш анонимный ящик\n\nРазместите её где угодно: любой, кто её откроет, сможет анонимно написать вам сюда. Каждый переход начинает новую беседу. Ссылка не меняется, пока вы не создадите новую.\nКнопки под ней:\n• ⏸️ Пауза: новых бесед нет, пока не возобновите (/pause, /resume).\n• 🔄 Новая ссылка: старая перестаёт начинать беседы (/newlink).\n• Число гостей и бесед (/stats).\nТекущие беседы в любом случае продолжают работать.\n\nПример: отправьте /link и поставьте ссылку в био Instagram."
         ),
         "helppage_which": (
-            "❓ /which — из какой беседы это сообщение?\n"
-            "\n"
-            "Ответьте на любое сообщение в этом чате командой /which: смахните сообщение или зажмите его и выберите «Ответить».\n"
-            "• Вы, владелец ящика: я назову номер беседы. Это работает и для ваших собственных ответов, и для следующих фото альбома, и для каждой части длинного сообщения.\n"
-            "• Гость: я укажу, где эта беседа начинается.\n"
-            "Удобно, когда в чате перемешались несколько бесед.\n"
-            "\n"
-            "Пример: ответьте на сообщение командой /which, и я отвечу: «{example}»"
+            "❓ /which — из какой беседы это сообщение?\n\nОтветьте на любое сообщение здесь командой /which.\n• Владелец ящика: назову номер беседы.\n• Гость: покажу, где она начинается.\n\nПример: \"{example}\""
         ),
-        "reactions_update_note": "🆕 Теперь здесь можно ставить реакции на сообщения — собеседник увидит их от моего имени. Подробнее: /help",
+        "reactions_update_note": "🆕 Теперь здесь можно ставить реакции на сообщения — собеседник их увидит. Подробнее: /help",
         "gift_ad": "🎉 У Mumu ботов уже больше {users} уникальных пользователей, поэтому мы решили раздать {amount} ⚡ бесплатного кредита! Получить и потратить его можно в {download} и {convert}.\n\n<i>Чтобы получить подарок, отправьте любое сообщение любому из этих двух ботов: он начислится автоматически. Получите его до {claim_by}; после получения он действует {days} дней.</i>",
         "reaction_not_passed": "⚠️ Собеседник не увидит эту реакцию — передаются только обычные эмодзи.",
         "reaction_one_only": "⚠️ Собеседник видит только вашу последнюю реакцию — на сообщение передаётся одна.",
-        "help_text": 'Есть два способа пользоваться этим ботом:\n\nЗаведите свой ящик — /link даёт вам постоянную ссылку. Разместите её где угодно на виду (в био, канале, истории — где хотите). Любой, кто по ней перейдёт, сможет отправить вам анонимное сообщение прямо в этот чат — вы не увидите, кто это.\nОтвечайте ответом на сообщение — смахните его вправо или нажмите и удерживайте и выберите «Ответить». Так я понимаю, к какой беседе относится ваш ответ, поэтому это обязательно, а не по желанию: ссылка открытая, с вами могут говорить сразу несколько человек, и сообщение, которое не говорит, на что отвечает, может уйти не туда. У собеседника ваш ответ тоже появится как настоящий ответ.\n\nВам прислали чужую ссылку? Перейдите по ней и напишите — первое сообщение уйдёт сразу, а ваша личность останется скрытой. Дальше отвечайте ответом на сообщение, точно так же, как другая сторона. Если позже перейти по той же ссылке снова, начнётся новая беседа, а не продолжение старой.\n\nРеакции: поставьте реакцию на сообщение в беседе — собеседник увидит такую же на своей копии. Она стоит рядом с моей картинкой, а не с вашей, так что ничего не выдаёт. Поменяете или уберёте её — у собеседника будет так же. На одно сообщение передаётся одна реакция, и только из этого списка:\n{reactions}\n⚠️ ВНИМАНИЕ: реакции Telegram Premium (особые эмодзи) НЕ передаются — собеседник их не увидит.\n\nКоманды:\n/link - получить ссылку на свой ящик\n/conversations - ваши разговоры: открытые и в архиве\n/which - отправьте ответом на любое сообщение: скажу, из какого оно разговора\n/newlink, /pause, /resume - они же кнопки на экране /link\n/blocked - посмотреть, кого вы заблокировали\n/stats - краткая статистика, она же на экране /link\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/archive - отправьте ответом на сообщение, и этот разговор уйдёт в архив (в /conversations такая кнопка есть у каждого разговора)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": "Ботом можно пользоваться двумя способами:\n\nСвой ящик — /link даёт постоянную ссылку. Разместите её где угодно (био, канал, сторис). Любой, кто по ней перейдёт, сможет анонимно написать вам сюда.\nЧтобы ответить, ответьте на сообщение: смахните его или нажмите и удерживайте, затем «Ответить». Каждый ответ должен быть ответом на сообщение — так он попадёт в нужную беседу.\n\nЧужая ссылка — перейдите по ней и напишите. Первое сообщение уйдёт сразу; дальше отвечайте на сообщение, которому отвечаете. Повторный переход по ссылке начинает новую беседу.\n\nРеакции: поставьте реакцию — собеседник увидит такую же, от моего имени. Одна на сообщение, только эти:\n{reactions}\n⚠️ Реакции Telegram Premium (свои эмодзи) НЕ передаются.\n\nКоманды:\n/link - ссылка на ваш ящик\n/conversations - ваши беседы, открытые и в архиве\n/which - ответьте ею на сообщение: из какой оно беседы?\n/archive - ответьте ею на сообщение, чтобы убрать беседу в архив\n/newlink, /pause, /resume - также кнопки под /link\n/blocked - кого вы заблокировали\n/stats - ваша статистика\n/cancel - остановить то, чего я жду\n/feedback - написать тому, кто ведёт ботов (анонимно)\n/donate - помочь с хостингом (необязательно)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/en, /uz, /rus - сменить язык (или /language)\n/privacy - что я храню о вас\n/terms - для чего можно использовать бота\n/deletemydata - удалить всё, что я о вас храню\n/start - начать сначала\n/fullhelp - это руководство (/help - краткое)\n\n⚠️ Платежи окончательны — Stars НЕ возвращаются, ⚡ кредит НЕЛЬЗЯ вывести.\n\n",
         "follow_link_invalid": "Эта ссылка недействительна — возможно, тот, кто ею поделился, сбросил её. Попросите у него новую.",
-        "follow_link_own": "Это ссылка на ваш собственный ящик — писать самому себе было бы просто заметкой для себя! Поделитесь ею с другими: /link",
+        "follow_link_own": "Это ваша собственная ссылка — поделитесь ею с другими: /link",
         "follow_link_blocked": "Вы не можете написать этому человеку.",
         "follow_link_paused": "Этот человек сейчас не принимает новые анонимные сообщения — попробуйте позже.",
         "follow_link_started": (
-            "Вы анонимно пишете кому-то — он увидит ваше сообщение, но не узнает, кто вы, если вы "
-            "сами не скажете.\n"
-            "\n"
-            "Напишите первое сообщение ниже. Дальше отвечайте на то сообщение, которому отвечаете "
-            "— смахните его или нажмите и удерживайте, затем «Ответить», — чтобы слова всегда "
-            "попадали в нужную беседу.\n"
-            "\n"
-            "Если перейти по этой ссылке снова позже, начнётся отдельная новая беседа — а эта "
-            "продолжит работать: отвечайте на любое её сообщение когда угодно."
+            "Вы пишете кому-то анонимно — он не увидит, кто вы.\n\nНапишите первое сообщение ниже. Дальше отвечайте на сообщение, которому отвечаете (смахните его)."
         ),
+        "follow_cancel_button": "✖️ Отмена",
+        "follow_link_cancelled": "Отменено.",
         "link_status_paused": "на паузе — новые беседы не принимаются",
         "link_status_active": "принимает сообщения",
         "link_message": (
-            "Ссылка на ваш анонимный ящик ({status}):\n"
-            "{url}\n\n"
-            "Скопируйте её и разместите где угодно — любой, кто её "
-            "откроет, сможет написать вам сюда, а вы не увидите, кто это."
+            "Ссылка на ваш анонимный ящик ({status}):\n{url}\n\nРазместите её где угодно — любой, кто её откроет, сможет анонимно написать вам сюда."
         ),
         "link_button_pause": "⏸️ Пауза",
         "link_button_resume": "▶️ Возобновить",
@@ -1011,11 +845,10 @@ STRINGS = {
         "anonlink_no_link_yet": "Ссылки пока нет — сначала отправьте /link.",
         "anonlink_paused_answer": "На паузе.",
         "anonlink_resumed_answer": "Возобновлено.",
-        "anonlink_newlink_answer": "Создана новая ссылка — старая больше не начинает новые беседы.",
+        "anonlink_newlink_answer": "Новая ссылка создана — старая больше не начинает беседы.",
         "newlink_message": "Новая ссылка (старая больше не начинает новые беседы):\n{url}",
         "pause_message": (
-            "На паузе — ваша ссылка не будет начинать новые беседы до /resume. "
-            "Уже идущие беседы продолжают работать как обычно."
+            "На паузе — новых бесед не будет до /resume. Текущие продолжают работать."
         ),
         "resume_message": "Возобновлено — ваша ссылка снова принимает новые беседы.",
         "stats_message": "Вам писали {followers} разных гостей, всего {conversations} беседы(бесед).",
@@ -1025,11 +858,10 @@ STRINGS = {
         "convs_summary": "{open} открытых \u00b7 {archived} в архиве",
         "convs_summary_blocked": "{open} открытых \u00b7 {archived} в архиве \u00b7 {blocked} заблокировано (см. /blocked)",
         "convs_empty_open": (
-            "Открытых бесед нет. /link \u2014 ваша ссылка; написать вам может любой, кто её откроет."
+            "Открытых бесед нет. Поделитесь своей /link, чтобы получать сообщения."
         ),
         "convs_empty_archived": (
-            "В архиве пока пусто. Закончив беседу, отправьте её в архив с её карточки; "
-            "она вернётся сама, если в ней что-то появится."
+            "В архиве пока пусто."
         ),
         "convs_row_button": "#{conv_number} \u00b7 {when}",
         "convs_show_archived": "\U0001f5c4 Архив",
@@ -1043,24 +875,21 @@ STRINGS = {
         "conv_jump_button": "\u2934\ufe0f К началу",
         "conv_archive_button": "\U0001f5c4 В архив",
         "conv_unarchive_button": "\u21a9\ufe0f Из архива",
-        "conv_archived_answer": "В архиве \u2014 вернётся в список, как только в ней что-то появится.",
+        "conv_archived_answer": "В архиве — вернётся, если вам снова напишут.",
         "conv_unarchived_answer": "Снова в списке открытых.",
         "conv_gone": "Такой беседы больше нет в записях.",
         "jump_bookmark": (
-            "\U0001f4cd Беседа #{conv_number} начинается здесь. Ответьте на это сообщение, чтобы написать в неё."
+            "📍 Здесь начинается беседа #{conv_number}. Ответьте на это сообщение, чтобы написать в неё."
         ),
         "jump_no_anchor": (
-            "Я больше не могу показать начало беседы #{conv_number} \u2014 сообщения перестают "
-            "храниться как якоря для ответа после {days} дней тишины в беседе."
+            "Я больше не могу найти начало беседы #{conv_number} — в ней было тихо больше {days} дней."
         ),
         # ---- /which ----
         "which_needs_reply": (
-            "Отправьте /which ответом на сообщение, и я скажу, к какой беседе оно относится. "
-            "Проведите по сообщению или нажмите и удерживайте его и выберите \u00abОтветить\u00bb."
+            "Ответьте на сообщение командой /which — скажу, из какой оно беседы."
         ),
         "which_unknown": (
-            "Это сообщение не относится ни к одной открытой здесь беседе. Возможно, оно ваше "
-            "собственное или его беседа уже в архиве."
+            "Этого сообщения нет в открытых беседах (возможно, оно ваше или в архиве)."
         ),
         "which_owner": "Это сообщение относится к беседе #{conv_number}.",
         "which_follower": "Это сообщение относится к беседе, которая начинается здесь.",
@@ -1081,10 +910,9 @@ STRINGS = {
         "not_your_conversation": "Это не ваша беседа.",
         "blocked_answer": "Заблокировано.",
         "unblock_button_labelled": "↩️ Разблокировать беседу #{conv_number}",
-        "too_fast": "Вы отправляете быстрее, чем я успеваю передавать — подождите около {seconds} сек. и попробуйте снова.",
+        "too_fast": "Слишком быстро — подождите {seconds} с и попробуйте снова.",
         "edit_not_relayed": (
-            "Это сообщение я уже передал, поэтому правка до собеседника не дошла — "
-            "у него прежний текст. Отправьте исправление ещё раз ответом на него."
+            "Правки не передаются — собеседник видит исходное сообщение. Отправьте исправление новым ответом."
         ),
         "unblocked_answer": "Разблокирован.",
         "delivery_blocked": "Ваше сообщение не удалось доставить.",
@@ -1092,34 +920,22 @@ STRINGS = {
         "incoming_header": "\U0001f4e9 Беседа #{conv_number}",
         "incoming_header_follower": "\U0001f4ec Новое сообщение",
         "delivery_forbidden": (
-            "Не удалось доставить — этот бот не может написать тому, кто сам его "
-            "не запускал, а этот человек ещё не запускал. Ничего не отправлено."
+            "Не отправлено — этот человек ещё не запускал бота."
         ),
         "delivery_failed": "Не удалось доставить это сообщение: {error}",
         "sent_confirmation": "Отправлено ✅",
         "reply_no_match": "Ваше сообщение не отправлено — не удалось сопоставить этот ответ с какой-либо беседой.",
         "must_reply": (
-            "Ничего не отправлено — сообщение не сказало, какой беседе оно отвечает.\n"
-            "\n"
-            "Ответьте на процитированное выше сообщение, и оно уйдёт туда. Смахните его или "
-            "нажмите и удерживайте, затем «Ответить»."
+            "Не отправлено. Ответьте на сообщение выше (смахните его), чтобы отправить туда."
         ),
         "reply_button_hint": (
-            "Чтобы ответить, смахните это сообщение вправо — или нажмите и удерживайте его и "
-            "выберите «Ответить». Так я понимаю, к какой беседе относится ваш ответ."
+            "Смахните это сообщение вправо или нажмите и удерживайте его, затем «Ответить»."
         ),
         "must_reply_opening": (
-            "Пока ничего не отправлено — беседа, которую вы открыли, ещё не начата.\n"
-            "\n"
-            "Ответьте на процитированное выше сообщение, и это станет вашим первым сообщением им. "
-            "Смахните его или нажмите и удерживайте, затем «Ответить»."
+            "Ещё не отправлено. Ответьте на сообщение выше (смахните его) — это станет вашим первым сообщением."
         ),
         "must_reply_ambiguous": (
-            "Ничего не отправлено — сообщение не сказало, какой беседе оно отвечает, а в этом "
-            "чате открыто несколько, так что мне пришлось бы гадать, кому его слать.\n"
-            "\n"
-            "Ответьте на то сообщение, которому отвечаете: смахните его или нажмите и "
-            "удерживайте, затем «Ответить»."
+            "Не отправлено — здесь открыто несколько бесед. Ответьте на сообщение, которому отвечаете (смахните его)."
         ),
         "restarting_send_again": (
             "🔄 Сейчас обновляюсь — подождите несколько секунд и отправьте ещё раз."
@@ -1133,27 +949,19 @@ STRINGS = {
         "reply_failed": "Не удалось доставить ваш ответ: {error}",
         "delivered_confirmation": "Доставлено ↩️",
         "reply_stale": (
-            "Этого сообщения нет в моих записях, поэтому я не могу понять, какой беседе оно "
-            "отвечает. Ничего не отправлено. Ответьте на одно из сообщений, которые я сюда "
-            "доставил — смахните его или нажмите и удерживайте, затем «Ответить»."
+            "Не отправлено — этого сообщения нет в открытых беседах. Ответьте на одно из сообщений, которые я сюда доставил."
         ),
-        "generic_nudge": "Не совсем понял, для чего это — если кто-то прислал вам ссылку, сначала перейдите по ней. Хотите свой ящик? Отправьте /link.",
+        "generic_nudge": "Вам прислали ссылку? Сначала перейдите по ней. Нужен свой ящик? /link",
         "export_removed": "📦 Команда /export удалена: теперь бот хранит меньше данных о ваших переписках. Ваши сообщения остаются в чате Telegram.",
         "archive_needs_reply": (
-            "Ответьте на сообщение из той беседы, которую хотите убрать в архив, и отправьте "
-            "/archive ещё раз — смахните сообщение или нажмите и удержите его и выберите «Ответить». "
-            "Либо откройте /conversations и выберите беседу из списка."
+            "Ответьте на сообщение из беседы командой /archive или выберите её в /conversations."
         ),
         "archive_not_owner": (
-            "Архив — это дело владельца ящика: он убирает беседу из своего списка, а у вас "
-            "такого списка нет."
+            "Архивировать беседы может только владелец ящика."
         ),
         "archive_already": "Беседа #{conv_number} уже в архиве.",
         "archive_confirm": (
-            "Убрать беседу #{conv_number} в архив?\n"
-            "\n"
-            "Она уйдёт из списка открытых. Ничего не удаляется, собеседнику ничего не сообщают, "
-            "и если он напишет снова — беседа сразу вернётся."
+            "Убрать беседу #{conv_number} в архив?\n\nНичего не удаляется, и собеседнику не сообщается. Если он снова напишет, беседа вернётся."
         ),
         "archive_button_yes": "🗂 В архив #{conv_number}",
         "archive_button_no": "Оставить открытой",

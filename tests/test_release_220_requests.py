@@ -1,6 +1,7 @@
 """Scenarios for the owner's 2.2.0 requests of 2026-10-28: StickerBot's per-sticker replies,
 emoji by reply, public packs and groups; DownloaderBot's quality picker, shorter cache and
-groups; the shorter problem note; the nightly report's unique users."""
+groups; the shorter problem note; the nightly report's unique users. Also AnonBot's Cancel
+button under the line a link tap opens with (2026-10-31)."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from conftest import connect, load
 STICKER = "sticker_bot"
 DOWNLOADER = "downloader_bot"
 MANAGER = "manager_bot"
+ANON = "anon_bot"
 MB = 1024 * 1024
 
 
@@ -685,8 +687,7 @@ def test_a_sticker_already_in_someone_elses_pack_is_offered_again(packs):
     context = _filling_closed(bot_module, fake, EDITOR)
     assert asyncio.run(bot_module.receive_media(_sent(EDITOR, EDITOR, said, IN_CLOSED), context)) == bot_module.EDITING
     assert fake.deleted == []
-    assert said[-1].text == ("This sticker is already in “Closed”. Add it again?\n"
-                             "Only the pack's owner can delete stickers from it.")
+    assert said[-1].text == "This sticker is already in “Closed”. Add it again?"
     (yes_text, yes), (no_text, no) = _buttons(said[-1])
     assert (yes_text, no_text) == ("➕ Add again", "✖ Don't add")
     # Only whoever was asked answers, and only once.
@@ -717,7 +718,7 @@ def test_whoever_may_delete_is_asked_to_add_it_again_or_remove_it(packs):
     (_, add), (remove_text, remove) = _buttons(question)
     assert remove_text == "🗑 Remove it"
     assert _tap(bot_module, remove, OWNER, question, context) == [None]
-    assert fake.deleted == ["S1"] and question.text == "🗑️ That sticker was already in this pack — removed it."
+    assert fake.deleted == ["S1"] and question.text == "🗑️ Removed from the pack."
 
     # A co-editor: "Remove it" only once the owner allows it, and never for the last sticker.
     fake, question, context = send(EDITOR, two)
@@ -729,12 +730,12 @@ def test_whoever_may_delete_is_asked_to_add_it_again_or_remove_it(packs):
         assert fake.deleted == ["S1"]
         fake, question, context = send(EDITOR, one)
         _tap(bot_module, _buttons(question)[1][1], EDITOR, question, context)
-        assert fake.deleted == [] and question.text.startswith("That's the only sticker left in this pack.")
+        assert fake.deleted == [] and question.text.startswith("That's the last sticker.")
         # Switched off again between the question and the tap: not removed.
         fake, question, context = send(EDITOR, two)
         packs.set_editors_delete("closed_by_bot", False)
         _tap(bot_module, _buttons(question)[1][1], EDITOR, question, context)
-        assert fake.deleted == [] and question.text.startswith("You can't delete stickers from this pack")
+        assert fake.deleted == [] and question.text == "Only the pack's owner can delete its stickers."
     finally:
         packs.set_editors_delete("closed_by_bot", False)
 
@@ -742,7 +743,7 @@ def test_whoever_may_delete_is_asked_to_add_it_again_or_remove_it(packs):
     packs.add_pack(OWNER, "solo_by_bot", "Solo")
     fake, question, context = send(OWNER, one, pack="solo_by_bot", title="Solo")
     _tap(bot_module, _buttons(question)[1][1], OWNER, question, context)
-    assert fake.deleted == [] and question.text.startswith("That's the only sticker left in this pack")
+    assert fake.deleted == [] and question.text.startswith("That's the last sticker — removing it")
     (sure_text, sure), (_, keep) = _buttons(question)
     assert sure_text == "🗑️ Yes, delete the pack"
     state = []
@@ -764,10 +765,75 @@ def test_nothing_is_deleted_in_a_group(packs):
     asyncio.run(group_mode.add_command(_sent(OWNER, GROUP, said, reply_to=posted, text=f"/add {link}"), context,
                                        [link]))
     assert fake.deleted == [] and fake.added == []
-    assert said[-1].text == ("This sticker is already in “Closed”. Add it again?\n"
-                             "Nothing is deleted in a group: only the pack's owner can delete its stickers.")
+    assert said[-1].text == "This sticker is already in “Closed”. Add it again?"
     no = said[-1].kwargs["reply_markup"].inline_keyboard[0][1].callback_data
     assert [text for text, _ in _buttons(said[-1])] == ["➕ Add again", "✖ Don't add"]
     assert _tap(load(STICKER, "bot"), no, OWNER, said[-1], context) == [None] and said[-1].text == "OK, not added."
     assert fake.added == []
     packs.forget_group(GROUP)
+
+
+# ── AnonBot: cancelling a link tap ───────────────────────────────────────────
+
+GUEST, INBOX_OWNER = 4242, 4343
+
+
+def _tapped_link(opening_line):
+    db = load(ANON, "db")
+    db.init_db()
+    assert load(ANON, "family_link").check_data_key(fresh=True)["usable"]
+    conv = db.start_new_anon_conversation(INBOX_OWNER, GUEST)
+    db.record_anon_relays(GUEST, [opening_line], conv["id"])
+    assert db.get_routing_context(GUEST, GUEST)["active"]["id"] == conv["id"]
+    return db, conv["id"]
+
+
+def test_a_cancelled_link_tap_leaves_nothing_to_send_into():
+    db, conv = _tapped_link(10)
+    assert db.cancel_unopened_conversation(conv, INBOX_OWNER) is False  # not their tap
+    assert db.cancel_unopened_conversation(conv, GUEST) is True
+    # The next plain message is not an opening one, and a reply to the
+    # "Cancelled" line reaches nobody.
+    assert db.get_routing_context(GUEST, GUEST)["active"] is None
+    assert db.get_relay_row(GUEST, 10) is None
+    assert db.get_conversation(conv) is None
+    assert db.cancel_unopened_conversation(conv, GUEST) is False
+
+
+def test_cancel_is_too_late_once_the_first_message_went():
+    db, conv = _tapped_link(20)
+    # The first message returns the opening line, so its button can come off.
+    assert db.mark_follower_opened(conv, GUEST) == 20
+    assert db.mark_follower_opened(conv, GUEST) is None
+    assert db.cancel_unopened_conversation(conv, GUEST) is False
+    assert db.get_routing_context(GUEST, GUEST)["active"]["id"] == conv
+
+
+def test_the_cancel_button_changes_the_line_and_undoes_itself_when_too_late():
+    import asyncio
+    bot = load(ANON, "bot")
+
+    def tap(conv):
+        edits = []
+
+        class Query:
+            data = f"aq_fcancel:{conv}"
+
+            async def answer(self, *args, **kwargs):
+                pass
+
+            async def edit_message_text(self, text, **kwargs):
+                edits.append(text)
+
+        update = SimpleNamespace(callback_query=Query(), effective_user=SimpleNamespace(id=GUEST))
+        asyncio.run(bot.follow_cancel_callback(update, SimpleNamespace(user_data={}, bot=None)))
+        return edits
+
+    db, conv = _tapped_link(30)
+    assert tap(conv) == ["Cancelled."]
+    assert db.get_conversation(conv) is None
+
+    # A first message beat the tap: the line goes back to what it said.
+    db, conv = _tapped_link(40)
+    db.mark_follower_opened(conv, GUEST)
+    assert tap(conv)[-1].startswith("You're writing to someone anonymously")

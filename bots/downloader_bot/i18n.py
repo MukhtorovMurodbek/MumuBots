@@ -36,36 +36,27 @@ LANGUAGE_PROMPT = (
 
 STRINGS = {
     "en": {
-        "transfer_waiting": "⏳ Another big file is being moved right now. Yours starts as soon as it is done — nothing for you to do.",
+        "transfer_waiting": "⏳ Another big file is being moved. Yours starts right after.",
         "quota_hour": (
-            "You've had {used} downloads in the last hour, which is this bot's limit "
-            "({limit}/hour) — it's there so everyone gets a turn on a small server. "
-            "The next one frees up in about {minutes} minute(s)."
+            "You've reached the limit of {limit} downloads an hour ({used} used). The next one frees up in about {minutes} min."
         ),
         "quota_day": (
-            "You've had {used} downloads today, which is this bot's daily limit "
-            "({limit}) — it's there so everyone gets a turn on a small server. "
-            "It frees up again in about {minutes} minute(s)."
+            "You've reached today's limit of {limit} downloads ({used} used). It frees up in about {minutes} min."
         ),
         "quota_donor_hint": (
-            "If you need more: anyone who has ever chipped in via /donate gets a much "
-            "higher limit, permanently. One donation of any size is enough."
+            "Need more? Anyone who has ever donated, any amount, gets a much higher limit for good: /donate"
         ),
         "flood_wait": "You're going faster than I can keep up with — give it about {seconds} second(s) and carry on.",
         # ---- shared keys (same name in every bot's i18n.py) ----
         "sibling_blurb": "Also part of this bot family, see below \U0001f447",
         "donation_nudge": (
-            "💙 If this bot's been useful: hosting/API costs are covered by whoever's "
-            "running it, and /donate is a totally optional way to help keep it alive. "
-            "No pressure either way!"
+            "💙 Find this bot useful? /donate helps pay for hosting. Totally optional."
         ),
         "donate_unknown_currency": 'Unknown currency "{currency}" — try xtr or usd.',
         "donate_currency_not_configured": "{currency} donations aren't set up on this bot yet — try Stars instead.",
         "donate_invalid_amount": "That's not a valid amount — try e.g. /donate 500 or /donate 5 usd.",
         "donate_prompt": (
-            "Thank you for contributing — it goes directly toward this bot's "
-            "hosting and API costs. Choose an amount below, or Custom to enter "
-            "your own (you can also send /donate <number> [usd] directly)."
+            "Thank you! It goes toward hosting costs. Pick an amount, or Custom for your own."
         ),
         "donate_custom_button": "✏️ Custom {symbol}",
         "donate_too_many_stars": "That's a lot of stars! Keep it under {max} ⭐ per donation.",
@@ -89,15 +80,15 @@ STRINGS = {
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded to you automatically, in full.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
         "report_button": '🐞 Add my details',
         "problem_logged_note": "Anonymous report is saved",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
+        "report_disclaimer": "📨 Add your details to this report?\n\nAlready saved, without you: the bot, error code {code}, incident {incident}, the time and the version.\n\nSend adds your Telegram ID, @username, language, and whether this is a private chat or a group. Never your messages or files.\n\nIt helps find your case in the logs. Your choice.",
         "report_send": '📨 Send my details',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
-        "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_sent": "✅ Thank you — added to incident {incident}.",
+        "report_already": "Your details are already on incident {incident}.",
+        "report_cancelled": "Cancelled — nothing about you was sent.",
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
-        "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
+        "crash_notice": "⚠️ Something went wrong on my side, so that wasn't done. Please try again.",
         "sandbox_notice": "🧪 Test mode — no real Stars were charged for this.",
         "balance_header": "⚡ Your balance: {balance}",
         "balance_totals": "Paid {paid} ⭐ in total · credited {credited} ⚡ · spent {spent} ⚡",
@@ -235,29 +226,17 @@ STRINGS = {
         "cancel_item_donation": "the donation amount I asked you for",
         "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
         "feedback_ask": (
-            "💬 What would you like to tell the person who runs these bots? A suggestion, a "
-            "problem, anything — write it in one message, as a reply to this one.\n"
-            "\n"
-            "Only they read it, and they can't write back: it is sent without your name or id. "
-            "/cancel to stop."
+            "💬 What would you like to tell the person who runs these bots? Reply to this message.\n\nIt's sent without your name, so they can't answer. /cancel to stop."
         ),
         "feedback_placeholder": "Your feedback",
-        "feedback_text_only": "That one has to be in words — write your feedback as a text reply to this message, or send /cancel.",
-        "feedback_thanks": "✅ Thank you — sent. Only the person who runs these bots reads it, and they can't reply: nothing in it says who you are.",
-        "feedback_limit": "You've sent {per_day} messages with /feedback today, which is as many as I take in a day. Thank you — write again tomorrow.",
-        "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
+        "feedback_text_only": "Please send text as a reply to this message, or /cancel.",
+        "feedback_thanks": "✅ Thank you — sent anonymously.",
+        "feedback_limit": "That's {per_day} today, the daily limit. Thank you — write again tomorrow.",
+        "feedback_failed": "Not sent — something went wrong on my side. Please try again later.",
         "cancel_button_feedback": "💬 Feedback",
         "cancel_item_feedback": "the feedback I asked you for",
         "help_brief": (
-            "How it works:\n"
-            "\n"
-            "• Paste a link and I send back what's behind it — no command needed. Instagram, TikTok, X, Pinterest and Reddit.\n"
-            "• /settings: the credit caption, the file quality, and large files over 48 MB, which cost ⚡ credit and only once you switch them on.\n"
-            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
-            "\n"
-            "Main commands: /settings · /balance · /cancel\n"
-            "Every command: the full guide, below or /fullhelp.\n"
-            "\n"
+            "How it works:\n\n• Paste a link and I send back what's behind it — no command needed. Instagram, TikTok, X, Pinterest and Reddit.\n• /settings: the caption, the file quality, and large files (over 48 MB, for ⚡ credit).\n• Ideas or problems: /feedback\n\nMain commands: /settings · /balance · /cancel\nEvery command: the full guide, below or /fullhelp.\n\n"
         ),
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
@@ -313,7 +292,7 @@ STRINGS = {
             "Hey! Send me a link (Instagram, TikTok, Pinterest, Reddit, or "
             "Twitter/X) and I'll grab it for you.\n\n"
         ),
-        "help_text": 'Paste a link any time and I\'ll grab it — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a clean image card for a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media if it\'s a media post, or a card if it\'s text\n\nUnder an album I add two buttons: 📄 PDF puts its photos into one PDF, 🗜 ZIP puts everything into one archive.\n\nCommands:\n/settings - the caption, the file quality, and large files (over 48 MB, for ⚡), on one screen\n/caption on|off - the "via @{username}" credit caption, on its own\n/lossless on|off - get downloads as uncompressed files\n/donate - chip in for hosting costs (totally optional)\n/cancel - stop something I\'m waiting on you for (I\'ll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n',
+        "help_text": "Paste a link any time — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a picture of a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media, or a picture of a text post\n\nUnder an album: 📄 PDF puts its photos into one PDF, 🗜 ZIP puts everything into one archive.\n\nCommands:\n/settings - caption, quality and large files (over 48 MB, for ⚡)\n/caption on|off - the \"via @{username}\" caption\n/lossless on|off - downloads as uncompressed files\n/cancel - stop something I'm waiting for\n/feedback - write to whoever runs these bots (anonymous)\n/donate - help pay for hosting (optional)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/en, /uz, /rus - switch language (or /language)\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - start over\n/fullhelp - this guide (/help - the short one)\n\n⚠️ Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn.\n\n",
         "caption_state_on": "ON",
         "caption_state_off": "OFF",
         "settings_heading": "⚙️ Your settings. Tap to change any of them.",
@@ -322,21 +301,21 @@ STRINGS = {
         "caption_toggle_answer": "Caption turned {state}.",
         "lossless_state_on": "ON",
         "lossless_state_off": "OFF",
-        "lossless_status": "Lossless is currently {state}.\n\nON: downloads arrive as files, exactly as the source had them — no Telegram re-compression, but they don't play or preview in the chat until you open them.\nOFF: downloads arrive as photos and videos that play inline, compressed by Telegram.",
+        "lossless_status": "Lossless is {state}.\n\nON: downloads come as original files — no compression, but no preview in the chat.\nOFF: photos and videos that play in the chat, compressed by Telegram.",
         "lossless_turned": "Lossless downloads turned {state}.",
         "lossless_toggle_answer": "Lossless turned {state}.",
         "large_state_on": "ON",
         "large_state_off": "OFF",
-        "large_status": "📦 Large files are {state}.\n\nON: a download over {free} MB is still fetched, up to {max} MB, and sent as a file — ⚡{per} up to 100 MB, less for each 100 MB after (⚡{top} for {max} MB), charged only once it has arrived and never if it fails.\nOFF: anything over {free} MB is refused, and nothing is charged.",
+        "large_status": "📦 Large files are {state}.\n\nON: downloads over {free} MB, up to {max} MB, come as files — ⚡{per} up to 100 MB, ⚡{top} for {max} MB. Charged only once the file arrives.\nOFF: anything over {free} MB is refused; nothing is charged.",
         "large_toggle_answer": "Large files: {state}.",
-        "large_files_turned_on": "📦 Large files are on. Send the link again and I'll get it — ⚡{per} up to 100 MB, less for each 100 MB after, charged once it has arrived. /settings turns it off again.",
+        "large_files_turned_on": "📦 Large files are on. Send the link again — ⚡{per} up to 100 MB, charged once it arrives. /settings turns it off.",
         "large_files_turn_on_button": "📦 Turn on large files",
-        "large_files_off": "📦 This one is bigger than {free} MB. I can still get it for you, as a file — ⚡{per} up to 100 MB, less for each 100 MB after — but only once you've switched on large files. Tap below (or /settings), then send the link again.",
+        "large_files_off": "📦 This one is over {free} MB. Switch on large files below (or in /settings), then send the link again — ⚡{per} up to 100 MB.",
         "large_files_private_only": "📦 This one is bigger than {free} MB. Files that big only come in a private chat with me — send me the link there.",
         "large_files_no_credit": "📦 This one is bigger than {free} MB, which costs at least ⚡{per}, and your balance is ⚡{balance}. Top up with /donate, then send the link again.",
-        "large_files_fetching": "📦 Bigger than {free} MB — fetching it as a large file. ⚡{per} up to 100 MB, less for each 100 MB after, charged once it has arrived.",
+        "large_files_fetching": "📦 Over {free} MB — getting it as a large file (⚡{per} up to 100 MB, charged once it arrives).",
         "large_files_too_big": "📦 This one is bigger than {max} MB, the most Telegram lets me send. Try a shorter clip.",
-        "large_files_short": "📦 It came to {mb} MB, which costs ⚡{price}, and your balance is ⚡{balance} — so nothing was charged. Top up with /donate and send the link again.",
+        "large_files_short": "📦 It's {mb} MB (⚡{price}) and your balance is ⚡{balance}, so nothing was charged. Top up with /donate and send the link again.",
         "large_files_sending": "📦 {mb} MB is here. Sending it...",
         "large_files_send_failed": "📦 I got it, but couldn't send it to you. The ⚡{price} is back — your balance is ⚡{balance}.",
         "large_files_charged": "📦 {mb} MB, sent. ⚡{price} for it — your balance is now ⚡{balance}.",
@@ -353,29 +332,26 @@ STRINGS = {
         "gift_granted": '🎁 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, good until {date}. It pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}. Your balance: /balance',
         "gift_claimed": "🎁 Gift received: {amount} ⚡ of free credit! Mumu bots have passed {users} users, and this is our thank-you.\nIt is good until {date} (UTC) and pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}.\nYour balance: /balance",
         "download_failed": "Couldn't download that: {error}",
-        "download_blocked": "🚫 I tried every way I have of getting that one and the site turned all of them away. That is about where the request came from, not about your link. Try again in a bit — this usually sorts itself out.",
-        "download_missing": "🔍 I couldn't find that post. Usually that means it was deleted, or it is from a private account. Public posts still work.",
+        "download_blocked": "🚫 The site turned me away — it's not your link. Try again in a bit.",
+        "download_missing": "🔍 Couldn't find that post — it may be deleted or private.",
         "download_too_big": "📦 That one is bigger than Telegram lets me send. Try a shorter clip.",
-        "download_all_routes_failed": "😕 That one didn't work, and I tried every way I know. Give it a minute and send it again — if it keeps failing, it is the site, not the link.",
+        "download_all_routes_failed": "😕 That didn't work. Try again in a minute — if it keeps failing, it's the site, not the link.",
         "fetching": "Fetching...",
         "reddit_fetch_failed": "Couldn't fetch that Reddit post: {error}",
         "twitter_fetch_failed_link": "Couldn't fetch that post's content right now — here's the link: {url}",
         "unrecognized_message": (
-            "That doesn't look like a link I recognize — Instagram, TikTok, "
-            "Pinterest, Reddit, or Twitter/X — paste one to download it, or "
-            "/help for commands."
+            "That's not a link I know. Paste an Instagram, TikTok, Pinterest, Reddit or X link, or see /help."
         ),
         "redeliver_as_file": "📄 Get it as an uncompressed file",
         "redeliver_as_compressed": "🖼 Get it compressed instead",
         "redeliver_expired": (
-            "That one is too old for the button now — send the link again, or use "
-            "/lossless to change how everything arrives."
+            "This button has expired — send the link again."
         ),
         "album_delivered": "{count} files above.",
-        "merge_too_big": "📦 That's too much to pack into one file — I can do up to {items} files and {mb} MB in all. Everything is still in the chat above.",
-        "merge_picture_too_big": "📦 One of the pictures is too big for a PDF (over {mp} megapixels), so there's no PDF this time. The pictures are in the chat above.",
-        "merge_no_photos": "📄 A PDF needs at least two photos, and I found fewer than that in the post this time. Send the link again, or take the files from the chat above.",
-        "merge_failed": "😕 Something went wrong while I was putting them into one file, so there's no PDF or ZIP this time. The files above are fine — send the link again to retry.",
+        "merge_too_big": "📦 Too much for one file (up to {items} files, {mb} MB). Everything is in the chat above.",
+        "merge_picture_too_big": "📦 One picture is too big for a PDF (over {mp} MP). The pictures are in the chat above.",
+        "merge_no_photos": "📄 A PDF needs at least two photos. The files are in the chat above.",
+        "merge_failed": "😕 Couldn't pack them into one file. The files above are fine — send the link again to retry.",
         "unknown_command": "I don't recognize that command. Send /help to see what I can do.",
         # 2.2.0: the quality picker and group chats (bot.py).
         "quality_heading": '📹 {title}',
@@ -384,7 +360,7 @@ STRINGS = {
         "quality_more_button": '🎵 MP3 · ✂️ Trim · more ↗️',
         "quality_expired": 'That choice has expired — send the link again.',
         "quality_picked": '⏳ {height}p — fetching...',
-        "group_hello": "👋 Hi! Post a link from Instagram, TikTok, Pinterest, Reddit or X in this chat and I'll send the video here.\n\n/settings — which links I download here, in what quality, and as videos or files. Anyone in the group can change them, unless an admin locks them.",
+        "group_hello": "👋 Hi! Post an Instagram, TikTok, Pinterest, Reddit or X link here and I'll send the video.\n\n/settings — what I download here, and how.",
         "group_cant_see": '⚠️ Right now I only see messages addressed to me. To see the links people post, make me an admin of this group.',
         "group_settings_text": '⚙️ What I do in this group — tap to change.\n\nQuality applies where the site offers a choice; other links come as the site sends them. Files over {free} MB are not sent in groups.',
         "group_on": '✅ Downloading links',
@@ -401,17 +377,17 @@ STRINGS = {
         "group_saved": 'Saved ✅',
     },
     "uz": {
-        "transfer_waiting": "⏳ Hozir boshqa katta fayl uzatilmoqda. Siznikini u tugashi bilan boshlayman — hech narsa qilishingiz shart emas.",
-        "quota_hour": "So'nggi bir soatda {used} ta fayl yuklab oldingiz — bu soatlik limit ({limit} ta). Kichik serverda hammaga navbat yetishi uchun shunday. Keyingisi taxminan {minutes} daqiqadan keyin mumkin bo'ladi.",
-        "quota_day": 'Bugun {used} ta fayl yuklab oldingiz — bu kunlik limit ({limit} ta). Kichik serverda hammaga navbat yetishi uchun shunday. Taxminan {minutes} daqiqadan keyin yana yuklab olishingiz mumkin.',
-        "quota_donor_hint": "Ko'proq kerakmi? /donate orqali bir marta bo'lsa ham hissa qo'shganlar uchun limit butunlay ancha yuqori bo'ladi. Miqdori ahamiyatsiz.",
+        "transfer_waiting": "⏳ Boshqa katta fayl ko'chirilmoqda. Sizniki undan keyin boshlanadi.",
+        "quota_hour": "Soatlik limitga yetdingiz: {limit} ta ({used} ta ishlatildi). Keyingisi taxminan {minutes} daqiqadan keyin.",
+        "quota_day": "Bugungi limitga yetdingiz: {limit} ta ({used} ta ishlatildi). Taxminan {minutes} daqiqadan keyin yana mumkin.",
+        "quota_donor_hint": "Ko'proq kerakmi? Bir marta bo'lsa ham xayriya qilgan har kimga limit doimiy ravishda ancha oshiriladi: /donate",
         "flood_wait": 'Juda tez yuboryapsiz — {seconds} soniyacha kutib, keyin davom eting.',
         "sibling_blurb": 'Oilamizdagi boshqa botlar pastda 👇',
-        "donation_nudge": "💙 Bot sizga foydali bo'lgan bo'lsa: server va API xarajatlarini botni yuritayotgan odam o'z hisobidan qoplaydi. /donate orqali bunga hissa qo'shishingiz mumkin — bu mutlaqo ixtiyoriy.",
+        "donation_nudge": "💙 Bot foydali bo'ldimi? /donate server xarajatlariga yordam beradi. Mutlaqo ixtiyoriy.",
         "donate_unknown_currency": '"{currency}" degan valyuta yo\'q — xtr yoki usd deb yozing.',
         "donate_currency_not_configured": "Bu botda hozircha {currency} bilan xayriya qilib bo'lmaydi — Stars'dan foydalaning.",
         "donate_invalid_amount": "Miqdor noto'g'ri — masalan, /donate 500 yoki /donate 5 usd deb yozing.",
-        "donate_prompt": "Hissangiz uchun rahmat — u to'g'ridan-to'g'ri botning server va API xarajatlariga ketadi. Quyidagi miqdorlardan birini tanlang yoki o'zingiz yozish uchun «Boshqa»ni bosing (/donate <son> [usd] deb ham yuborishingiz mumkin).",
+        "donate_prompt": "Rahmat! Bu server xarajatlariga ketadi. Miqdorni tanlang yoki o'zingiz yozish uchun «Boshqa»ni bosing.",
         "donate_custom_button": "✏️ Boshqa {symbol}",
         "donate_too_many_stars": "Bu juda ko'p! Bir martalik xayriya {max} ⭐ dan oshmasin.",
         "donate_out_of_range": "{currency} bilan xayriya {lo} dan {hi} {symbol} gacha bo'lishi kerak.",
@@ -434,15 +410,15 @@ STRINGS = {
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov sizga avtomatik ravishda to'liq qaytariladi.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
         "report_button": "🐞 Ma'lumotlarimni qo'shish",
         "problem_logged_note": "Anonim hisobot saqlandi",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
+        "report_disclaimer": "📨 Bu xabarga ma'lumotlaringizni qo'shasizmi?\n\nSizsiz saqlangan: bot, xato kodi {code}, hodisa {incident}, vaqt va versiya.\n\n«Yuborish» Telegram ID, @username, til va chat shaxsiy yoki guruh ekanini qo'shadi. Xabarlaringiz va fayllaringiz hech qachon qo'shilmaydi.\n\nBu sizning holatingizni loglardan topishga yordam beradi. Tanlov sizda.",
         "report_send": "📨 Ma'lumotlarimni yuborish",
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
-        "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
+        "report_already": "Ma'lumotlaringiz {incident} hodisasida allaqachon bor.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
-        "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
+        "crash_notice": "⚠️ Men tomonda xatolik yuz berdi, shuning uchun bajarilmadi. Qaytadan urinib ko'ring.",
         "sandbox_notice": '🧪 Test rejimi — haqiqiy Stars yechilmadi.',
         "balance_header": "⚡ Balansingiz: {balance}",
         "balance_totals": "Jami {paid} ⭐ to'landi · {credited} ⚡ qo'shildi · {spent} ⚡ sarflandi",
@@ -493,29 +469,17 @@ STRINGS = {
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
         "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
         "feedback_ask": (
-            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Taklif, muammo — nima bo'lsa "
-            "ham, bitta xabarda, shu xabarga javob qilib yozing.\n"
-            "\n"
-            "Uni faqat o'sha odam o'qiydi va sizga javob yoza olmaydi: xabar ismingiz va ID "
-            "raqamingizsiz yuboriladi. To'xtatish: /cancel"
+            "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Shu xabarga javob qilib yozing.\n\nXabar ismingizsiz yuboriladi, shuning uchun sizga javob yoza olmaydi. To'xtatish: /cancel"
         ),
         "feedback_placeholder": "Fikringiz",
-        "feedback_text_only": "Bu yerga faqat matn qabul qilinadi — fikringizni shu xabarga javob qilib so'z bilan yozing yoki /cancel yuboring.",
-        "feedback_thanks": "✅ Rahmat — yuborildi. Uni faqat bu botlarni yuritayotgan odam o'qiydi va javob yoza olmaydi: xabarda kimligingiz ko'rsatilmagan.",
-        "feedback_limit": "Bugun /feedback orqali {per_day} ta xabar yubordingiz — bir kunda shuncha qabul qilaman. Rahmat, ertaga yana yozishingiz mumkin.",
-        "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "feedback_text_only": "Shu xabarga javob qilib matn yuboring yoki /cancel.",
+        "feedback_thanks": "✅ Rahmat — anonim yuborildi.",
+        "feedback_limit": "Bugun {per_day} ta bo'ldi, bu kunlik chegara. Rahmat — ertaga yana yozing.",
+        "feedback_failed": "Yuborilmadi — men tomonda xatolik yuz berdi. Keyinroq qayta urinib ko'ring.",
         "cancel_button_feedback": "💬 Fikr-mulohaza",
         "cancel_item_feedback": "men so'ragan fikr-mulohaza",
         "help_brief": (
-            "Bot qanday ishlaydi:\n"
-            "\n"
-            "• Havola yuboring — ortidagi faylni yuboraman, buyruq kerak emas. Instagram, TikTok, X, Pinterest va Reddit.\n"
-            "• /settings: «via» izohi, fayl sifati va 48 MB dan katta fayllar — ular ⚡ kredit turadi va faqat o'zingiz yoqsangiz ishlaydi.\n"
-            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
-            "\n"
-            "Asosiy buyruqlar: /settings · /balance · /cancel\n"
-            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n"
-            "\n"
+            "Bot qanday ishlaydi:\n\n• Havola yuboring — ichidagini yuboraman, buyruq kerak emas. Instagram, TikTok, X, Pinterest va Reddit.\n• /settings: izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga).\n• Taklif yoki muammo: /feedback\n\nAsosiy buyruqlar: /settings · /balance · /cancel\nBarcha buyruqlar: to'liq qo'llanma, pastda yoki /fullhelp.\n\n"
         ),
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
@@ -570,7 +534,7 @@ STRINGS = {
             "Salom! Menga havola yuboring (Instagram, TikTok, Pinterest, Reddit "
             "yoki Twitter/X) va men uni siz uchun yuklab beraman.\n\n"
         ),
-        "help_text": 'Havola yuboring — faylni olib beraman, buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar, matnli post uchun esa rasm-kartochka\n  - Pinterest: pin, asl o\'lchamda\n  - Reddit: media post bo\'lsa — media, matnli bo\'lsa — kartochka\n\nAlbom ostida ikkita tugma chiqadi: 📄 PDF — rasmlarni bitta PDF faylga jamlaydi, 🗜 ZIP — hamma narsani bitta arxivga soladi.\n\nBuyruqlar:\n/settings - izoh, fayl sifati va katta fayllar (48 MB dan katta, ⚡ evaziga) — hammasi bitta ekranda\n/caption on|off - fayllar ostidagi "via @{username}" yozuvini yoqish/o\'chirish\n/lossless on|off - fayllarni siqilmagan holda olish\n/donate - server xarajatlariga hissa qo\'shish (ixtiyoriy)\n/cancel - joriy amalni bekor qilish (bir nechta bo\'lsa, qaysi birini so\'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o\'qiydi, javob qaytmaydi\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to\'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o\'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to\'liq qo\'llanma (/help - qisqasi)\n\n⚠️ DIQQAT: To\'lovlar QAYTARILMAYDI — /donate orqali to\'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO\'LMAYDI.\n\n',
+        "help_text": "Istalgan vaqt havola yuboring — buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar yoki matnli post rasmi\n  - Pinterest: pin, asl o'lchamda\n  - Reddit: media yoki matnli post rasmi\n\nAlbom ostida: 📄 PDF rasmlarni bitta PDF ga jamlaydi, 🗜 ZIP hammasini bitta arxivga soladi.\n\nBuyruqlar:\n/settings - izoh, sifat va katta fayllar (48 MB dan katta, ⚡ evaziga)\n/caption on|off - \"via @{username}\" yozuvi\n/lossless on|off - fayllarni siqilmagan holda olish\n/cancel - men kutayotgan narsani to'xtatish\n/feedback - botlarni yuritayotgan odamga yozish (anonim)\n/donate - server xarajatlariga yordam (ixtiyoriy)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/privacy - siz haqingizda nimalar saqlanadi\n/terms - botdan nima uchun foydalanish mumkin\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - boshidan boshlash\n/fullhelp - shu qo'llanma (/help - qisqasi)\n\n⚠️ To'lovlar qaytarilmaydi — Stars qaytarilMAYDI, ⚡ kreditni yechib olib BO'LMAYDI.\n\n",
         "caption_state_on": "YONIQ",
         "caption_state_off": "O'CHIQ",
         "settings_heading": "⚙️ Sozlamalaringiz. O'zgartirish uchun bosing.",
@@ -579,21 +543,21 @@ STRINGS = {
         "caption_toggle_answer": 'Izoh endi {state}.',
         "lossless_state_on": "YONIQ",
         "lossless_state_off": "O'CHIQ",
-        "lossless_status": "Siqilmagan rejim hozir {state}.\n\nYONIQ: fayllar asl sifatida, hujjat ko'rinishida keladi — Telegram ularni siqmaydi, lekin ochmaguningizcha chatda ko'rinmaydi va ijro etilmaydi.\nO'CHIQ: fayllar chatda darhol ko'rinadigan rasm va video bo'lib keladi, lekin Telegram ularni siqadi.",
+        "lossless_status": "Siqilmagan rejim {state}.\n\nYONIQ: fayllar asl holida keladi — siqilmaydi, lekin chatda ko'rinmaydi.\nO'CHIQ: chatda ko'rinadigan rasm va video, Telegram siqadi.",
         "lossless_turned": 'Siqilmagan holda yuklash endi {state}.',
         "lossless_toggle_answer": 'Siqilmagan rejim endi {state}.',
         "large_state_on": "YONIQ",
         "large_state_off": "O'CHIQ",
-        "large_status": "📦 Katta fayllar hozir {state}.\n\nYONIQ: {free} MB dan katta yuklamani ham {max} MB gacha olib kelaman va fayl sifatida yuboraman — 100 MB gacha ⚡{per}, keyingi har 100 MB undan arzonroq ({max} MB uchun ⚡{top}). Kredit fayl yetib kelgandan keyingina yechiladi, xato bo'lsa umuman yechilmaydi.\nO'CHIQ: {free} MB dan kattasi rad etiladi va hech narsa yechilmaydi.",
+        "large_status": "📦 Katta fayllar {state}.\n\nYONIQ: {free} MB dan katta, {max} MB gacha yuklamalar fayl bo'lib keladi — 100 MB gacha ⚡{per}, {max} MB uchun ⚡{top}. Kredit fayl yetib kelgandan keyingina yechiladi.\nO'CHIQ: {free} MB dan kattasi rad etiladi; hech narsa yechilmaydi.",
         "large_toggle_answer": "Katta fayllar: {state}.",
-        "large_files_turned_on": "📦 Katta fayllar yoqildi. Havolani yana yuboring — olib kelaman. 100 MB gacha ⚡{per}, keyingi har 100 MB undan arzonroq; kredit fayl yetib kelgach yechiladi. O'chirish uchun: /settings.",
+        "large_files_turned_on": "📦 Katta fayllar yoqildi. Havolani qayta yuboring — 100 MB gacha ⚡{per}, fayl yetib kelgach yechiladi. O'chirish: /settings",
         "large_files_turn_on_button": "📦 Katta fayllarni yoqish",
-        "large_files_off": "📦 Bu fayl {free} MB dan katta. Uni baribir fayl qilib olib bera olaman — 100 MB gacha ⚡{per}, keyingi har 100 MB undan arzonroq, lekin avval katta fayllarni yoqishingiz kerak. Pastdagi tugmani bosing (yoki /settings), keyin havolani yana yuboring.",
+        "large_files_off": "📦 Bu fayl {free} MB dan katta. Pastda (yoki /settings da) katta fayllarni yoqing, keyin havolani qayta yuboring — 100 MB gacha ⚡{per}.",
         "large_files_private_only": "📦 Bu fayl {free} MB dan katta. Bunday fayllarni faqat men bilan shaxsiy chatda yuboraman — havolani o'sha yerga tashlang.",
         "large_files_no_credit": "📦 Bu fayl {free} MB dan katta, narxi kamida ⚡{per}, balansingizda esa ⚡{balance} bor. /donate orqali to'ldiring, keyin havolani yana yuboring.",
-        "large_files_fetching": "📦 {free} MB dan katta — katta fayl sifatida olib kelyapman. 100 MB gacha ⚡{per}, keyingi har 100 MB undan arzonroq; kredit fayl yetib kelgach yechiladi.",
+        "large_files_fetching": "📦 {free} MB dan katta — katta fayl sifatida olinmoqda (100 MB gacha ⚡{per}, yetib kelgach yechiladi).",
         "large_files_too_big": "📦 Bu fayl {max} MB dan katta — Telegram menga bundan kattasini yuborishga ruxsat bermaydi. Qisqaroq videoni sinab ko'ring.",
-        "large_files_short": "📦 Fayl {mb} MB chiqdi, narxi ⚡{price}, balansingizda esa ⚡{balance} — shuning uchun hech narsa yechilmadi. /donate orqali to'ldiring va havolani yana yuboring.",
+        "large_files_short": "📦 Fayl {mb} MB (⚡{price}), balansingiz esa ⚡{balance}, shuning uchun hech narsa yechilmadi. /donate bilan to'ldiring va havolani qayta yuboring.",
         "large_files_sending": "📦 {mb} MB tayyor. Yuboryapman...",
         "large_files_send_failed": "📦 Faylni oldim, lekin sizga yubora olmadim. ⚡{price} qaytarildi — balansingiz ⚡{balance}.",
         "large_files_charged": "📦 {mb} MB yuborildi. Buning uchun ⚡{price} yechildi — balansingiz endi ⚡{balance}.",
@@ -610,22 +574,22 @@ STRINGS = {
         "gift_granted": "🎁 Bizda 100 dan ortiq foydalanuvchi bo'ldi, rahmat! Sizga {amount} ⚡ bepul kredit berildi, u {date} gacha amal qiladi. Bu {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi. Balansingiz: /balance",
         "gift_claimed": "🎁 Sovg'a: {amount} ⚡ bepul kredit! Mumu botlarida {users} dan ortiq foydalanuvchi bo'ldi, bu bizning minnatdorchiligimiz.\nU {date} gacha (UTC) amal qiladi va {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi.\nBalansingiz: /balance",
         "download_failed": "Buni yuklab bo'lmadi: {error}",
-        "download_blocked": '🚫 Buni olishning barcha yo‘llarini sinab ko‘rdim, sayt hammasini rad etdi. Bu havolangizga emas, so‘rov qayerdan kelganiga bog‘liq. Birozdan so‘ng qayta urinib ko‘ring — odatda o‘zi tuzalib ketadi.',
-        "download_missing": '🔍 Bu postni topa olmadim. Odatda bu post o‘chirilgan yoki yopiq akkauntdan ekanini bildiradi. Ochiq postlar ishlayveradi.',
+        "download_blocked": "🚫 Sayt meni qaytardi — havolangizda muammo yo'q. Birozdan keyin urinib ko'ring.",
+        "download_missing": "🔍 Bu post topilmadi — o'chirilgan yoki yopiq bo'lishi mumkin.",
         "download_too_big": '📦 Bu fayl Telegram ruxsat beradigan hajmdan katta. Qisqaroq video sinab ko‘ring.',
-        "download_all_routes_failed": '😕 Bu ishlamadi, men bilgan barcha yo‘llarni sinab ko‘rdim. Bir daqiqadan so‘ng yana yuboring — agar takrorlansa, muammo havolada emas, saytda.',
+        "download_all_routes_failed": "😕 Bo'lmadi. Bir daqiqadan keyin urinib ko'ring — takrorlanaversa, muammo saytda, havolada emas.",
         "fetching": "Olinmoqda...",
         "reddit_fetch_failed": "Bu Reddit postini olib bo'lmadi: {error}",
         "twitter_fetch_failed_link": "Hozircha bu post mazmunini olib bo'lmadi — mana havola: {url}",
-        "unrecognized_message": "Bu tanish havolaga o'xshamayapti. Instagram, TikTok, Pinterest, Reddit yoki Twitter/X havolasini yuboring — buyruqlar ro'yxati: /help",
+        "unrecognized_message": "Bu men biladigan havola emas. Instagram, TikTok, Pinterest, Reddit yoki X havolasini yuboring yoki /help ni ko'ring.",
         "redeliver_as_file": "📄 Siqilmagan fayl sifatida olish",
         "redeliver_as_compressed": "🖼 Siqilgan holda olish",
-        "redeliver_expired": "Bu tugmaning muddati o'tgan — havolani qaytadan yuboring yoki fayllar qanday kelishini /lossless orqali o'zgartiring.",
+        "redeliver_expired": "Bu tugmaning muddati o'tgan — havolani qayta yuboring.",
         "album_delivered": "Yuqorida {count} ta fayl.",
-        "merge_too_big": "📦 Bunchasini bitta faylga joylab bo'lmaydi — ko'pi bilan {items} ta fayl va jami {mb} MB. Fayllarning o'zi yuqorida turibdi.",
-        "merge_picture_too_big": "📦 Rasmlardan biri PDF uchun juda katta ({mp} megapikseldan katta), shuning uchun bu safar PDF chiqmaydi. Rasmlarning o'zi yuqorida turibdi.",
-        "merge_no_photos": "📄 PDF uchun kamida ikkita rasm kerak, postda esa bu safar ikkitadan kam rasm topildi. Havolani qayta yuboring yoki fayllarni yuqoridan oling.",
-        "merge_failed": "😕 Fayllarni bitta qilib yig'ishda nimadir xato ketdi, shuning uchun bu safar PDF ham, ZIP ham chiqmadi. Yuqoridagi fayllar joyida — qayta urinish uchun havolani yana yuboring.",
+        "merge_too_big": "📦 Bitta fayl uchun juda ko'p ({items} ta fayl, {mb} MB gacha). Hammasi yuqoridagi chatda.",
+        "merge_picture_too_big": "📦 Rasmlardan biri PDF uchun juda katta ({mp} MP dan ortiq). Rasmlar yuqoridagi chatda.",
+        "merge_no_photos": "📄 PDF uchun kamida ikkita rasm kerak. Fayllar yuqoridagi chatda.",
+        "merge_failed": "😕 Ularni bitta faylga jamlab bo'lmadi. Yuqoridagi fayllar joyida — qayta urinish uchun havolani yana yuboring.",
         "unknown_command": "Bunday buyruq yo'q. Bot nimalar qila olishini bilish uchun /help yuboring.",
         # 2.2.0: the quality picker and group chats (bot.py).
         "quality_heading": '📹 {title}',
@@ -634,7 +598,7 @@ STRINGS = {
         "quality_more_button": '🎵 MP3 · ✂️ Kesish · boshqalar ↗️',
         "quality_expired": 'Bu tanlov eskirgan — havolani qaytadan yuboring.',
         "quality_picked": '⏳ {height}p — olinmoqda...',
-        "group_hello": "👋 Salom! Bu chatga Instagram, TikTok, Pinterest, Reddit yoki X havolasini yuboring — videoni shu yerga yuboraman.\n\n/settings — bu yerda qaysi havolalarni, qanday sifatda, video yoki fayl sifatida yuklashim. Admin qulflamagan bo'lsa, guruhdagi har kim o'zgartira oladi.",
+        "group_hello": "👋 Salom! Bu yerga Instagram, TikTok, Pinterest, Reddit yoki X havolasini yuboring — videoni yuboraman.\n\n/settings — bu yerda nimani va qanday yuklashim.",
         "group_cant_see": "⚠️ Hozir faqat menga yozilgan xabarlarni ko'raman. Odamlar yuborgan havolalarni ko'rishim uchun meni guruh admini qiling.",
         "group_settings_text": "⚙️ Bu guruhda nima qilaman — o'zgartirish uchun bosing.\n\nSifat sayt tanlov bergan joyda ishlaydi; boshqa havolalar sayt qanday bersa, shunday keladi. {free} MB dan katta fayllar guruhlarda yuborilmaydi.",
         "group_on": '✅ Havolalarni yuklayapman',
@@ -651,35 +615,26 @@ STRINGS = {
         "group_saved": 'Saqlandi ✅',
     },
     "ru": {
-        "transfer_waiting": "⏳ Сейчас передаётся другой большой файл. Ваш начнётся сразу после него — ничего делать не нужно.",
+        "transfer_waiting": "⏳ Сейчас переносится другой большой файл. Ваш начнётся сразу после.",
         "quota_hour": (
-            "За последний час вы скачали {used} — это предел этого бота ({limit} в час). "
-            "Он нужен, чтобы на маленьком сервере хватало всем. Следующая попытка "
-            "освободится примерно через {minutes} минут(ы)."
+            "Достигнут предел: {limit} загрузок в час (использовано {used}). Следующая — примерно через {minutes} мин."
         ),
         "quota_day": (
-            "Сегодня вы скачали {used} — это дневной предел бота ({limit}). Он нужен, "
-            "чтобы на маленьком сервере хватало всем. Снова откроется примерно через "
-            "{minutes} минут(ы)."
+            "Достигнут дневной предел: {limit} загрузок (использовано {used}). Снова можно примерно через {minutes} мин."
         ),
         "quota_donor_hint": (
-            "Если нужно больше: у всех, кто хоть раз поддержал бота через /donate, "
-            "предел заметно выше и навсегда. Сумма значения не имеет."
+            "Нужно больше? Все, кто хоть раз сделал пожертвование (любое), получают намного больший предел навсегда: /donate"
         ),
         "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
         "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
-            "💙 Если этот бот оказался полезным: расходы на хостинг/API покрывает тот, "
-            "кто его запустил, а /donate — это совершенно необязательный способ помочь "
-            "ему остаться на плаву. Никакого давления в любом случае!"
+            "💙 Бот полезен? /donate помогает оплачивать хостинг. Совершенно необязательно."
         ),
         "donate_unknown_currency": 'Неизвестная валюта "{currency}" — попробуйте xtr или usd.',
         "donate_currency_not_configured": "Пожертвования в {currency} на этом боте пока не настроены — попробуйте Stars.",
         "donate_invalid_amount": "Это некорректная сумма — попробуйте, например, /donate 500 или /donate 5 usd.",
         "donate_prompt": (
-            "Спасибо за вклад — эти средства идут прямо на хостинг и API этого "
-            "бота. Выберите сумму ниже или нажмите «Другое», чтобы ввести свою "
-            "(также можно сразу отправить /donate <число> [usd])."
+            "Спасибо! Это идёт на хостинг. Выберите сумму или «Другое», чтобы ввести свою."
         ),
         "donate_custom_button": "✏️ Другое {symbol}",
         "donate_too_many_stars": "Это очень много звёзд! Пусть будет меньше {max} ⭐ за одно пожертвование.",
@@ -703,15 +658,15 @@ STRINGS = {
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается вам автоматически и полностью.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
         "report_button": '🐞 Добавить мои данные',
         "problem_logged_note": 'Анонимный отчёт сохранён',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
+        "report_disclaimer": "📨 Добавить ваши данные к этому отчёту?\n\nУже сохранено без вас: бот, код ошибки {code}, инцидент {incident}, время и версия.\n\n«Отправить» добавит ваш Telegram ID, @username, язык и то, личный это чат или группа. Никогда — ваши сообщения или файлы.\n\nЭто помогает найти ваш случай в логах. Решать вам.",
         "report_send": '📨 Отправить мои данные',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
-        "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_sent": "✅ Спасибо — добавлено к инциденту {incident}.",
+        "report_already": "Ваши данные уже есть в инциденте {incident}.",
+        "report_cancelled": "Отменено — ничего о вас не отправлено.",
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
-        "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
+        "crash_notice": "⚠️ Что-то пошло не так с моей стороны, поэтому это не сделано. Попробуйте ещё раз.",
         "sandbox_notice": "🧪 Тестовый режим — настоящие Stars не списывались.",
         "balance_header": "⚡ Ваш баланс: {balance}",
         "balance_totals": "Всего оплачено {paid} ⭐ · начислено {credited} ⚡ · потрачено {spent} ⚡",
@@ -834,29 +789,17 @@ STRINGS = {
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
         "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
         "feedback_ask": (
-            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Идея, проблема, что угодно — "
-            "напишите одним сообщением в ответ на это.\n"
-            "\n"
-            "Его прочитает только он, и ответить вам он не сможет: сообщение уходит без вашего "
-            "имени и id. Остановить: /cancel"
+            "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Ответьте на это сообщение.\n\nОно уходит без вашего имени, поэтому ответить вам не смогут. Остановить: /cancel"
         ),
         "feedback_placeholder": "Ваш отзыв",
-        "feedback_text_only": "Сюда нужен текст — напишите отзыв словами в ответ на это сообщение или отправьте /cancel.",
-        "feedback_thanks": "✅ Спасибо — отправлено. Это прочитает только тот, кто ведёт этих ботов, и ответить он не сможет: в сообщении нет ничего о том, кто вы.",
-        "feedback_limit": "Через /feedback сегодня пришло уже {per_day} ваших сообщений — больше за день я не принимаю. Спасибо, напишите завтра.",
-        "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
+        "feedback_text_only": "Отправьте текст в ответ на это сообщение или /cancel.",
+        "feedback_thanks": "✅ Спасибо — отправлено анонимно.",
+        "feedback_limit": "Сегодня уже {per_day} — это дневной предел. Спасибо — напишите завтра.",
+        "feedback_failed": "Не отправлено — что-то пошло не так с моей стороны. Попробуйте позже.",
         "cancel_button_feedback": "💬 Отзыв",
         "cancel_item_feedback": "отзыв, который я просил написать",
         "help_brief": (
-            "Как это устроено:\n"
-            "\n"
-            "• Пришлите ссылку — пришлю то, что по ней лежит, без всяких команд. Instagram, TikTok, X, Pinterest и Reddit.\n"
-            "• /settings: подпись «via», качество файлов и большие файлы больше 48 МБ — они стоят ⚡ кредит и работают, только если их включить.\n"
-            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
-            "\n"
-            "Основные команды: /settings · /balance · /cancel\n"
-            "Все команды — в полном руководстве: кнопка ниже или /fullhelp.\n"
-            "\n"
+            "Как это устроено:\n\n• Пришлите ссылку — я верну то, что по ней, команда не нужна. Instagram, TikTok, X, Pinterest и Reddit.\n• /settings: подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡).\n• Идеи или проблемы: /feedback\n\nОсновные команды: /settings · /balance · /cancel\nВсе команды: полное руководство, ниже или /fullhelp.\n\n"
         ),
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
@@ -910,7 +853,7 @@ STRINGS = {
             "Здравствуйте! Пришлите мне ссылку (Instagram, TikTok, Pinterest, Reddit "
             "или Twitter/X), и я скачаю это для вас.\n\n"
         ),
-        "help_text": 'Просто пришлите ссылку в любое время — я её заберу, команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото, а для текстового поста — аккуратная карточка\n  - Pinterest: пин в полном размере\n  - Reddit: медиа, если это медиа-пост, или карточка, если это текст\n\nПод альбомом появятся две кнопки: 📄 PDF собирает фото в один PDF, 🗜 ZIP — всё в один архив.\n\nКоманды:\n/settings - подпись, качество файлов и большие файлы (больше 48 МБ, за ⚡), всё на одном экране\n/caption on|off - подпись "via @{username}" на загрузках, отдельно\n/lossless on|off - получать загрузки несжатыми файлами\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": "Присылайте ссылку в любое время — команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото или картинка текстового поста\n  - Pinterest: пин в полном размере\n  - Reddit: медиа или картинка текстового поста\n\nПод альбомом: 📄 PDF собирает фото в один PDF, 🗜 ZIP — всё в один архив.\n\nКоманды:\n/settings - подпись, качество и большие файлы (больше 48 МБ, за ⚡)\n/caption on|off - подпись \"via @{username}\"\n/lossless on|off - загрузки несжатыми файлами\n/cancel - остановить то, чего я жду\n/feedback - написать тому, кто ведёт ботов (анонимно)\n/donate - помочь с хостингом (необязательно)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/en, /uz, /rus - сменить язык (или /language)\n/privacy - что я храню о вас\n/terms - для чего можно использовать бота\n/deletemydata - удалить всё, что я о вас храню\n/start - начать сначала\n/fullhelp - это руководство (/help - краткое)\n\n⚠️ Платежи окончательны — Stars НЕ возвращаются, ⚡ кредит НЕЛЬЗЯ вывести.\n\n",
         "caption_state_on": "ВКЛ",
         "caption_state_off": "ВЫКЛ",
         "settings_heading": "⚙️ Ваши настройки. Нажмите, чтобы изменить.",
@@ -919,21 +862,21 @@ STRINGS = {
         "caption_toggle_answer": "Подпись теперь {state}.",
         "lossless_state_on": "ВКЛ",
         "lossless_state_off": "ВЫКЛ",
-        "lossless_status": "Режим без потерь сейчас {state}.\n\nВКЛ: загрузки приходят файлом, ровно такими, какими были в источнике — Telegram их не пережимает, но они не проигрываются в чате, пока вы их не откроете.\nВЫКЛ: загрузки приходят фото и видео, которые играют прямо в чате, со сжатием Telegram.",
+        "lossless_status": "Режим без потерь {state}.\n\nВКЛ: загрузки приходят исходными файлами — без сжатия, но без превью в чате.\nВЫКЛ: фото и видео, которые играют в чате, со сжатием Telegram.",
         "lossless_turned": "Загрузка без потерь теперь {state}.",
         "lossless_toggle_answer": "Режим без потерь теперь {state}.",
         "large_state_on": "ВКЛ",
         "large_state_off": "ВЫКЛ",
-        "large_status": "📦 Большие файлы сейчас {state}.\n\nВКЛ: загрузку больше {free} МБ я всё равно скачаю — до {max} МБ — и пришлю файлом: ⚡{per} до 100 МБ, каждые следующие 100 МБ дешевле ({max} МБ — ⚡{top}). Списываю, только когда файл уже скачан, и ничего — если не получилось.\nВЫКЛ: всё, что больше {free} МБ, отклоняется, и ничего не списывается.",
+        "large_status": "📦 Большие файлы {state}.\n\nВКЛ: загрузки больше {free} МБ, до {max} МБ, приходят файлом — ⚡{per} до 100 МБ, ⚡{top} за {max} МБ. Списывается, только когда файл пришёл.\nВЫКЛ: всё больше {free} МБ отклоняется; ничего не списывается.",
         "large_toggle_answer": "Большие файлы: {state}.",
-        "large_files_turned_on": "📦 Большие файлы включены. Пришлите ссылку ещё раз — я скачаю. ⚡{per} до 100 МБ, каждые следующие 100 МБ дешевле; спишу, когда файл уже будет у меня. Выключить: /settings.",
+        "large_files_turned_on": "📦 Большие файлы включены. Пришлите ссылку снова — ⚡{per} до 100 МБ, списывается, когда файл придёт. Выключить: /settings",
         "large_files_turn_on_button": "📦 Включить большие файлы",
-        "large_files_off": "📦 Этот файл больше {free} МБ. Я всё равно могу прислать его файлом — ⚡{per} до 100 МБ, каждые следующие 100 МБ дешевле, — но только если вы включите большие файлы. Нажмите кнопку ниже (или /settings), потом пришлите ссылку ещё раз.",
+        "large_files_off": "📦 Этот файл больше {free} МБ. Включите большие файлы кнопкой ниже (или в /settings) и пришлите ссылку снова — ⚡{per} до 100 МБ.",
         "large_files_private_only": "📦 Этот файл больше {free} МБ. Такие файлы я присылаю только в личном чате — отправьте ссылку туда.",
         "large_files_no_credit": "📦 Этот файл больше {free} МБ, это стоит минимум ⚡{per}, а на балансе ⚡{balance}. Пополните через /donate и пришлите ссылку ещё раз.",
-        "large_files_fetching": "📦 Больше {free} МБ — скачиваю как большой файл. ⚡{per} до 100 МБ, каждые следующие 100 МБ дешевле; спишу, когда он будет у меня.",
+        "large_files_fetching": "📦 Больше {free} МБ — скачиваю как большой файл (⚡{per} до 100 МБ, списывается, когда придёт).",
         "large_files_too_big": "📦 Этот файл больше {max} МБ — больше Telegram мне отправлять не позволяет. Попробуйте ролик покороче.",
-        "large_files_short": "📦 Получилось {mb} МБ, это ⚡{price}, а на балансе ⚡{balance} — поэтому ничего не списано. Пополните через /donate и пришлите ссылку ещё раз.",
+        "large_files_short": "📦 Файл на {mb} МБ (⚡{price}), а на балансе ⚡{balance}, поэтому ничего не списано. Пополните через /donate и пришлите ссылку снова.",
         "large_files_sending": "📦 {mb} МБ скачано. Отправляю...",
         "large_files_send_failed": "📦 Я скачал файл, но не смог его вам отправить. ⚡{price} вернулись — на балансе ⚡{balance}.",
         "large_files_charged": "📦 {mb} МБ, отправлено. За это ⚡{price} — на балансе теперь ⚡{balance}.",
@@ -950,29 +893,26 @@ STRINGS = {
         "gift_granted": '🎁 Нас уже больше 100 — спасибо! Вам начислено {amount} ⚡ бесплатного кредита, он действует до {date}. Этого хватит примерно на {conversions} платных конвертаций в {convert} или на скачивание больших файлов в {download}. Ваш баланс: /balance',
         "gift_claimed": "🎁 Подарок: {amount} ⚡ бесплатного кредита! У Mumu ботов уже больше {users} пользователей — это наше спасибо.\nОн действует до {date} (UTC). Этого хватит на платные конвертации (около {conversions}) в {convert} или на скачивание больших файлов в {download}.\nВаш баланс: /balance",
         "download_failed": "Не удалось это скачать: {error}",
-        "download_blocked": '🚫 Я перебрал все способы достать это, и сайт отказал всем. Дело не в ссылке, а в том, откуда пришёл запрос. Попробуйте через некоторое время — обычно это проходит само.',
-        "download_missing": '🔍 Не нашёл этот пост. Обычно это значит, что его удалили или он из закрытого аккаунта. Публичные посты работают.',
+        "download_blocked": "🚫 Сайт меня не пустил — дело не в вашей ссылке. Попробуйте чуть позже.",
+        "download_missing": "🔍 Не нашёл этот пост — возможно, он удалён или закрыт.",
         "download_too_big": '📦 Это больше, чем Telegram позволяет мне отправить. Попробуйте ролик покороче.',
-        "download_all_routes_failed": '😕 Не получилось, а я пробовал все способы. Подождите минуту и пришлите снова — если повторяется, дело в сайте, а не в ссылке.',
+        "download_all_routes_failed": "😕 Не получилось. Попробуйте через минуту — если не выходит снова, дело в сайте, а не в ссылке.",
         "fetching": "Загрузка...",
         "reddit_fetch_failed": "Не удалось получить этот пост Reddit: {error}",
         "twitter_fetch_failed_link": "Не удалось получить содержимое поста прямо сейчас — вот ссылка: {url}",
         "unrecognized_message": (
-            "Это не похоже на ссылку, которую я узнаю — Instagram, TikTok, "
-            "Pinterest, Reddit или Twitter/X — пришлите одну из них, чтобы скачать, "
-            "или /help для списка команд."
+            "Такую ссылку я не знаю. Пришлите ссылку из Instagram, TikTok, Pinterest, Reddit или X, или загляните в /help."
         ),
         "redeliver_as_file": "📄 Получить несжатым файлом",
         "redeliver_as_compressed": "🖼 Получить сжатым",
         "redeliver_expired": (
-            "Для кнопки это уже слишком старая загрузка — пришлите ссылку заново или "
-            "поменяйте способ доставки через /lossless."
+            "Срок этой кнопки истёк — пришлите ссылку снова."
         ),
         "album_delivered": "Выше {count} файл(ов).",
-        "merge_too_big": "📦 Слишком много, чтобы собрать в один файл. Мой предел: файлов — {items}, общий размер — {mb} МБ. Всё это по-прежнему в чате выше.",
-        "merge_picture_too_big": "📦 Одно из фото слишком большое для PDF (больше {mp} мегапикселей), поэтому в этот раз PDF не получится. Сами фото — в чате выше.",
-        "merge_no_photos": "📄 Для PDF нужно хотя бы два фото, а в этом посте сейчас нашлось меньше. Пришлите ссылку заново или возьмите файлы из чата выше.",
-        "merge_failed": "😕 Что-то пошло не так, пока я собирал всё в один файл, — ни PDF, ни ZIP в этот раз не вышло. Файлы выше целы; пришлите ссылку заново, чтобы попробовать ещё раз.",
+        "merge_too_big": "📦 Слишком много для одного файла (до {items} файлов, {mb} МБ). Всё есть в чате выше.",
+        "merge_picture_too_big": "📦 Одна из картинок слишком большая для PDF (больше {mp} МП). Картинки — в чате выше.",
+        "merge_no_photos": "📄 Для PDF нужно хотя бы два фото. Файлы — в чате выше.",
+        "merge_failed": "😕 Не удалось собрать их в один файл. Файлы выше в порядке — пришлите ссылку снова, чтобы повторить.",
         "unknown_command": "Я не знаю такую команду. Отправьте /help, чтобы увидеть, что я умею.",
         # 2.2.0: the quality picker and group chats (bot.py).
         "quality_heading": '📹 {title}',
@@ -981,7 +921,7 @@ STRINGS = {
         "quality_more_button": '🎵 MP3 · ✂️ Обрезка · другое ↗️',
         "quality_expired": 'Этот выбор устарел — отправьте ссылку ещё раз.',
         "quality_picked": '⏳ {height}p — загружаю...',
-        "group_hello": '👋 Привет! Отправьте в этот чат ссылку из Instagram, TikTok, Pinterest, Reddit или X — и я пришлю видео сюда.\n\n/settings — какие ссылки я скачиваю здесь, в каком качестве, видео или файлом. Менять может любой участник, если админ не закрыл это.',
+        "group_hello": "👋 Привет! Отправьте сюда ссылку из Instagram, TikTok, Pinterest, Reddit или X — и я пришлю видео.\n\n/settings — что и как я скачиваю здесь.",
         "group_cant_see": '⚠️ Сейчас я вижу только сообщения, адресованные мне. Чтобы видеть ссылки участников, сделайте меня админом группы.',
         "group_settings_text": '⚙️ Что я делаю в этой группе — нажмите, чтобы изменить.\n\nКачество работает там, где сайт даёт выбор; остальные ссылки приходят такими, какими их отдаёт сайт. Файлы больше {free} МБ в группах не отправляются.',
         "group_on": '✅ Скачиваю ссылки',
