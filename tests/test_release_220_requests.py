@@ -837,3 +837,25 @@ def test_the_cancel_button_changes_the_line_and_undoes_itself_when_too_late():
     db, conv = _tapped_link(40)
     db.mark_follower_opened(conv, GUEST)
     assert tap(conv)[-1].startswith("You're writing to someone anonymously")
+
+
+# ── StickerBot: titles renamed outside the bot ───────────────────────────────
+
+def test_mypacks_picks_up_titles_renamed_on_telegram(packs):
+    import asyncio
+    from telegram.error import BadRequest
+    bot_module = load(STICKER, "bot")
+    packs.add_pack(OWNER, "renamed_by_bot", "Mine")
+    packs.add_pack(OWNER, "gone_by_bot", "Gone")
+
+    class FakeBot:
+        async def get_sticker_set(self, name):
+            if name == "gone_by_bot":
+                raise BadRequest("Stickerset_invalid")
+            return SimpleNamespace(title={"renamed_by_bot": "Custom"}.get(name, packs.get_pack_title(name)))
+
+    stored = [("renamed_by_bot", "Mine"), ("gone_by_bot", "Gone"), ("open_by_bot", "Open")]
+    assert asyncio.run(bot_module._refresh_pack_titles(FakeBot(), stored)) == {"renamed_by_bot": "Custom"}
+    assert packs.get_pack_title("renamed_by_bot") == "Custom"
+    assert packs.get_pack_title("gone_by_bot") == "Gone"
+    assert packs.get_pack_title("open_by_bot") == "Open"

@@ -64,6 +64,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InputSticker,
 )
+from telegram.error import TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     ChatMemberHandler,
@@ -95,6 +96,7 @@ from db import (
     get_pack_owner,
     get_pack_title,
     set_pack_title,
+    set_pack_titles,
     get_pack_creator_info,
     get_coedit_view,
     reset_share_token,
@@ -223,6 +225,10 @@ TITLE, EDITING, RENAME, INVITE = range(4)
 
 # The most characters Telegram takes in a pack's title; a longer one is cut.
 PACK_TITLE_MAX = 64
+# /mypacks asks Telegram for the current titles of at most this many packs, all
+# at once, and stops waiting after this many seconds.
+TITLE_REFRESH_MAX = 50
+TITLE_REFRESH_SECONDS = 4
 
 
 def build_help_text(lang: str, full: bool = False) -> str:
@@ -889,7 +895,39 @@ async def show_packs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(update, i18n.t(lang, "no_packs_yet"), reply_markup=kb)
         return
     text = i18n.t(lang, "your_packs") + ("\n" + i18n.t(lang, "your_packs_shared_note") if shared else "")
-    await reply(update, text, reply_markup=packs_keyboard(packs, lang, shared))
+    shown = await reply(update, text, reply_markup=packs_keyboard(packs, lang, shared))
+    # Shown first from what is stored, then corrected in place if a title has
+    # changed. Inline rather than in a task: updates from one person run one at
+    # a time, so a tap on the list cannot be overwritten by this edit.
+    changed = await _refresh_pack_titles(context.bot, (list(packs) + list(shared))[:TITLE_REFRESH_MAX])
+    if changed:
+        def fix(rows):
+            return [(name, changed.get(name, title)) for name, title in rows]
+        await shown.set(context.bot, text, reply_markup=packs_keyboard(fix(packs), lang, fix(shared)))
+
+
+async def _refresh_pack_titles(bot, packs) -> "dict[str, str]":
+    """The titles Telegram has now, for the (name, title) pairs given; saves and
+    returns the ones that differ. A pack can be renamed outside this bot (the
+    "edit" in Telegram's sticker panel, @Stickers), and the stored title used to
+    stay the old one for good. A pack Telegram can't find, or an answer that
+    doesn't come in time, leaves the stored title as it is."""
+    async def current(name, title):
+        try:
+            now = (await bot.get_sticker_set(name)).title
+        except TelegramError:
+            return None
+        return (name, now) if now and now != title else None
+
+    try:
+        found = await asyncio.wait_for(
+            asyncio.gather(*(current(name, title) for name, title in packs)), TITLE_REFRESH_SECONDS)
+    except asyncio.TimeoutError:
+        return {}
+    changed = dict(pair for pair in found if pair)
+    if changed:
+        await asyncio.to_thread(set_pack_titles, changed)
+    return changed
 
 
 # ---------- pack detail menu (Add / Rename / Co-edit) ----------

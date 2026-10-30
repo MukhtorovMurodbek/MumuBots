@@ -659,6 +659,16 @@ def set_pack_title(name: str, title: str) -> None:
         conn.commit()
 
 
+def set_pack_titles(titles: "dict[str, str]") -> None:
+    """Several at once, in one round trip: the titles /mypacks found changed on
+    Telegram (see bot._refresh_pack_titles)."""
+    with pooled() as conn:
+        with conn.cursor() as cur:
+            cur.executemany("UPDATE packs SET title = %s WHERE name = %s",
+                            [(title, name) for name, title in titles.items()])
+        conn.commit()
+
+
 # ---------- co-editing ----------
 
 def add_editor(pack_name: str, user_id: int) -> None:
