@@ -34,8 +34,8 @@ LANGUAGE_PROMPT = (
 
 STRINGS = {
     "en": {
-        "maintenance_note": "🔧 AnonBot is closed for a short repair. Your conversations are safe, but nothing sent to it right now is delivered or kept. Please write again in a little while.",
-        "flood_wait": "You're going faster than I can keep up with — give it about {seconds} second(s) and carry on.",
+        "maintenance_note": "🔧 AnonBot is closed for a short repair. Your conversations are safe, but nothing sent now is delivered or kept. Please write again later.",
+        "flood_wait": "Too fast — wait about {seconds} s and carry on.",
         # ---- shared keys (same name in every bot's i18n.py) ----
         "sibling_blurb": "Also part of this bot family, see below \U0001f447",
         "donation_nudge": (
@@ -51,22 +51,22 @@ STRINGS = {
         "donate_too_many_stars": "That's a lot of stars! Keep it under {max} ⭐ per donation.",
         "donate_out_of_range": "{currency} donations need to be between {lo} and {hi} {symbol}.",
         "donate_invoice_title": "Contribute to hosting",
-        "donate_invoice_description": "Goes towards what this bot costs to run, and adds {credited} ⚡ of credit to your balance for conversions in ConvertBot.",
+        "donate_invoice_description": "Helps pay for hosting, and adds {credited} ⚡ of credit for ConvertBot.",
         "donate_invoice_label": "Hosting contribution",
         "donate_invoice_description_fiat": 'A one-time voluntary donation towards hosting costs. Thank you!',
-        "donate_prompt_credit": 'Stars you pay become ⚡ credit for conversions in ConvertBot. Your next {left} ⭐ earn {each} ⚡ each ({mult}×): {rate} ⚡ of ordinary credit plus a bonus that expires {days} days after payment. ⚡ can NOT be withdrawn or turned back into Stars.',
-        "donate_prompt_credit_base": 'Stars you pay become ⚡ credit for conversions in ConvertBot, {rate} ⚡ per ⭐. ⚡ can NOT be withdrawn or turned back into Stars.',
+        "donate_prompt_credit": "Each ⭐ gives ⚡ credit for ConvertBot. Your next {left} ⭐ give {each} ⚡ each ({mult}×): {rate} ⚡ plus a bonus that expires {days} days after payment. ⚡ can NOT be withdrawn or turned back into Stars.",
+        "donate_prompt_credit_base": "Each ⭐ gives {rate} ⚡ of credit for ConvertBot. ⚡ can NOT be withdrawn or turned back into Stars.",
         "donate_invoice_error": "⚠️ Telegram wouldn't create that invoice: {error}",
         "stars_unit": "Stars",
         "donate_custom_ask": "How many {unit} would you like to donate? Reply with a number.",
         "donate_invalid_amount_retry": "That's not a valid amount — send /donate to try again.",
         "donate_thanks": "🙏 Thank you for the {amount} ⭐ — genuinely appreciated!",
-        "topup_thanks": "🙏 Thank you for donating {stars} ⭐ — it helps keep the bots running.\n\nAs a thank-you, you've received {total} ⚡ of credit in {convert_bot} to use on file conversions. Your credit there: {balance} ⚡.",
+        "topup_thanks": "🙏 Thank you for {stars} ⭐!\n\nYou got {total} ⚡ of credit in {convert_bot} for conversions. Balance there: {balance} ⚡.",
         "topup_thanks_bonus": 'Of that, {bonus} ⚡ is bonus credit and expires on {date}.',
-        "credit_cannot_be_withdrawn": '⚡ is credit for conversions in ConvertBot, and can NOT be withdrawn or turned back into Stars. A problem with a payment? /paysupport',
-        "topup_refunded": "⚠️ Your payment of {stars} ⭐ went through, but a problem on my side kept the ⚡ from reaching your balance, so I've refunded it: the {stars} ⭐ are back in your account. Please try again in a few minutes.",
-        "topup_failed": "⚠️ Your payment of {stars} ⭐ went through, but a problem on my side kept the ⚡ from reaching your balance. Nothing is lost: the owner has been told and will add it by hand. To follow up: /paysupport",
-        "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded to you automatically, in full.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
+        "credit_cannot_be_withdrawn": "⚡ is credit for ConvertBot conversions and can NOT be withdrawn or turned back into Stars. Payment problem? /paysupport",
+        "topup_refunded": "⚠️ Your {stars} ⭐ payment went through, but the ⚡ didn't reach your balance, so the {stars} ⭐ were refunded. Please try again in a few minutes.",
+        "topup_failed": "⚠️ Your {stars} ⭐ payment went through, but the ⚡ didn't reach your balance. Nothing is lost — the owner will add it by hand. Follow up: /paysupport",
+        "paysupport_text": "💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ can NOT be withdrawn or turned back into Stars. Only a payment that couldn't become credit is refunded, automatically and in full.\n\nCharged with no credit, or charged twice? Write to {contact} with the date, the amount and your Telegram ID, {user_id}. It's put right with credit.\n\n/balance lists your payments.",
         "report_button": '🐞 Add my details',
         "problem_logged_note": "Anonymous report is saved",
         "report_disclaimer": "📨 Add your details to this report?\n\nAlready saved, without you: the bot, error code {code}, incident {incident}, the time and the version.\n\nSend adds your Telegram ID, @username, language, and whether this is a private chat or a group. Never your messages or files.\n\nIt helps find your case in the logs. Your choice.",
@@ -90,122 +90,65 @@ STRINGS = {
             "A permanent link that lets anyone write to you anonymously."
         ),
         "bot_description": (
-            "Get a link and post it wherever you like. Anyone who opens it can write to you "
-            "without you being shown who they are, and you can answer — as a real threaded "
-            "conversation, several at once.\n"
-            "\n"
-            "They are anonymous to you, not to the bot: it stores which two accounts are talking "
-            "so that a reply can reach the right thread, and never stores what either of you "
-            "writes. /privacy has the whole of it.\n"
-            "\n"
-            "English, Uzbek and Russian."
+            "Get a link, post it anywhere, and people can write to you anonymously. You answer in threaded conversations, several at once.\n\nThe bot knows who talks to whom, so replies reach the right thread, but never stores what anyone writes. /privacy\n\nEnglish, Uzbek and Russian."
         ),
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
         "privacy_stored": (
-            "• your Telegram user id, and the language you chose\n"
-            "• your inbox link, if you have made one\n"
-            "• who is talking to whom: a conversation is stored as the pair of user ids behind it "
-            "plus a number, which is what lets a reply reach the right thread\n"
-            "• which message belongs to which conversation, by message id, and when each was relayed\n"
-            "• who you have blocked\n"
-            "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
-            "using it\n"
-            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
-            "• a record of any donation: the amount and Telegram's payment id\n"
-            "\n"
-            "What is not kept is what anybody writes. Messages pass straight through and are "
-            "never stored here: they live in the two Telegram chats, and each side can delete "
-            "their own copy. Reactions pass through the same way — the bot puts the same one on "
-            "the other person's copy and keeps no record of it. "
-            "The "
-            "one exception is what you choose to send with /feedback, below.\n"
-            "\n"
-            "Anonymous means anonymous to the person you are writing to. They are never shown "
-            "your name, your username or your id. It is not anonymity from the bot itself — the "
-            "pairing above is what makes a reply possible at all."
+            "• your Telegram ID and language\n• your inbox link, if you made one\n• who talks to whom: each conversation as the pair of IDs behind it plus a number, so replies reach the right thread\n• which message belongs to which conversation, by message ID, and when it was relayed\n• who you blocked\n• that you were shown a one-time announcement, so it shows only once\n• a timestamp each time you use the bot, to count users\n• daily button-tap counts for the whole bot, not per person\n• donations: the amount and Telegram's payment ID\n\nMessages and reactions are never stored: they pass straight through and live only in the two Telegram chats, where each side can delete their copy. The one exception is /feedback, below.\n\nAnonymous means anonymous to the person you write to: they never see your name, username or ID. The bot itself knows who is paired — that is how replies work."
         ),
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
-            "Every error this bot shows anybody is written down by itself: the error code, an "
-            "incident number, when it happened and the bot's version. Nothing in that is about "
-            "you — not your id, not your name, not what you sent. A fault nobody reports is "
-            "still a fault, which is why it does not wait to be asked.\n"
-            "\n"
-            "\"Add my details\" under an error offers to attach four things to that one "
-            "incident: your Telegram user id, your @username if you have one, the language you "
-            "picked, and whether the chat is private or a group. All four are named on screen "
-            "first, and nothing is sent unless you tap Send. What you wrote and the files you "
-            "sent are never part of it.\n"
-            "\n"
-            "Those four are cleared after 30 days on their own, and /deletemydata clears them "
-            "straight away. The record of the error stays — it still happened — it just stops "
-            "saying who hit it. The records themselves are deleted after 180 days."
+            "Every error is logged without you: its code, an incident number, the time and the bot's version.\n\n\"Add my details\" under an error attaches your Telegram ID, @username, language and chat type (private or group) to that one incident — only if you tap Send. Never your messages or files. They are cleared after 30 days, or at once with /deletemydata. Error records are deleted after 180 days."
         ),
         "privacy_seen_by_heading": "Who else sees it:",
         "privacy_seen_by": (
-            "• Telegram, which carries every message both ways and sets its own terms\n"
-            "• the hosting provider this bot runs on, and the database it writes to"
+            "• Telegram, which carries every message\n• the hosting provider and the database the bot uses"
         ),
         "privacy_others": (
-            "• and nobody beyond those — messages go through Telegram and no further, and no outside service "
-            "is called"
+            "• nobody else — messages go through Telegram only, and no outside service is used"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
+        "privacy_kept_for": "Settings stay until you erase them or stop using the bot. Usage times go after about three months. Payment records and your ⚡ balance stay longer, for payment disputes.\n\nNothing is sold, used for ads, or given to anyone not named above.",
         "privacy_your_choices": (
-            "What you can do:\n"
-            "/deletemydata — erase what this bot holds on you\n"
-            "/terms — what the bot may be used for\n"
-            "\n"
-            "Blocking the bot in Telegram stops it talking to you but erases nothing, so send "
-            "/deletemydata first if you want both."
+            "What you can do:\n/deletemydata — erase what this bot holds on you\n/terms — the rules\n\nBlocking the bot erases nothing, so send /deletemydata first."
         ),
         "terms_heading": "📜 Terms",
         "terms_use": (
-            "Use it for what it is for, within the law and within Telegram's own terms. Do not "
-            "use it to harass anyone, and do not drive it past the limits it sets — an account "
-            "doing either is blocked."
+            "Use it within the law and Telegram's terms. Harassing anyone or pushing past the bot's limits gets an account blocked."
         ),
         "terms_specific": (
-            "Messages: a hidden name is not a licence. Threats, harassment and anything illegal "
-            "are all still exactly that when the sender is anonymous, and an inbox owner can "
-            "block a sender for good. Anyone running an inbox is responsible for what they invite "
-            "people to send them."
+            "Messages: being anonymous doesn't make threats, harassment or anything illegal OK. Inbox owners can block senders for good, and are responsible for what they invite people to send."
         ),
-        "terms_money": 'Money: /donate is voluntary and goes towards what the bots cost to run. A payment in Stars also adds ⚡ credit for conversions in ConvertBot: 2 ⚡ per ⭐, or 6 for your first 500 Stars ever and 4 for the next 500. The part above 2 is bonus credit and expires 90 days after the payment. Payments are FINAL: Stars are NOT refunded, and credit can NOT be withdrawn or turned back into Stars. The one exception: a payment the bot could not turn into credit is refunded automatically, in full. Telegram handles every payment and the bot never sees a card number. A payment that went wrong: /paysupport.',
+        "terms_money": "Money: /donate is voluntary and helps pay for hosting. Stars also add ⚡ credit for ConvertBot: 2 ⚡ per ⭐, or 6 for your first 500 Stars and 4 for the next 500; the part above 2 is bonus that expires 90 days after payment. Payments are FINAL: Stars are NOT refunded and credit can NOT be withdrawn — except a payment that couldn't become credit, which is refunded automatically. Telegram handles payments; the bot never sees a card. Problems: /paysupport",
         "terms_no_warranty": (
-            "No promises: one person runs this, it is free, and it can be slow, wrong, or off "
-            "entirely without warning. Keep your own copy of anything that matters."
+            "No promises: one person runs this for free, and it can be slow, wrong or down without warning. Keep your own copies of what matters."
         ),
         "policy_full_text": "Full text: {url}",
         "policy_contact": "Questions, complaints or a data request: {contact}",
         "delete_data_confirm": "⚠️ This erases what this bot holds on you. There is no undo.",
-        "delete_data_consequences": 'Your inbox link stops working — every copy of it anybody has posted, permanently. Open conversations stop being routable, so neither side can reply into them any more, and your block list goes with them.\n\nMessages already sent are untouched. They were never stored here; they are in the Telegram chats, and each side deletes their own copy.\n\nDonation records stay, without your username, because a dispute about a payment is settled against them. Your ⚡ balance stays too, and is still yours if you come back.',
+        "delete_data_consequences": "Your inbox link stops working for good, open conversations can't be replied to any more, and your block list goes.\n\nSent messages stay in the Telegram chats; they were never stored here.\n\nPayment records stay, without your username, for payment disputes. Your ⚡ balance stays too.",
         "delete_data_button_yes": "🗑 Erase it",
         "delete_data_button_no": "↩️ Keep my data",
         "delete_data_kept": "Nothing was erased.",
         "delete_data_done": (
-            "🗑 Done — {rows} record(s) erased.\n"
-            "\n"
-            "Send /start whenever you like; the bot will treat you as new."
+            "🗑 Done — {rows} record(s) erased. Send /start any time to begin fresh."
         ),
         "delete_data_failed": (
-            "Couldn't erase that just now — something went wrong at my end. Please try again in "
-            "a few minutes."
+            "Couldn't erase it — something went wrong on my side. Please try again in a few minutes."
         ),
         "language_set_confirmation": "✅ Language set to English.",
         "cancel_header": "\u274c Cancelled:",
-        "cancel_nothing": "Nothing to cancel — I wasn't waiting on anything from you.",
+        "cancel_nothing": "Nothing to cancel.",
         "cancel_ask": "What should I stop? Here's what I'm waiting on:",
-        "cancel_kept": "Alright — nothing cancelled.",
+        "cancel_kept": "OK — nothing cancelled.",
         "cancel_reply_box_freed": "Your reply box is free again.",
         "cancel_button_all": "❌ All of it",
         "cancel_button_none": "↩️ Nothing, keep going",
         "cancel_button_donation": "💸 Donation amount",
         "cancel_item_donation": "the donation amount I asked you for",
-        "cancel_item_stale_prompt": "a leftover prompt that was still waiting on an answer",
+        "cancel_item_stale_prompt": "an old unanswered question",
         "cancel_item_anon_session": "the anonymous chat you had open — tap the link again to start a new one",
         "cancel_button_anon_session": "💬 The anonymous chat you're in",
         "feedback_ask": (
@@ -220,10 +163,7 @@ STRINGS = {
         "cancel_item_feedback": "the feedback I asked you for",
         "privacy_feedback_heading": "If you send /feedback:",
         "privacy_feedback": (
-            "What you write reaches the person who runs these bots as a Telegram message, with "
-            "which bot it came from and your language — not your name, your username or your id. "
-            "Only they read it, and they cannot reply to it. A copy is kept in the bots' "
-            "database for 30 days and then deleted."
+            "It reaches the person who runs these bots with the bot's name and your language — not your name, username or ID. They can't reply. A copy is kept for 30 days."
         ),
         # ---- anon_bot-specific keys ----
         "start_greeting": "Hey! This bot runs anonymous-question inboxes.\n\n",
@@ -233,7 +173,7 @@ STRINGS = {
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
         "help_page_everything": "The full guide: /fullhelp",
-        "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
+        "help_page_gone": "That help page is gone. Send /help.",
         "helppage_link": (
             "🔗 /link — your anonymous inbox link\n\nPost it anywhere: whoever opens it can write to you here anonymously. Each open starts a new conversation. The link stays the same until you make a new one.\nButtons under it:\n• ⏸️ Pause: no new conversations until you resume (/pause, /resume).\n• 🔄 New link: the old one stops starting conversations (/newlink).\n• Counts of guests and conversations (/stats).\nCurrent conversations keep working either way.\n\nExample: send /link and put the link in your Instagram bio."
         ),
@@ -358,13 +298,13 @@ STRINGS = {
             "Not sent — several conversations are open here. Reply to the message you're answering (swipe it)."
         ),
         "restarting_send_again": (
-            "🔄 I'm being updated right now — give me a few seconds and send that again."
+            "🔄 I'm being updated — send that again in a few seconds."
         ),
-        "update_soon_try_later": "🔧 I'm being updated in a moment, so I can't start anything new right now — please try again in about {minutes} minute(s). I'll message you when I'm back.",
-        "update_soon_try_later_soon": "🔧 I'm being updated right now, so I can't start anything new — please try again shortly. I'll message you when I'm back.",
-        "update_will_reset": "🔧 Heads up: I'm about to be updated, and what you have going right now will be reset. You'll be able to start it again in a few minutes.",
-        "update_done_try_now": '✅ The update is done — go ahead and try again now.',
-        "gift_granted": "🎁 We have passed 100 users, thank you! You get {amount} ⚡ of free credit, good until {date}. It pays for about {conversions} paid conversions in {convert} or big-file downloads in {download}. Your balance: /balance",
+        "update_soon_try_later": "🔧 I'm about to be updated — please try again in about {minutes} min. I'll message you when I'm back.",
+        "update_soon_try_later_soon": "🔧 I'm being updated — please try again shortly. I'll message you when I'm back.",
+        "update_will_reset": "🔧 I'm about to be updated, and what you're doing now will be reset. You can start again in a few minutes.",
+        "update_done_try_now": "✅ Update done — try again now.",
+        "gift_granted": "🎁 We passed 100 users — thank you! Here's {amount} ⚡ of free credit, good until {date}: about {conversions} paid conversions in {convert} or big downloads in {download}. /balance",
         "reply_forbidden": "Couldn't deliver your reply — they may have blocked or left the bot.",
         "reply_failed": "Couldn't deliver your reply: {error}",
         "delivered_confirmation": "Delivered ↩️",
@@ -390,8 +330,8 @@ STRINGS = {
         "unknown_command": "I don't recognize that command. Send /help to see what I can do.",
     },
     "uz": {
-        "maintenance_note": "🔧 AnonBot qisqa ta'mirlash uchun yopiq. Suhbatlaringiz joyida, lekin hozir yuborilgan xabarlar yetkazilmaydi va saqlanmaydi. Iltimos, birozdan keyin qayta yozing.",
-        "flood_wait": 'Juda tez yuboryapsiz — {seconds} soniyacha kutib, keyin davom eting.',
+        "maintenance_note": "🔧 AnonBot qisqa ta'mirda. Suhbatlaringiz joyida, lekin hozir yuborilgan narsa yetkazilmaydi va saqlanmaydi. Keyinroq yana yozing.",
+        "flood_wait": "Juda tez — taxminan {seconds} soniya kutib, davom eting.",
         "sibling_blurb": 'Oilamizdagi boshqa botlar pastda 👇',
         "donation_nudge": "💙 Bot foydali bo'ldimi? /donate server xarajatlariga yordam beradi. Mutlaqo ixtiyoriy.",
         "donate_unknown_currency": '"{currency}" degan valyuta yo\'q — xtr yoki usd deb yozing.',
@@ -402,22 +342,22 @@ STRINGS = {
         "donate_too_many_stars": "Bu juda ko'p! Bir martalik xayriya {max} ⭐ dan oshmasin.",
         "donate_out_of_range": "{currency} bilan xayriya {lo} dan {hi} {symbol} gacha bo'lishi kerak.",
         "donate_invoice_title": 'Server xarajatlariga hissa',
-        "donate_invoice_description": "Botlar xarajatlariga ketadi va ConvertBot'dagi konvertatsiyalar uchun balansingizga {credited} ⚡ kredit qo'shadi.",
+        "donate_invoice_description": "Server xarajatlariga yordam beradi va ConvertBot uchun {credited} ⚡ kredit qo'shadi.",
         "donate_invoice_label": 'Xayriya',
         "donate_invoice_description_fiat": 'Server xarajatlari uchun bir martalik ixtiyoriy xayriya. Rahmat!',
-        "donate_prompt_credit": "To'lagan Stars'ingiz ConvertBot'da konvertatsiyalarga sarflanadigan ⚡ kreditga aylanadi. Keyingi {left} ⭐ ning har biri {each} ⚡ beradi ({mult}×): {rate} ⚡ oddiy kredit, qolgani esa to'lovdan {days} kun o'tgach muddati tugaydigan bonus. ⚡ ni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.",
-        "donate_prompt_credit_base": "To'lagan har bir ⭐ ConvertBot'da konvertatsiyalarga sarflanadigan {rate} ⚡ kreditga aylanadi. ⚡ ni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.",
+        "donate_prompt_credit": "Har bir ⭐ ConvertBot uchun ⚡ kredit beradi. Keyingi {left} ⭐ ning har biri {each} ⚡ beradi ({mult}×): {rate} ⚡ va to'lovdan {days} kun o'tgach yo'qoladigan bonus. ⚡ ni yechib olib yoki Stars'ga aylantirib BO'LMAYDI.",
+        "donate_prompt_credit_base": "Har bir ⭐ ConvertBot uchun {rate} ⚡ kredit beradi. ⚡ ni yechib olib yoki Stars'ga aylantirib BO'LMAYDI.",
         "donate_invoice_error": "⚠️ Telegram to'lov hisobini yaratmadi: {error}",
         "stars_unit": "Stars (yulduzcha)",
         "donate_custom_ask": 'Qancha {unit} xayriya qilmoqchisiz? Faqat sonni yozib yuboring.',
         "donate_invalid_amount_retry": "Miqdor noto'g'ri — qaytadan urinish uchun /donate yuboring.",
         "donate_thanks": '🙏 {amount} ⭐ uchun katta rahmat!',
-        "topup_thanks": "🙏 {stars} ⭐ xayriyangiz uchun rahmat — bu botlarning ishlashiga yordam beradi.\n\nMinnatdorchilik sifatida {convert_bot} botida fayllarni o'girish uchun {total} ⚡ kredit oldingiz. U yerdagi balansingiz: {balance} ⚡.",
+        "topup_thanks": "🙏 {stars} ⭐ uchun rahmat!\n\n{convert_bot} da konvertatsiyalar uchun {total} ⚡ kredit oldingiz. U yerdagi balans: {balance} ⚡.",
         "topup_thanks_bonus": 'Shundan {bonus} ⚡ — bonus kredit, uning muddati {date} kuni tugaydi.',
-        "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit: uni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. To'lovda muammo bo'lsa: /paysupport",
-        "topup_refunded": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin men tomondagi muammo tufayli ⚡ balansingizga tushmadi, shuning uchun to'lovni qaytardim: {stars} ⭐ hisobingizga qaytdi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
-        "topup_failed": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin men tomondagi muammo tufayli ⚡ balansingizga tushmadi. Hech narsa yo'qolmaydi: egasiga xabar berildi, u qo'lda qo'shib qo'yadi. Murojaat uchun: /paysupport",
-        "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov sizga avtomatik ravishda to'liq qaytariladi.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
+        "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit, uni yechib olib yoki Stars'ga aylantirib BO'LMAYDI. To'lov bilan muammo? /paysupport",
+        "topup_refunded": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin ⚡ balansingizga tushmadi, shuning uchun {stars} ⭐ qaytarildi. Bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "topup_failed": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin ⚡ balansingizga tushmadi. Hech narsa yo'qolmaydi — egasi uni qo'lda qo'shib qo'yadi. Kuzatish: /paysupport",
+        "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarilMAYDI, ⚡ ni yechib olib yoki Stars'ga aylantirib BO'LMAYDI. Faqat kreditga aylanmagan to'lov avtomatik ravishda to'liq qaytariladi.\n\nPul yechildi-yu kredit kelmadimi yoki ikki marta yechildimi? {contact} ga sana, miqdor va Telegram ID raqamingizni ({user_id}) yozing. Kredit bilan to'g'rilab beriladi.\n\n/balance to'lovlaringizni ko'rsatadi.",
         "report_button": "🐞 Ma'lumotlarimni qo'shish",
         "problem_logged_note": "Anonim hisobot saqlandi",
         "report_disclaimer": "📨 Bu xabarga ma'lumotlaringizni qo'shasizmi?\n\nSizsiz saqlangan: bot, xato kodi {code}, hodisa {incident}, vaqt va versiya.\n\n«Yuborish» Telegram ID, @username, til va chat shaxsiy yoki guruh ekanini qo'shadi. Xabarlaringiz va fayllaringiz hech qachon qo'shilmaydi.\n\nBu sizning holatingizni loglardan topishga yordam beradi. Tanlov sizda.",
@@ -440,36 +380,36 @@ STRINGS = {
         "bot_short_description": (
             "Sizga anonim yozish imkonini beruvchi doimiy havola."
         ),
-        "bot_description": "Havola oling va uni istalgan joyga joylang. Uni ochgan har kim sizga kimligini oshkor qilmay yoza oladi, siz esa javob berasiz — bir vaqtda bir nechta alohida suhbat bo'lib.\n\nYozuvchilar sizga noma'lum, lekin botga emas: javob to'g'ri suhbatga borishi uchun bot qaysi ikki akkaunt yozishayotganini saqlaydi, yozilgan xabarlarni esa hech qachon saqlamaydi. Batafsil: /privacy\n\nIngliz, o'zbek va rus tillarida.",
+        "bot_description": "Havola oling, uni istalgan joyga joylang — odamlar sizga anonim yoza oladi. Siz bir nechta suhbatda javob berasiz.\n\nBot javoblar to'g'ri suhbatga borishi uchun kim kim bilan gaplashayotganini biladi, lekin yozilgan narsani hech qachon saqlamaydi. /privacy\n\nO'zbek, ingliz va rus tillarida.",
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
+        "privacy_stored": "• Telegram ID raqamingiz va tilingiz\n• quti havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan gaplashayotgani: har bir suhbat ortidagi ikki ID va raqam sifatida — javoblar to'g'ri suhbatga borishi uchun\n• qaysi xabar qaysi suhbatga tegishli (xabar ID si bo'yicha) va qachon yetkazilgani\n• kimlarni bloklaganingiz\n• bir martalik e'lonni ko'rganingiz — u faqat bir marta ko'rsatilishi uchun\n• har safar botdan foydalanganingiz vaqti — foydalanuvchilarni sanash uchun\n• butun bot bo'yicha kunlik tugma bosishlar soni, odamlar bo'yicha emas\n• xayriyalar: miqdor va Telegram to'lov ID si\n\nXabarlar va reaksiyalar hech qachon saqlanmaydi: ular to'g'ridan-to'g'ri o'tadi va faqat ikki Telegram chatida qoladi, har kim o'z nusxasini o'chira oladi. Yagona istisno — /feedback, quyida.\n\nAnonim — siz yozayotgan odam uchun anonim degani: u ismingiz, username yoki ID raqamingizni hech qachon ko'rmaydi. Botning o'zi esa kim kim bilan bog'langanini biladi — javoblar shunday ishlaydi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Har bir xato sizsiz yoziladi: kodi, hodisa raqami, vaqti va bot versiyasi.\n\nXato ostidagi «Ma'lumotlarimni qo'shish» o'sha hodisaga Telegram ID, @username, til va chat turini (shaxsiy yoki guruh) qo'shadi — faqat «Yuborish»ni bossangiz. Xabarlar va fayllar hech qachon qo'shilmaydi. Ular 30 kundan keyin yoki /deletemydata bilan darhol o'chiriladi. Xato yozuvlari 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
-        "privacy_seen_by": "• Telegram — barcha xabarlar u orqali o'tadi va u o'z qoidalari asosida ishlaydi\n• bot joylashgan hosting va bot foydalanadigan ma'lumotlar bazasi",
-        "privacy_others": "• boshqa hech kim — xabarlar faqat Telegram orqali o'tadi, tashqi xizmatlarga murojaat qilinmaydi",
+        "privacy_seen_by": "• Telegram — barcha xabarlarni u yetkazadi\n• hosting provayderi va bot ishlatadigan ma'lumotlar bazasi",
+        "privacy_others": "• boshqa hech kim — xabarlar faqat Telegram orqali o'tadi, tashqi xizmatlar ishlatilmaydi",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
-        "privacy_your_choices": "Nima qilishingiz mumkin:\n/deletemydata — bot siz haqingizda saqlagan ma'lumotlarni o'chirish\n/terms — botdan foydalanish shartlari\n\nBotni Telegramda bloklasangiz, u sizga yozmay qo'yadi, lekin hech narsa o'chmaydi. Ikkalasini ham xohlasangiz, avval /deletemydata yuboring.",
+        "privacy_kept_for": "Sozlamalar siz o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha saqlanadi. Foydalanish vaqtlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz to'lov nizolari uchun uzoqroq saqlanadi.\n\nHech narsa sotilmaydi, reklamaga ishlatilmaydi va yuqorida aytilmaganlarga berilmaydi.",
+        "privacy_your_choices": "Nima qila olasiz:\n/deletemydata — bot siz haqingizda saqlagan narsalarni o'chirish\n/terms — qoidalar\n\nBotni bloklash hech narsani o'chirmaydi, shuning uchun avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
-        "terms_use": "Botdan maqsadiga ko'ra, qonun va Telegram qoidalari doirasida foydalaning. Uni boshqalarni bezovta qilish uchun ishlatmang va belgilangan cheklovlardan oshirib yuklamang — aks holda akkaunt bloklanadi.",
-        "terms_specific": "Xabarlar haqida: ismingiz yashirinligi hamma narsaga ruxsat degani emas. Tahdid, ta'qib va qonunga zid har qanday xabar anonim yozilgan bo'lsa ham shundayligicha qoladi, havola egasi esa yuboruvchini butunlay bloklay oladi. Xabarlar qutisini ochgan odam o'zi nimaga taklif qilgani uchun javob beradi.",
-        "terms_money": "Pul haqida: /donate — ixtiyoriy, mablag' botlar xarajatlariga ketadi. Stars'dagi to'lov ConvertBot'da konvertatsiyalar uchun ⚡ kredit ham beradi: har ⭐ uchun 2 ⚡, umumiy hisobda birinchi 500 ta Stars uchun esa 6 ⚡ dan, keyingi 500 tasi uchun 4 ⚡ dan. 2 ⚡ dan ortig'i bonus kredit bo'lib, to'lovdan 90 kun o'tgach muddati tugaydi. To'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. Yagona istisno: bot kreditga aylantira olmagan to'lov avtomatik ravishda to'liq qaytariladi. Har bir to'lovni Telegram o'tkazadi, bot karta raqamingizni ko'rmaydi. To'lovda muammo bo'lsa: /paysupport.",
-        "terms_no_warranty": "Kafolat yo'q: botni bir kishi yuritadi va u oldindan ogohlantirmasdan sekinlashishi, xato qilishi yoki butunlay to'xtab qolishi mumkin. Siz uchun muhim narsalarning nusxasini o'zingizda saqlang.",
+        "terms_use": "Botdan qonun va Telegram shartlari doirasida foydalaning. Kimnidir bezovta qilgan yoki bot chegaralarini buzgan akkaunt bloklanadi.",
+        "terms_specific": "Xabarlar: anonimlik tahdid, bezovtalik yoki noqonuniy narsalarni oqlamaydi. Quti egalari yuboruvchini butunlay bloklay oladi va odamlarni nima yuborishga chaqirganliklari uchun o'zlari javob beradi.",
+        "terms_money": "Pul: /donate ixtiyoriy va server xarajatlariga yordam beradi. Stars ConvertBot uchun ⚡ kredit ham beradi: har ⭐ uchun 2 ⚡, ilk 500 Stars uchun 6 va keyingi 500 uchun 4; 2 dan ortig'i bonus bo'lib, to'lovdan 90 kun o'tgach yo'qoladi. To'lovlar QAYTARILMAYDI: Stars qaytarilMAYDI, kreditni yechib olib BO'LMAYDI — kreditga aylanmagan to'lov bundan mustasno, u avtomatik qaytariladi. To'lovlarni Telegram amalga oshiradi; bot karta raqamini ko'rmaydi. Muammo: /paysupport",
+        "terms_no_warranty": "Kafolat yo'q: buni bir kishi bepul yuritadi, u sekin ishlashi, xato qilishi yoki ogohlantirishsiz to'xtashi mumkin. Muhim narsalarning nusxasini o'zingizda saqlang.",
         "policy_full_text": "To'liq matn: {url}",
         "policy_contact": "Savol, shikoyat yoki ma'lumot so'rovi uchun: {contact}",
         "delete_data_confirm": "⚠️ Bot siz haqingizda saqlagan ma'lumotlar o'chiriladi. Buni ortga qaytarib bo'lmaydi.",
-        "delete_data_consequences": "Havolangiz butunlay ishlamay qoladi — qayerga joylangan bo'lsa ham. Ochiq suhbatlarga endi hech bir tomon javob yoza olmaydi, bloklanganlar ro'yxatingiz ham o'chiriladi.\n\nYuborilgan xabarlarga hech narsa qilmaydi: ular bu yerda saqlanmagan, Telegram chatlarida turadi va har kim o'z nusxasini o'zi o'chiradi.\n\nXayriya yozuvlari foydalanuvchi nomingizsiz saqlanib qoladi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi. ⚡ balansingiz ham saqlanadi — qaytib kelsangiz, u o'z joyida bo'ladi.",
+        "delete_data_consequences": "Quti havolangiz butunlay ishlamay qoladi, ochiq suhbatlarga endi javob yozib bo'lmaydi, bloklar ro'yxati ham o'chadi.\n\nYuborilgan xabarlar Telegram chatlarida qoladi; ular bu yerda hech qachon saqlanmagan.\n\nTo'lov yozuvlari to'lov nizolari uchun username'ingizsiz qoladi. ⚡ balansingiz ham qoladi.",
         "delete_data_button_yes": "🗑 O'chirilsin",
         "delete_data_button_no": "↩️ Ma'lumotlarim qolsin",
         "delete_data_kept": "Hech narsa o'chirilmadi.",
-        "delete_data_done": "🗑 Bajarildi — {rows} ta yozuv o'chirildi.\n\nIstalgan payt /start yuborsangiz, bot sizni yangi foydalanuvchi sifatida kutib oladi.",
-        "delete_data_failed": "Hozir o'chirib bo'lmadi — bot tomonida xatolik yuz berdi. Bir necha daqiqadan keyin qayta urinib ko'ring.",
+        "delete_data_done": "🗑 Tayyor — {rows} ta yozuv o'chirildi. Yangidan boshlash uchun istalgan vaqt /start yuboring.",
+        "delete_data_failed": "O'chirib bo'lmadi — men tomonda xatolik yuz berdi. Bir necha daqiqadan keyin qayta urinib ko'ring.",
         "language_set_confirmation": "✅ Til o'zbekchaga o'zgartirildi.",
         "cancel_header": "\u274c Bekor qilindi:",
-        "cancel_nothing": "Bekor qilinadigan amal yo'q — hozir hech narsa kutilmayapti.",
+        "cancel_nothing": "Bekor qilinadigan narsa yo'q.",
         "cancel_ask": 'Qaysi birini bekor qilay? Hozir quyidagilar kutilmoqda:',
         "cancel_kept": "Yaxshi — hech narsa bekor qilinmadi.",
         "cancel_reply_box_freed": "Xabar yozish maydoni endi bo'sh.",
@@ -477,7 +417,7 @@ STRINGS = {
         "cancel_button_none": '↩️ Hech birini, davom etamiz',
         "cancel_button_donation": "💸 Xayriya miqdori",
         "cancel_item_donation": 'kiritilishi kutilayotgan xayriya miqdori',
-        "cancel_item_stale_prompt": "javobsiz qolgan eski so'rov",
+        "cancel_item_stale_prompt": "javobsiz qolgan eski savol",
         "feedback_ask": (
             "💬 Bu botlarni yuritayotgan odamga nima demoqchisiz? Shu xabarga javob qilib yozing.\n\nXabar ismingizsiz yuboriladi, shuning uchun sizga javob yoza olmaydi. To'xtatish: /cancel"
         ),
@@ -490,10 +430,7 @@ STRINGS = {
         "cancel_item_feedback": "men so'ragan fikr-mulohaza",
         "privacy_feedback_heading": "/feedback yuborsangiz:",
         "privacy_feedback": (
-            "Yozganingiz bu botlarni yuritayotgan odamga Telegram xabari sifatida yetib boradi — "
-            "qaysi botdan kelgani va tilingiz bilan birga, lekin ismingiz, foydalanuvchi nomingiz "
-            "va ID raqamingizsiz. Uni faqat o'sha odam o'qiydi va unga javob yoza olmaydi. "
-            "Nusxasi botlar bazasida 30 kun saqlanadi, keyin o'chiriladi."
+            "U botlarni yuritayotgan odamga bot nomi va tilingiz bilan yetib boradi — ismingiz, username yoki ID raqamingiz bilan emas. U javob yoza olmaydi. Nusxasi 30 kun saqlanadi."
         ),
         "cancel_item_anon_session": "ochiq turgan anonim suhbat — yangisini boshlash uchun havolani qayta bosing",
         "cancel_button_anon_session": "💬 Siz turgan anonim suhbat",
@@ -504,7 +441,7 @@ STRINGS = {
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
         "help_page_everything": "To'liq qo'llanma: /fullhelp",
-        "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
+        "help_page_gone": "Bu yordam sahifasi endi yo'q. /help yuboring.",
         "helppage_link": (
             "🔗 /link — anonim qutingiz havolasi\n\nUni istalgan joyga joylang: ochgan har kim sizga shu yerda anonim yoza oladi. Har ochilishda yangi suhbat boshlanadi. Yangisini yaratmaguningizcha havola o'zgarmaydi.\nOstidagi tugmalar:\n• ⏸️ To'xtatish: qayta yoqmaguningizcha yangi suhbat yo'q (/pause, /resume).\n• 🔄 Yangi havola: eskisi endi suhbat boshlamaydi (/newlink).\n• Mehmonlar va suhbatlar soni (/stats).\nBoshlangan suhbatlar har holda ishlayveradi.\n\nMisol: /link yuboring va havolani Instagram bio'ngizga qo'ying."
         ),
@@ -606,12 +543,12 @@ STRINGS = {
         "reply_button_hint": "Bu xabarni o'ngga suring yoki bosib turib «Javob berish»ni tanlang.",
         "must_reply_opening": "Hali yuborilmadi. Yuqoridagi xabarga javob qiling (o'ngga suring) — bu birinchi xabaringiz bo'ladi.",
         "must_reply_ambiguous": "Yuborilmadi — bu yerda bir nechta suhbat ochiq. Javob berayotgan xabaringizga javob qiling (o'ngga suring).",
-        "restarting_send_again": '🔄 Bot hozir yangilanmoqda — bir necha soniyadan keyin qaytadan yuboring.',
-        "update_soon_try_later": "🔧 Bot tez orada yangilanadi, shuning uchun yangi ishni boshlab bo'lmaydi — taxminan {minutes} daqiqadan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
-        "update_soon_try_later_soon": "🔧 Bot hozir yangilanmoqda, shuning uchun yangi ishni boshlab bo'lmaydi — birozdan keyin qayta urinib ko'ring. Ishga tushgach, o'zim xabar beraman.",
-        "update_will_reset": "🔧 Diqqat: bot yangilanadi va hozir bajarilayotgan ishingiz to'xtab qoladi. Bir necha daqiqadan keyin qaytadan boshlashingiz mumkin.",
-        "update_done_try_now": "✅ Yangilanish tugadi — endi qaytadan urinib ko'rishingiz mumkin.",
-        "gift_granted": "🎁 Bizda 100 dan ortiq foydalanuvchi bo'ldi, rahmat! Sizga {amount} ⚡ bepul kredit berildi, u {date} gacha amal qiladi. Bu {convert} orqali taxminan {conversions} ta pullik konvertatsiya yoki {download} orqali katta fayllarni yuklab olish uchun yetadi. Balansingiz: /balance",
+        "restarting_send_again": "🔄 Bot yangilanmoqda — bir necha soniyadan keyin qayta yuboring.",
+        "update_soon_try_later": "🔧 Bot hozir yangilanadi — taxminan {minutes} daqiqadan keyin qayta urinib ko'ring. Ishga tushgach, xabar beraman.",
+        "update_soon_try_later_soon": "🔧 Bot yangilanmoqda — birozdan keyin qayta urinib ko'ring. Ishga tushgach, xabar beraman.",
+        "update_will_reset": "🔧 Bot hozir yangilanadi va hozirgi ishingiz to'xtaydi. Bir necha daqiqadan keyin qaytadan boshlashingiz mumkin.",
+        "update_done_try_now": "✅ Yangilanish tugadi — endi qayta urinib ko'ring.",
+        "gift_granted": "🎁 100 foydalanuvchidan oshdik — rahmat! Sizga {amount} ⚡ bepul kredit, {date} gacha amal qiladi: {convert} da taxminan {conversions} ta pullik konvertatsiya yoki {download} da katta fayllar. /balance",
         "reply_forbidden": "Javobingizni yetkazib bo'lmadi — ular sizni bloklagan yoki botni tark etgan bo'lishi mumkin.",
         "reply_failed": "Javobingizni yetkazib bo'lmadi: {error}",
         "delivered_confirmation": "Yetkazildi ↩️",
@@ -633,8 +570,8 @@ STRINGS = {
         "unknown_command": "Bunday buyruq yo'q. Bot nimalar qila olishini bilish uchun /help yuboring.",
     },
     "ru": {
-        "maintenance_note": "🔧 AnonBot ненадолго закрыт на ремонт. Ваши разговоры в сохранности, но то, что отправлено сейчас, не доставляется и не сохраняется. Пожалуйста, напишите чуть позже.",
-        "flood_wait": "Вы отправляете быстрее, чем я успеваю — подождите примерно {seconds} секунд(ы) и продолжайте.",
+        "maintenance_note": "🔧 AnonBot ненадолго закрыт на ремонт. Беседы в сохранности, но отправленное сейчас не доставляется и не сохраняется. Напишите позже.",
+        "flood_wait": "Слишком быстро — подождите около {seconds} с и продолжайте.",
         "sibling_blurb": "Тоже часть этой семьи ботов, смотрите ниже \U0001f447",
         "donation_nudge": (
             "💙 Бот полезен? /donate помогает оплачивать хостинг. Совершенно необязательно."
@@ -649,22 +586,22 @@ STRINGS = {
         "donate_too_many_stars": "Это очень много звёзд! Пусть будет меньше {max} ⭐ за одно пожертвование.",
         "donate_out_of_range": "Пожертвования в {currency} должны быть в диапазоне от {lo} до {hi} {symbol}.",
         "donate_invoice_title": "Поддержать хостинг",
-        "donate_invoice_description": "Идёт на расходы по работе бота и добавляет {credited} ⚡ на ваш баланс для конвертаций в ConvertBot.",
+        "donate_invoice_description": "Помогает оплачивать хостинг и добавляет {credited} ⚡ кредита для ConvertBot.",
         "donate_invoice_label": "Вклад в хостинг",
         "donate_invoice_description_fiat": 'Разовое добровольное пожертвование на хостинг. Спасибо!',
-        "donate_prompt_credit": 'Оплаченные Stars превращаются в ⚡ кредит на конвертации в ConvertBot. Следующие {left} ⭐ дают по {each} ⚡ ({mult}×): {rate} ⚡ обычного кредита и бонус, который сгорает через {days} дней после оплаты. ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars.',
-        "donate_prompt_credit_base": 'Оплаченные Stars превращаются в ⚡ кредит на конвертации в ConvertBot, {rate} ⚡ за ⭐. ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars.',
+        "donate_prompt_credit": "Каждая ⭐ даёт ⚡ кредит для ConvertBot. Следующие {left} ⭐ дают по {each} ⚡ ({mult}×): {rate} ⚡ плюс бонус, который сгорает через {days} дней после оплаты. ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars.",
+        "donate_prompt_credit_base": "Каждая ⭐ даёт {rate} ⚡ кредита для ConvertBot. ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars.",
         "donate_invoice_error": "⚠️ Telegram не смог создать этот счёт: {error}",
         "stars_unit": "Stars (звёзды)",
         "donate_custom_ask": "Сколько {unit} вы хотите пожертвовать? Ответьте числом.",
         "donate_invalid_amount_retry": "Это некорректная сумма — отправьте /donate, чтобы попробовать снова.",
         "donate_thanks": "🙏 Спасибо за {amount} ⭐ — это по-настоящему ценно!",
-        "topup_thanks": '🙏 Спасибо за пожертвование в {stars} ⭐ — это помогает ботам работать.\n\nВ благодарность вы получили {total} ⚡ кредита в {convert_bot} — его можно тратить на конвертацию файлов. Ваш баланс там: {balance} ⚡.',
+        "topup_thanks": "🙏 Спасибо за {stars} ⭐!\n\nВы получили {total} ⚡ кредита в {convert_bot} на конвертации. Баланс там: {balance} ⚡.",
         "topup_thanks_bonus": 'Из них {bonus} ⚡ — бонусный кредит, он сгорит {date}.',
-        "credit_cannot_be_withdrawn": '⚡ — это кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с платежом? /paysupport',
-        "topup_refunded": "⚠️ Ваш платёж на {stars} ⭐ прошёл, но из-за проблемы на моей стороне ⚡ не поступили на баланс, поэтому я вернул платёж: {stars} ⭐ снова на вашем счёте. Пожалуйста, попробуйте ещё раз через несколько минут.",
-        "topup_failed": "⚠️ Ваш платёж на {stars} ⭐ прошёл, но из-за проблемы на моей стороне ⚡ не поступили на баланс. Ничего не потеряно: владелец уже знает и начислит их вручную. Уточнить: /paysupport",
-        "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается вам автоматически и полностью.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
+        "credit_cannot_be_withdrawn": "⚡ — кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с оплатой? /paysupport",
+        "topup_refunded": "⚠️ Платёж на {stars} ⭐ прошёл, но ⚡ не дошёл до баланса, поэтому {stars} ⭐ вернули. Попробуйте снова через несколько минут.",
+        "topup_failed": "⚠️ Платёж на {stars} ⭐ прошёл, но ⚡ не дошёл до баланса. Ничего не потеряно — владелец добавит его вручную. Уточнить: /paysupport",
+        "paysupport_text": "💳 Помощь с оплатой\n\nПлатежи окончательны: Stars НЕ возвращаются, ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars. Возвращается только платёж, который не удалось превратить в кредит, — автоматически и полностью.\n\nДеньги списаны, а кредита нет, или списали дважды? Напишите на {contact}: дата, сумма и ваш Telegram ID, {user_id}. Всё исправят кредитом.\n\n/balance показывает ваши платежи.",
         "report_button": '🐞 Добавить мои данные',
         "problem_logged_note": 'Анонимный отчёт сохранён',
         "report_disclaimer": "📨 Добавить ваши данные к этому отчёту?\n\nУже сохранено без вас: бот, код ошибки {code}, инцидент {incident}, время и версия.\n\n«Отправить» добавит ваш Telegram ID, @username, язык и то, личный это чат или группа. Никогда — ваши сообщения или файлы.\n\nЭто помогает найти ваш случай в логах. Решать вам.",
@@ -688,98 +625,55 @@ STRINGS = {
             "Постоянная ссылка, по которой вам пишут анонимно."
         ),
         "bot_description": (
-            "Получите ссылку и выложите где угодно. Любой, кто её откроет, напишет вам, не показав, "
-            "кто он, а вы сможете ответить — настоящей веткой, и таких веток может идти сразу "
-            "несколько.\n"
-            "\n"
-            "Они анонимны для вас, но не для бота: чтобы ответ попал в нужную ветку, бот хранит, "
-            "какие два аккаунта переписываются, и никогда не хранит то, что вы пишете. "
-            "Подробности — /privacy.\n"
-            "\n"
-            "Английский, узбекский и русский."
+            "Получите ссылку, разместите её где угодно — и вам смогут писать анонимно. Вы отвечаете в отдельных беседах, сразу в нескольких.\n\nБот знает, кто с кем говорит, чтобы ответы попадали в нужную беседу, но никогда не хранит написанное. /privacy\n\nНа русском, английском и узбекском."
         ),
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• ваш числовой id в Telegram и выбранный язык\n"
-            "• вашу ссылку-инбокс, если вы её сделали\n"
-            "• кто с кем говорит: разговор хранится как пара id и номер — именно поэтому ответ "
-            "попадает в нужную ветку\n"
-            "• какое сообщение к какому разговору относится, по id сообщения, и когда оно было доставлено\n"
-            "• кого вы заблокировали\n"
-            "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
-            "ботом хоть кто-нибудь\n"
-            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
-            "• запись о пожертвовании: сумму и платёжный id Telegram\n"
-            "\n"
-            "Чего здесь нет — самих сообщений. Они проходят насквозь и тут не сохраняются: они "
-            "лежат в двух чатах Telegram, и каждый может удалить свою копию. Реакции проходят так "
-            "же: бот ставит такую же на копию собеседника и нигде её не записывает. "
-            "Единственное исключение — то, что вы отправите через /feedback (ниже).\n"
-            "\n"
-            "Анонимность — это анонимность от того, кому вы пишете. Ему никогда не показывают ни "
-            "ваше имя, ни username, ни id. От самого бота это не анонимность: без той самой пары "
-            "id ответ просто некуда было бы доставить."
+            "• ваш Telegram ID и язык\n• ссылка на ваш ящик, если вы её создали\n• кто с кем общается: каждая беседа — пара ID и номер, чтобы ответы попадали в нужную беседу\n• какое сообщение к какой беседе относится (по ID сообщения) и когда оно передано\n• кого вы заблокировали\n• что вам показали разовое объявление — чтобы оно показывалось один раз\n• время каждого использования бота — чтобы считать пользователей\n• дневное число нажатий кнопок по всему боту, не по людям\n• пожертвования: сумма и ID платежа в Telegram\n\nСообщения и реакции никогда не хранятся: они проходят насквозь и остаются только в двух чатах Telegram, где каждый может удалить свою копию. Единственное исключение — /feedback, ниже.\n\nАнонимно — значит анонимно для того, кому вы пишете: он никогда не видит ваше имя, username или ID. Сам бот знает, кто с кем связан, — так работают ответы."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
+        "privacy_problems": "Каждая ошибка записывается без вас: код, номер инцидента, время и версия бота.\n\n«Добавить мои данные» под ошибкой прикрепляет к этому инциденту ваш Telegram ID, @username, язык и тип чата (личный или группа) — только если нажать «Отправить». Сообщения и файлы — никогда. Это стирается через 30 дней или сразу через /deletemydata. Записи об ошибках удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
-            "• Telegram — он передаёт каждое сообщение в обе стороны и действует по своим "
-            "правилам\n"
-            "• хостинг, на котором работает бот, и база данных, в которую он пишет"
+            "• Telegram, через который идут все сообщения\n• хостинг-провайдер и база данных бота"
         ),
         "privacy_others": (
-            "• и больше никто, кроме них — сообщения идут через Telegram и дальше никуда, никакие внешние "
-            "сервисы не вызываются"
+            "• больше никто — сообщения идут только через Telegram, внешние сервисы не используются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": "Настройки хранятся, пока вы их не удалите или не перестанете пользоваться ботом. Время использования удаляется примерно через три месяца. Платёжные записи и ваш ⚡ баланс хранятся дольше — на случай споров об оплате.\n\nНичего не продаётся, не используется для рекламы и не передаётся никому, кроме названных выше.",
         "privacy_your_choices": (
-            "Что можно сделать:\n"
-            "/deletemydata — стереть всё, что бот хранит о вас\n"
-            "/terms — для чего ботом можно пользоваться\n"
-            "\n"
-            "Блокировка бота в Telegram остановит его сообщения, но ничего не сотрёт — если "
-            "нужно и то и другое, сначала отправьте /deletemydata."
+            "Что вы можете сделать:\n/deletemydata — удалить всё, что бот о вас хранит\n/terms — правила\n\nБлокировка бота ничего не удаляет, поэтому сначала отправьте /deletemydata."
         ),
         "terms_heading": "📜 Условия",
         "terms_use": (
-            "Пользуйтесь ботом по назначению, в рамках закона и правил самого Telegram. Не "
-            "используйте его, чтобы кого-то донимать, и не нагружайте сверх заданных лимитов — за то "
-            "и другое аккаунт блокируется."
+            "Пользуйтесь ботом в рамках закона и правил Telegram. За травлю или обход ограничений бота аккаунт блокируется."
         ),
         "terms_specific": (
-            "О сообщениях: скрытое имя — не индульгенция. Угрозы, травля и всё незаконное "
-            "остаются ровно тем же самым, когда отправитель анонимен, а владелец инбокса может "
-            "заблокировать отправителя навсегда. Кто открыл инбокс, тот и отвечает за то, что он "
-            "предлагает ему присылать."
+            "Сообщения: анонимность не делает угрозы, травлю или что-то незаконное допустимыми. Владелец ящика может навсегда заблокировать отправителя и сам отвечает за то, что предлагает себе присылать."
         ),
-        "terms_money": 'О деньгах: /donate — дело добровольное, деньги идут на то, во что обходятся боты. Платёж в Stars ещё и добавляет ⚡ кредит на конвертации в ConvertBot: 2 ⚡ за ⭐, а за ваши первые 500 Stars — 6 и за следующие 500 — 4. Всё сверх 2 — бонусный кредит, он сгорает через 90 дней после платежа. Платежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а кредит НЕЛЬЗЯ вывести или обменять обратно на Stars. Единственное исключение: платёж, который бот не смог зачислить как кредит, возвращается автоматически и полностью. Все платежи проводит Telegram, бот никогда не видит номер карты. Проблема с платежом — /paysupport.',
+        "terms_money": "Деньги: /donate добровольный и помогает оплачивать хостинг. Stars также дают ⚡ кредит для ConvertBot: 2 ⚡ за ⭐, или 6 за первые 500 Stars и 4 за следующие 500; всё сверх 2 — бонус, который сгорает через 90 дней после оплаты. Платежи окончательны: Stars НЕ возвращаются, кредит НЕЛЬЗЯ вывести — кроме платежа, который не удалось превратить в кредит, он возвращается автоматически. Платежи проводит Telegram; бот не видит номер карты. Проблемы: /paysupport",
         "terms_no_warranty": (
-            "Без обещаний: бота ведёт один человек, он бесплатный и может тормозить, ошибаться "
-            "или вовсе не работать без предупреждения. Держите свою копию всего, что вам важно."
+            "Без гарантий: бота бесплатно ведёт один человек, он может тормозить, ошибаться или отключиться без предупреждения. Храните копии важного у себя."
         ),
         "policy_full_text": "Полный текст: {url}",
         "policy_contact": "Вопросы, жалобы или запрос по данным: {contact}",
         "delete_data_confirm": "⚠️ Это сотрёт всё, что бот хранит о вас. Отменить будет нельзя.",
-        "delete_data_consequences": 'Ваша ссылка перестанет работать — каждая её копия, которую кто-либо выложил, навсегда. Открытые разговоры перестанут маршрутизироваться: ответить в них не сможет ни одна из сторон, и список заблокированных уйдёт вместе с ними.\n\nУже отправленные сообщения это не затронет. Здесь они и не хранились — они в чатах Telegram, и каждый удаляет свою копию сам.\n\nЗаписи о пожертвованиях останутся, без username, потому что по ним разбираются споры о платежах. Баланс ⚡ тоже останется — он ваш, если вернётесь.',
+        "delete_data_consequences": "Ссылка на ваш ящик перестанет работать навсегда, на открытые беседы больше нельзя будет ответить, список блокировок удалится.\n\nОтправленные сообщения останутся в чатах Telegram; здесь они никогда не хранились.\n\nПлатёжные записи останутся без вашего username — на случай споров об оплате. ⚡ баланс тоже останется.",
         "delete_data_button_yes": "🗑 Стереть",
         "delete_data_button_no": "↩️ Оставить мои данные",
         "delete_data_kept": "Ничего не стёрто.",
         "delete_data_done": (
-            "🗑 Готово — стёрто записей: {rows}.\n"
-            "\n"
-            "Отправьте /start, когда захотите; бот примет вас как нового."
+            "🗑 Готово — удалено записей: {rows}. Отправьте /start, когда захотите начать заново."
         ),
         "delete_data_failed": (
-            "Сейчас стереть не получилось — что-то сломалось на моей стороне. Попробуйте ещё раз "
-            "через несколько минут."
+            "Не удалось удалить — что-то пошло не так с моей стороны. Попробуйте через несколько минут."
         ),
         "language_set_confirmation": "✅ Язык изменён на русский.",
         "cancel_header": "\u274c \u041e\u0442\u043c\u0435\u043d\u0435\u043d\u043e:",
-        "cancel_nothing": "\u041e\u0442\u043c\u0435\u043d\u044f\u0442\u044c \u043d\u0435\u0447\u0435\u0433\u043e — \u044f \u043d\u0438\u0447\u0435\u0433\u043e \u043e\u0442 \u0432\u0430\u0441 \u043d\u0435 \u0436\u0434\u0430\u043b.",
+        "cancel_nothing": "Отменять нечего.",
         "cancel_ask": "Что остановить? Вот что я жду:",
         "cancel_kept": "Хорошо — ничего не отменено.",
         "cancel_reply_box_freed": "Поле ответа снова свободно.",
@@ -787,7 +681,7 @@ STRINGS = {
         "cancel_button_none": "↩️ Ничего, продолжаем",
         "cancel_button_donation": "💸 Сумма пожертвования",
         "cancel_item_donation": "\u0441\u0443\u043c\u043c\u0430 \u043f\u043e\u0436\u0435\u0440\u0442\u0432\u043e\u0432\u0430\u043d\u0438\u044f, \u043a\u043e\u0442\u043e\u0440\u0443\u044e \u044f \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u043b",
-        "cancel_item_stale_prompt": "старый запрос, который всё ещё ждал ответа",
+        "cancel_item_stale_prompt": "старый вопрос без ответа",
         "feedback_ask": (
             "💬 Что вы хотите сказать тому, кто ведёт этих ботов? Ответьте на это сообщение.\n\nОно уходит без вашего имени, поэтому ответить вам не смогут. Остановить: /cancel"
         ),
@@ -800,9 +694,7 @@ STRINGS = {
         "cancel_item_feedback": "отзыв, который я просил написать",
         "privacy_feedback_heading": "Если вы отправляете /feedback:",
         "privacy_feedback": (
-            "Написанное уходит тому, кто ведёт этих ботов, сообщением в Telegram — вместе с "
-            "названием бота и вашим языком, но без имени, username и id. Копия хранится в базе "
-            "ботов 30 дней, потом удаляется. Читает его только он, и ответить на него он не может."
+            "Оно приходит тому, кто ведёт ботов, с названием бота и вашим языком — без имени, username и ID. Ответить он не может. Копия хранится 30 дней."
         ),
         "cancel_item_anon_session": "\u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u0430\u043d\u043e\u043d\u0438\u043c\u043d\u044b\u0439 \u0447\u0430\u0442 — \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u0441\u0441\u044b\u043b\u043a\u0443 \u0441\u043d\u043e\u0432\u0430, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0447\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439",
         "cancel_button_anon_session": "💬 Анонимный чат, в котором вы",
@@ -813,7 +705,7 @@ STRINGS = {
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
         "help_page_everything": "Полное руководство: /fullhelp",
-        "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
+        "help_page_gone": "Этой страницы справки больше нет. Отправьте /help.",
         "helppage_link": (
             "🔗 /link — ссылка на ваш анонимный ящик\n\nРазместите её где угодно: любой, кто её откроет, сможет анонимно написать вам сюда. Каждый переход начинает новую беседу. Ссылка не меняется, пока вы не создадите новую.\nКнопки под ней:\n• ⏸️ Пауза: новых бесед нет, пока не возобновите (/pause, /resume).\n• 🔄 Новая ссылка: старая перестаёт начинать беседы (/newlink).\n• Число гостей и бесед (/stats).\nТекущие беседы в любом случае продолжают работать.\n\nПример: отправьте /link и поставьте ссылку в био Instagram."
         ),
@@ -938,13 +830,13 @@ STRINGS = {
             "Не отправлено — здесь открыто несколько бесед. Ответьте на сообщение, которому отвечаете (смахните его)."
         ),
         "restarting_send_again": (
-            "🔄 Сейчас обновляюсь — подождите несколько секунд и отправьте ещё раз."
+            "🔄 Меня обновляют — отправьте это снова через несколько секунд."
         ),
-        "update_soon_try_later": '🔧 Сейчас меня обновляют, поэтому я не могу начать ничего нового — попробуйте снова примерно через {minutes} мин. Я напишу, когда вернусь.',
-        "update_soon_try_later_soon": '🔧 Сейчас меня обновляют, поэтому я не могу начать ничего нового — попробуйте снова чуть позже. Я напишу, когда вернусь.',
-        "update_will_reset": '🔧 Внимание: меня скоро обновят, и то, что вы сейчас начали, будет сброшено. Через несколько минут сможете начать заново.',
-        "update_done_try_now": '✅ Обновление завершено — можете пробовать снова.',
-        "gift_granted": "🎁 Нас уже больше 100 — спасибо! Вам начислено {amount} ⚡ бесплатного кредита, он действует до {date}. Этого хватит примерно на {conversions} платных конвертаций в {convert} или на скачивание больших файлов в {download}. Ваш баланс: /balance",
+        "update_soon_try_later": "🔧 Меня сейчас обновят — попробуйте снова примерно через {minutes} мин. Я напишу, когда вернусь.",
+        "update_soon_try_later_soon": "🔧 Меня обновляют — попробуйте чуть позже. Я напишу, когда вернусь.",
+        "update_will_reset": "🔧 Меня сейчас обновят, и то, что вы делаете, сбросится. Начать заново можно через несколько минут.",
+        "update_done_try_now": "✅ Обновление готово — попробуйте снова.",
+        "gift_granted": "🎁 Нас уже больше 100 — спасибо! Вам {amount} ⚡ бесплатного кредита до {date}: это около {conversions} платных конвертаций в {convert} или больших загрузок в {download}. /balance",
         "reply_forbidden": "Не удалось доставить ваш ответ — возможно, вас заблокировали или человек покинул бота.",
         "reply_failed": "Не удалось доставить ваш ответ: {error}",
         "delivered_confirmation": "Доставлено ↩️",

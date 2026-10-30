@@ -328,7 +328,8 @@ applies. Also held:
 - **The pairing behind each conversation** — the two user ids, a conversation
   number, when it started, when it was last spoken in, and whether the inbox
   owner has filed it away. This is what makes a reply reach the right thread.
-  Kept until erased, or until the conversation is.
+  Kept until erased, or until the conversation is. A link tap cancelled with
+  its Cancel button before anything was sent is deleted straight away.
 - **A message-id map** — which message belongs to which conversation, and
   nothing about when or by whom. This is what lets a reply be matched to what it
   answers. Deleted 30 days after a conversation's last message, which closes
