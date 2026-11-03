@@ -134,7 +134,11 @@ def quoted(cols: list[str]) -> str:
 # backup
 # ---------------------------------------------------------------------------
 
-def backup(dsn: str, out_path: Path, schemas: list[str] | None) -> None:
+def backup(dsn: str, out_path: Path, schemas: list[str] | None,
+           leave_out: frozenset = frozenset(), say=print) -> None:
+    """`leave_out`: table names (in any schema) not to copy -- the volume's
+    reserve copy skips the logs and counters (reserve_copies.LEAVE_OUT).
+    `say` gets the per-table lines; the bot's frequent copies pass a no-op."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -148,7 +152,8 @@ def backup(dsn: str, out_path: Path, schemas: list[str] | None) -> None:
     with closing(psycopg.connect(dsn)) as conn, zipfile.ZipFile(
         out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9
     ) as zf:
-        tables = list_tables(conn, schemas)
+        tables = [(schema, table) for schema, table in list_tables(conn, schemas)
+                  if table not in leave_out]
         if not tables:
             sys.exit("That database has no family tables in it at all -- wrong DATABASE_URL?")
         for schema, table in tables:
@@ -165,11 +170,11 @@ def backup(dsn: str, out_path: Path, schemas: list[str] | None) -> None:
             manifest["tables"].append(
                 {"schema": schema, "table": table, "columns": cols, "approx_rows": rows}
             )
-            print(f"  {schema}.{table}: ~{rows} row(s)")
+            say(f"  {schema}.{table}: ~{rows} row(s)")
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
 
     size = out_path.stat().st_size
-    print(f"\nWrote {out_path} ({size/1024:.0f} KB, {len(manifest['tables'])} table(s)).")
+    say(f"\nWrote {out_path} ({size/1024:.0f} KB, {len(manifest['tables'])} table(s)).")
 
 
 # ---------------------------------------------------------------------------

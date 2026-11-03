@@ -37,14 +37,12 @@ import logging
 import os
 import re
 import secrets
-import tempfile
 import time as time_module
 import zipfile
 from collections import OrderedDict, deque
 from itertools import takewhile
 from datetime import datetime, time, timedelta, timezone
 from io import BytesIO
-from pathlib import Path
 
 # main.py gives each bot its settings; this only reads a .env if one is present.
 try:
@@ -72,6 +70,8 @@ import db
 import family_link
 import lifecycle
 import problems
+import reserve
+import reserve_copies
 from live_message import LiveMessage, edit_in_place
 from db import init_db
 import monitoring
@@ -1920,27 +1920,53 @@ def _backup_parts(size: int, limit: "int | None" = None) -> list:
     return [(start, min(start + limit, size)) for start in range(0, size, limit)]
 
 
-def _build_backup(out_path: Path) -> dict:
-    """family_db.backup into `out_path`, and what the caption says about it.
-
-    Imported here rather than at the top: family_db is a command-line tool
-    that happens to live in this folder, and nothing else in the bot needs
-    it loaded."""
-    import family_db
-    try:
-        family_db.backup(db.DATABASE_URL, out_path, None)
-    except SystemExit as exc:
-        # Its command-line way of saying "no tables at all".
-        raise RuntimeError(str(exc) or "nothing to back up") from None
-    with zipfile.ZipFile(out_path) as archive:
-        manifest = json.loads(archive.read("MANIFEST.json"))
-    digest = hashlib.sha256()
-    with open(out_path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
+def _build_backup() -> "tuple[bytes, dict]":
+    """The whole database as family_db's archive, and what the caption says about it."""
+    archive = reserve_copies.build_archive(db.DATABASE_URL)
+    with zipfile.ZipFile(BytesIO(archive)) as opened:
+        manifest = json.loads(opened.read("MANIFEST.json"))
     tables = manifest.get("tables") or []
-    return {"tables": len(tables), "rows": sum(t.get("approx_rows", 0) for t in tables),
-            "size": out_path.stat().st_size, "sha256": digest.hexdigest()}
+    return archive, {"tables": len(tables), "rows": sum(t.get("approx_rows", 0) for t in tables),
+                     "size": len(archive), "sha256": hashlib.sha256(archive).hexdigest()}
+
+
+RESTORE_HINT = ("To restore: <code>python scripts/restore_reserve.py</code> (it also erases again "
+                "whoever used /deletemydata since). docs/reserve-copies.md has the steps.")
+
+
+async def _deliver_backup(bot, chat_id: int, name: str, archive: bytes, info: dict,
+                          heading: str) -> "tuple[int, int, str | None]":
+    """Send `archive` to `chat_id` and pin it: (pinned, parts, what went wrong or None).
+
+    Pinned with no notification, and nothing in this bot ever unpins -- so
+    every backup stays one tap away at the top of this chat, the newest and
+    all the ones before it. Over BACKUP_PART_BYTES it goes as numbered parts,
+    each pinned, joined back with `copy /b` or `cat`."""
+    parts = _backup_parts(len(archive))
+    summary = (f"{info['size'] / (1024 * 1024):.1f} MB · {info['tables']} tables · "
+               f"~{info['rows']} rows\nsha256 {info['sha256']}")
+    pinned = 0
+    for index, (start, end) in enumerate(parts, 1):
+        if len(parts) == 1:
+            filename, caption = name, f"{heading}\n{summary}"
+        else:
+            filename = f"{name}.{index:03d}"
+            caption = (f"{heading} — part {index} of {len(parts)}\n"
+                       + summary + "\n(the checksum is of the joined file)")
+        try:
+            sent = await bot.send_document(
+                chat_id=chat_id, document=BytesIO(archive[start:end]), filename=filename,
+                caption=caption, read_timeout=300, write_timeout=300)
+        except Exception as exc:
+            logger.exception("Could not send backup part %s", index)
+            return pinned, len(parts), (f"part {index} of {len(parts)} could not be sent: "
+                                        f"{type(exc).__name__}: {exc}")
+        try:
+            await bot.pin_chat_message(chat_id=chat_id, message_id=sent.message_id, disable_notification=True)
+            pinned += 1
+        except Exception:
+            logger.warning("Could not pin backup part %s", index, exc_info=True)
+    return pinned, len(parts), None
 
 
 async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1954,16 +1980,8 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     since. It replaces the old zip, which summarised binary columns and could
     be read but not restored from.
 
-    Redeploying from it: start each bot once against the new database so the
-    tables exist, then
-        python manager_bot/family_db.py restore --into <url> --file <zip> --mode replace
-    DEPLOY.md, "Restoring from a pinned backup", has the whole of it.
-
-    Pinned with no notification, and nothing in this bot ever unpins -- so
-    every backup stays one tap away at the top of this chat, the newest and
-    all the ones before it. tests/test_backup.py holds that to the source.
-    Over BACKUP_PART_BYTES it goes as numbered parts, each pinned, joined
-    back with `copy /b` or `cat`.
+    The same copy arrives by itself after every nightly report (_nightly_reserve_copy).
+    docs/reserve-copies.md says how to restore from it.
     """
     if not await guard(update, context):
         return
@@ -1971,57 +1989,95 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = await update.message.reply_text("Backing up the whole database…")
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M")
     name = f"botfamily_{stamp}.zip"
-    with tempfile.TemporaryDirectory(prefix="mbot-backup-") as folder:
-        path = Path(folder) / name
-        try:
-            info = await asyncio.to_thread(_build_backup, path)
-        except Exception as exc:
-            logger.exception("Backup failed")
-            await edit_in_place(note, context.bot, f"⚠️ Backup failed: {type(exc).__name__}: {exc}")
-            return
-
-        parts = _backup_parts(info["size"])
-        summary = (f"{info['size'] / (1024 * 1024):.1f} MB · {info['tables']} tables · "
-                   f"~{info['rows']} rows\nsha256 {info['sha256']}")
-        pinned = 0
-        for index, (start, end) in enumerate(parts, 1):
-            with open(path, "rb") as handle:
-                handle.seek(start)
-                chunk = handle.read(end - start)
-            if len(parts) == 1:
-                filename = name
-                caption = "🗄 Database backup — lossless, restorable\n" + summary
-            else:
-                filename = f"{name}.{index:03d}"
-                caption = (f"🗄 Database backup — part {index} of {len(parts)}\n"
-                           + summary + "\n(the checksum is of the joined file)")
-            try:
-                sent = await context.bot.send_document(
-                    chat_id=chat_id, document=BytesIO(chunk), filename=filename,
-                    caption=caption, read_timeout=300, write_timeout=300)
-            except Exception as exc:
-                logger.exception("Could not send backup part %s", index)
-                await edit_in_place(note, context.bot,
-                                    f"⚠️ The backup was made but part {index} of {len(parts)} "
-                                    f"could not be sent: {type(exc).__name__}: {exc}")
-                return
-            try:
-                await context.bot.pin_chat_message(
-                    chat_id=chat_id, message_id=sent.message_id, disable_notification=True)
-                pinned += 1
-            except Exception:
-                logger.warning("Could not pin backup part %s", index, exc_info=True)
-
-    lines = [f"✅ Backed up and pinned ({pinned} of {len(parts)} pinned)." if pinned < len(parts)
-             else ("✅ Backed up and pinned." if len(parts) == 1
-                   else f"✅ Backed up in {len(parts)} parts, all pinned.")]
-    if len(parts) > 1:
+    try:
+        archive, info = await asyncio.to_thread(_build_backup)
+    except Exception as exc:
+        logger.exception("Backup failed")
+        await edit_in_place(note, context.bot, f"⚠️ Backup failed: {type(exc).__name__}: {exc}")
+        return
+    pinned, parts, problem = await _deliver_backup(
+        context.bot, chat_id, name, archive, info, "🗄 Database backup — lossless, restorable")
+    if problem:
+        await edit_in_place(note, context.bot, f"⚠️ The backup was made but {problem}")
+        return
+    lines = [f"✅ Backed up and pinned ({pinned} of {parts} pinned)." if pinned < parts
+             else ("✅ Backed up and pinned." if parts == 1
+                   else f"✅ Backed up in {parts} parts, all pinned.")]
+    if parts > 1:
         lines.append(f"Join them first: <code>copy /b {name}.001+{name}.002 {name}</code> "
                      f"on Windows, or <code>cat {name}.0* &gt; {name}</code>.")
-    lines.append("To restore: start each bot once against the new database, then "
-                 "<code>python manager_bot/family_db.py restore --into &lt;url&gt; "
-                 f"--file {name} --mode replace</code>. DEPLOY.md has the details.")
+    lines.append(RESTORE_HINT)
     await edit_in_place(note, context.bot, "\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+# ---------------------------------------------------------------------------
+# Reserve copies (the owner, 2026-11-03) -- reserve_copies.py says what each is
+# ---------------------------------------------------------------------------
+
+# How the volume's `latest` copy is doing, for the once-a-minute job below and
+# the nightly caption. `problem` is what the owner was last told went wrong,
+# so a broken volume is reported once, and its recovery once.
+_RESERVE = {"mark": None, "written_at": None, "tried_at": None, "problem": None}
+
+
+async def _nightly_reserve_copy(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The whole database to every owner, pinned, after the nightly report; and
+    sealed onto the volume. Never raises: a failure is told to the owner."""
+    taken_at = datetime.now(timezone.utc)
+    name = f"botfamily_{taken_at.strftime('%Y-%m-%d_%H%M')}.zip"
+    try:
+        archive, info = await asyncio.to_thread(_build_backup)
+    except Exception as exc:
+        logger.exception("The nightly reserve copy failed")
+        await notify_owner(context, f"🗄 The nightly reserve copy failed: {html.escape(f'{type(exc).__name__}: {exc}')}")
+        return
+    volume = ""
+    if reserve.RESERVE_DIR:
+        try:
+            await asyncio.to_thread(reserve_copies.write_nightly, archive, taken_at)
+            pruned = await asyncio.to_thread(reserve_copies.prune_erasures, db.DATABASE_URL)
+            written = _RESERVE["written_at"]
+            age = (f"{max(0, int((taken_at - written).total_seconds() // 60))} min old" if written
+                   else "not written since the bots started")
+            volume = f"\nVolume: sealed copy kept; the current one is {age}"
+            if pruned:
+                volume += f"; {pruned} erasure note(s) past {reserve.KEEP_DAYS} days dropped"
+        except Exception as exc:
+            logger.exception("The nightly reserve copy could not be kept on the volume")
+            volume = f"\n⚠️ Not kept on the volume: {type(exc).__name__}: {exc}"
+    for admin_id in ADMIN_IDS:
+        _, _, problem = await _deliver_backup(
+            context.bot, admin_id, name, archive, info, "🗄 Nightly reserve copy — for emergencies only" + volume)
+        if problem:
+            await notify_owner(context, f"🗄 The nightly reserve copy was made but {html.escape(problem)}")
+
+
+async def keep_reserve_current(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every minute: if anything in `latest` changed, and the last copy is at least
+    reserve_copies.MIN_SECONDS old, write it to the volume again."""
+    if not reserve.RESERVE_DIR:
+        return
+    now = time_module.monotonic()
+    if _RESERVE["tried_at"] is not None and now - _RESERVE["tried_at"] < reserve_copies.MIN_SECONDS:
+        return
+    try:
+        problem = await asyncio.to_thread(reserve_copies.volume_problem)
+        if problem is None:
+            mark = await asyncio.to_thread(reserve_copies.change_mark, db.DATABASE_URL)
+            if mark == _RESERVE["mark"] and _RESERVE["written_at"] is not None:
+                return
+            _RESERVE["tried_at"] = now
+            await asyncio.to_thread(reserve_copies.write_latest, db.DATABASE_URL)
+            _RESERVE["mark"], _RESERVE["written_at"] = mark, datetime.now(timezone.utc)
+    except Exception as exc:
+        logger.warning("The reserve copy on the volume could not be written", exc_info=True)
+        problem = f"{type(exc).__name__}: {exc}"
+    _RESERVE["tried_at"] = now
+    if problem and not _RESERVE["problem"]:
+        await notify_owner(context, f"🗄 The reserve copy on the volume is not being kept: {html.escape(problem)}")
+    elif not problem and _RESERVE["problem"]:
+        await notify_owner(context, "🗄 The reserve copy on the volume is being kept again.")
+    _RESERVE["problem"] = problem
 
 
 # ---------------------------------------------------------------------------
@@ -2390,6 +2446,13 @@ async def _people_report(remember: bool) -> "list[str]":
 
 
 async def nightly_problem_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The report, then the night's reserve copy (the owner, 2026-11-03: "Make
+    the nightly report also do a backup copy")."""
+    await _nightly_report(context)
+    await _nightly_reserve_copy(context)
+
+
+async def _nightly_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         rows = await asyncio.to_thread(
             family_link.recent_problem_reports_since, NIGHTLY_REPORT_HOURS)
@@ -3124,7 +3187,7 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 /stars — ConvertBot's Stars: paid, refunded, recent
 
 <b>The database</b>
-/backup — the whole database, lossless and restorable, sent here and pinned
+/backup — the whole database, lossless and restorable, sent here and pinned (it also comes by itself after the nightly report)
 /dbdump &lt;bot&gt; — that bot's own tables as CSVs
 /sql &lt;SELECT …&gt; — read-only query on the shared database
 /decode &lt;code&gt; — what an error code means
@@ -4318,6 +4381,8 @@ def main():
     app.job_queue.run_repeating(count_unique_people, interval=PROMO_COUNT_SECONDS,
                                 first=PROMO_COUNT_FIRST_SECONDS)
     app.job_queue.run_repeating(record_people, interval=PEOPLE_RECORD_SECONDS, first=300)
+    if reserve.RESERVE_DIR:
+        app.job_queue.run_repeating(keep_reserve_current, interval=60, first=30)
     app.job_queue.run_repeating(_event_backstop, interval=PUMP_TICK_SECONDS, first=10)
     app.job_queue.run_repeating(_result_backstop, interval=PUMP_TICK_SECONDS, first=5)
 

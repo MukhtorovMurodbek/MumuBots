@@ -129,12 +129,24 @@ collected speculatively, and nothing is collected to be sold later.
 | ⚡ credit balance and its ledger | kept, like the payments |
 | gifts given (which gift was given to your id, and when) | kept, like the ledger |
 | feedback sent with `/feedback` | 30 days |
+| reserve copies of the database | see below; never used once older than 30 days |
+| a note that you used `/deletemydata` (your id, encrypted) | 30 days |
+
+Reserve copies of the whole database are made every night and, for what
+changes, within minutes, and kept by the operator (in the operator's Telegram
+and on the host's storage). They are used only to recover from an emergency —
+the database lost or broken — and never once older than 30 days.
 
 ### Erasing it
 
 `/deletemydata`, inside the bot. It asks once, then erases in that moment. No
 account, no form, and no waiting period. It erases what that bot holds; each
 bot has its own `/deletemydata`.
+
+A reserve copy taken before you erased still holds you. So the erase leaves a
+note — which bot, your id encrypted with the key, and when — and a restore
+from a reserve copy erases again everyone whose note is newer than the copy.
+The note is deleted after 30 days, the age past which no copy is used.
 
 What survives is the payment record, without the username on it. A payment
 record has to outlive the payer asking to be forgotten: it is what a payment

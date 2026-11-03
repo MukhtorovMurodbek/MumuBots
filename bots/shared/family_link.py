@@ -542,6 +542,21 @@ def init_family_schema() -> None:
             f"CREATE INDEX IF NOT EXISTS idx_family_feedback_pending "
             f"ON {FAMILY_SCHEMA}.feedback (delivered_at, id)"
         )
+        # Who used /deletemydata, so that restoring a reserve copy taken before
+        # it erases them again (reserve.py; the owner, 2026-11-03). The id is
+        # sealed: only the restore, which holds the key, can read it. Kept for
+        # reserve.KEEP_DAYS, the age past which no copy is ever restored.
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.erasures (
+                id BIGSERIAL PRIMARY KEY,
+                bot TEXT NOT NULL,
+                db_schema TEXT NOT NULL,
+                sealed_user BYTEA NOT NULL,
+                erased_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
         conn.commit()
 
 

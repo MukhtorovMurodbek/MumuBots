@@ -61,6 +61,7 @@ import i18n
 import lifecycle
 import live_message
 import problems
+import reserve
 import resources
 
 # ---------------------------------------------------------------------------
@@ -1954,6 +1955,9 @@ async def delete_my_data_chosen(update, context):
             query.message, context.bot, body(i18n.t(lang, "delete_data_failed")), parse_mode=ParseMode.HTML
         )
         return None
+    # A note that they asked, so that a reserve copy taken before now, if one
+    # is ever restored, erases them again (reserve.py). It logs its own failure.
+    await asyncio.to_thread(reserve.note_erasure, user_id)
     try:
         rows += await asyncio.to_thread(lifecycle.forget_user, user_id)
     except Exception:

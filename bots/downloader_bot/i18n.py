@@ -127,7 +127,7 @@ STRINGS = {
             "• the site you linked, and the download services the bot falls back on. They get the link and see the bot's server, not you; what they log is up to their own policies"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": "Settings stay until you erase them or stop using the bot. Usage times go after about three months. Payment records and your ⚡ balance stay longer, for payment disputes.\n\nNothing is sold, used for ads, or given to anyone not named above.",
+        "privacy_kept_for": "Settings stay until you erase them or stop using the bot. Usage times go after about three months. Payment records and your ⚡ balance stay longer, for payment disputes. Reserve copies of the database are kept for emergencies only, and never used once older than 30 days. After /deletemydata, an encrypted note of your ID is kept for 30 days, so that restoring a copy erases you again.\n\nNothing is sold, used for ads, or given to anyone not named above.",
         "privacy_your_choices": (
             "What you can do:\n/deletemydata — erase what this bot holds on you\n/terms — the rules\n\nBlocking the bot erases nothing, so send /deletemydata first."
         ),
@@ -379,7 +379,7 @@ STRINGS = {
         "privacy_seen_by": "• Telegram — barcha xabarlarni u yetkazadi\n• hosting provayderi va bot ishlatadigan ma'lumotlar bazasi",
         "privacy_others": "• siz havola bergan sayt va bot zaxira sifatida foydalanadigan yuklash xizmatlari. Ular havolani oladi va sizni emas, bot serverini ko'radi; nimani yozib qolishlari o'z siyosatlariga bog'liq",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalar siz o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha saqlanadi. Foydalanish vaqtlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz to'lov nizolari uchun uzoqroq saqlanadi.\n\nHech narsa sotilmaydi, reklamaga ishlatilmaydi va yuqorida aytilmaganlarga berilmaydi.",
+        "privacy_kept_for": "Sozlamalar siz o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha saqlanadi. Foydalanish vaqtlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz to'lov nizolari uchun uzoqroq saqlanadi. Ma'lumotlar bazasining zaxira nusxalari faqat favqulodda holatlar uchun saqlanadi va 30 kundan eskisi hech qachon ishlatilmaydi. /deletemydata dan keyin ID'ingizning shifrlangan qaydi 30 kun saqlanadi, shunda nusxa tiklansa ham siz yana o'chirilasiz.\n\nHech narsa sotilmaydi, reklamaga ishlatilmaydi va yuqorida aytilmaganlarga berilmaydi.",
         "privacy_your_choices": "Nima qila olasiz:\n/deletemydata — bot siz haqingizda saqlagan narsalarni o'chirish\n/terms — qoidalar\n\nBotni bloklash hech narsani o'chirmaydi, shuning uchun avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan qonun va Telegram shartlari doirasida foydalaning. Kimnidir bezovta qilgan yoki bot chegaralarini buzgan akkaunt bloklanadi.",
@@ -638,7 +638,7 @@ STRINGS = {
             "• сайт по вашей ссылке и запасные сервисы загрузки, которыми пользуется бот. Они получают ссылку и видят сервер бота, а не вас; что они записывают — по их собственным правилам"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": "Настройки хранятся, пока вы их не удалите или не перестанете пользоваться ботом. Время использования удаляется примерно через три месяца. Платёжные записи и ваш ⚡ баланс хранятся дольше — на случай споров об оплате.\n\nНичего не продаётся, не используется для рекламы и не передаётся никому, кроме названных выше.",
+        "privacy_kept_for": "Настройки хранятся, пока вы их не удалите или не перестанете пользоваться ботом. Время использования удаляется примерно через три месяца. Платёжные записи и ваш ⚡ баланс хранятся дольше — на случай споров об оплате. Резервные копии базы хранятся только на случай аварии, и копия старше 30 дней никогда не используется. После /deletemydata зашифрованная отметка с вашим ID хранится 30 дней, чтобы при восстановлении из копии вы снова были удалены.\n\nНичего не продаётся, не используется для рекламы и не передаётся никому, кроме названных выше.",
         "privacy_your_choices": (
             "Что вы можете сделать:\n/deletemydata — удалить всё, что бот о вас хранит\n/terms — правила\n\nБлокировка бота ничего не удаляет, поэтому сначала отправьте /deletemydata."
         ),

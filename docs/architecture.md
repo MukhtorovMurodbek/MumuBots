@@ -27,6 +27,7 @@ bots/
     pricing.py            ⚡ prices of paid jobs, from Railway CPU/memory/egress costs
     resources.py          cgroup memory/CPU limits and use, shared fairly between the bots
     vault.py              sealing personal data with the data key
+    reserve.py            the erasure notes that keep a restored copy from bringing people back
   <bot>_bot/
     bot.py                handlers and main(); main() builds the Application and calls run_polling()
     db.py                 that bot's tables, in its own schema
@@ -35,8 +36,10 @@ bots/
     ...                   its own modules (converters, providers, ...)
   manager_bot/
     monitoring.py         ManagerBot's version of the monitoring that shared_features gives the others
-    family_db.py          ManagerBot's read view across every bot's schema
+    family_db.py          the whole database as an archive (/backup), and loading one back
+    reserve_copies.py     the nightly and the volume's reserve copies (docs/reserve-copies.md)
 scripts/encrypt_personal_data.py   one-off migration that seals existing personal data
+scripts/restore_reserve.py         emergency restore from the reserve copies
 tests/                  pytest suite (needs a Postgres it may create/drop a database on)
 docs/                   architecture, operator docs, licensing, release notes
 LEGAL.md                privacy policy and terms; every public bot's /privacy and /terms link here
