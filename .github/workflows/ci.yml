@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Every pushed branch, not only main: work happens on branches (2.2.0 and those off it) and
+  # pull requests wait on Railway's PR environments, so a push is the only way CI sees the work.
   push:
-    branches: [main]
   pull_request:
 
 # Read-only, and no secrets anywhere: CI can neither change the repository nor deploy.
