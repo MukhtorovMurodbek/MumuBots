@@ -3114,6 +3114,7 @@ if __name__ == "__main__":
 # ─── module: downloader_bot.bot ──────────────────────────────────────────────
 """Media downloader bot -- 4th bot in the family (see ARCHITECTURE.md)."""
 import asyncio
+import hashlib
 import logging
 import os
 import shutil
@@ -3917,8 +3918,13 @@ async def redeliver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await asyncio.to_thread(record_download, update.effective_user.id, remembered["platform"])
 
     async def work():
+        platform, url = remembered["platform"], remembered["url"]
+        if platform in ("reddit", "twitter") and not delivery_cache.has(update.effective_user.id, platform, url):
+            handler = _handle_reddit if platform == "reddit" else _handle_twitter
+            await handler(update, context, url, lossless=not remembered["lossless"])
+            return
         await _resolve_and_send(
-            update, context, remembered["platform"], remembered["url"],
+            update, context, platform, url,
             lossless_override=not remembered["lossless"], from_redo=True,
         )
 
@@ -3934,6 +3940,29 @@ class _MergeStop(Exception):
 def _merge_text(lang: str, key: str) -> str:
 
     return i18n.t(lang, key, items=MERGE_MAX_ITEMS, mb=MERGE_MAX_MB, mp=merge.MAX_MEGAPIXELS)
+
+def _file_digest(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+def _without_duplicates(items: list, paths: list) -> "tuple[list, list]":
+    """The downloaded files without exact copies (some routes give the same picture twice); the copies are deleted."""
+    seen: set = set()
+    kept_items, kept_paths = [], []
+    for item, path in zip(items, paths):
+        digest = _file_digest(path)
+        if digest in seen:
+            _remove_files([path])
+            continue
+        seen.add(digest)
+        kept_items.append(item)
+        kept_paths.append(path)
+    if len(kept_paths) < len(paths):
+        logger.info("dropped %d file(s) that came twice", len(paths) - len(kept_paths))
+    return kept_items, kept_paths
 
 def _remove_files(paths) -> None:
     for path in paths:
@@ -4028,6 +4057,7 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 total += os.path.getsize(paths[-1])
                 if total > MERGE_MAX_MB * 1024 * 1024:
                     raise _MergeStop("merge_too_big")
+            wanted, paths[:] = await asyncio.to_thread(_without_duplicates, wanted, list(paths))
 
             if kind == "pdf":
 
@@ -4435,6 +4465,8 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 items = resolved.items
                 for item in items:
                     paths.append(await resolvers.download(item))
+                if len(paths) > 1:
+                    items, paths[:] = await asyncio.to_thread(_without_duplicates, items, list(paths))
                 if lossless_override is None:
                     delivered_lossless = await asyncio.to_thread(
                         get_lossless_enabled, update.effective_user.id)
@@ -4563,10 +4595,11 @@ async def _send_large(update, context, items_with_paths, lang) -> None:
         else:
             await _send_media(update, context, [(item, path)], lang, probing=probing)
 
-async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str,
+                         lossless: bool | None = None):
     """Reddit is the one platform where the *text* is often the point, so the post is read first and only media posts go near the download path."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    status = await LiveMessage.reply_to(update.message, i18n.t(lang, "fetching"))
+    status = await LiveMessage.reply_to(update.effective_message, i18n.t(lang, "fetching"))
     try:
         post = await platforms.fetch_reddit_post(url)
     except Exception as exc:
@@ -4579,13 +4612,13 @@ async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             try:
                 image = await net.fetch_bytes(direct_img)
                 await _reply_image_with_button(
-                    update, context, image, "reddit", lang, "reddit", url)
+                    update, context, image, "reddit", lang, "reddit", url, lossless)
                 await status.delete(context.bot)
                 await _after_send(update, context, lang)
                 return
             except Exception:
                 logger.exception("Reddit direct image fetch failed -- falling back")
-        await _resolve_and_send(update, context, "reddit", url, status=status)
+        await _resolve_and_send(update, context, "reddit", url, status=status, lossless_override=lossless)
         return
 
     title = post.get("title", "")
@@ -4599,16 +4632,17 @@ async def _handle_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE, url
     png = await asyncio.to_thread(cards.render_card, "reddit", subreddit, author, body, meta)
 
     await _reply_image_with_button(
-        update, context, png, "reddit_post", lang, "reddit", url)
+        update, context, png, "reddit_post", lang, "reddit", url, lossless)
     await status.delete(context.bot)
     await _after_send(update, context, lang)
 
-async def _handle_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _handle_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str,
+                          lossless: bool | None = None):
     """Media first, card second."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    status = await LiveMessage.reply_to(update.message, i18n.t(lang, "fetching"))
+    status = await LiveMessage.reply_to(update.effective_message, i18n.t(lang, "fetching"))
     if await _resolve_and_send(update, context, "twitter", url, status=status,
-                               quiet_if_missing=True):
+                               quiet_if_missing=True, lossless_override=lossless):
         return
 
     tweet = await platforms.fetch_tweet_syndication(url)
@@ -4623,7 +4657,7 @@ async def _handle_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
         png = await asyncio.to_thread(
             cards.render_card, "twitter", source, author, tweet.get("text", ""), meta)
         await _reply_image_with_button(
-            update, context, png, "tweet", lang, "twitter", url)
+            update, context, png, "tweet", lang, "twitter", url, lossless)
         await status.delete(context.bot)
         await _after_send(update, context, lang)
         return
@@ -6813,7 +6847,7 @@ COMMAND_SINCE = {
     "providers": "1.2.3",
     "stars": "1.2.3",
     "crashtest": "1.2.3",
-    "gift": "2.2.0",
+    "gift": "2.1.1",
 }
 
 def _version_key(version: str | None):

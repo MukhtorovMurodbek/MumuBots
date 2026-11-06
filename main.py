@@ -1038,6 +1038,12 @@ def check(bots: list[Bot]) -> int:
             expect(f"DownloaderBot measures a video's shape ({shape_problem})", shape_problem is None)
             if shape_problem is None:
                 print("  ok    DownloaderBot: ffprobe measured a 64x36 test clip")
+            # yt-dlp needs a JavaScript runtime to answer YouTube's challenges (its own
+            # documentation says so); requirements.txt brings deno (yt-dlp[deno]).
+            deno = shutil.which("deno")
+            expect("DownloaderBot has deno, the JavaScript runtime yt-dlp needs for YouTube", deno is not None)
+            if deno:
+                print("  ok    DownloaderBot: deno is there to answer YouTube's challenges")
         else:
             print("  --    DownloaderBot: video shape not checked (ffmpeg is not on PATH)")
     give_back_memory()

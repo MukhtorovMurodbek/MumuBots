@@ -789,14 +789,16 @@ MAX_DOWNLOAD_MB = int(os.environ.get("DBOT_MAX_DOWNLOAD_MB", "48"))
 
 MAX_DURATION_S = int(os.environ.get("DBOT_MAX_DURATION_SECONDS", "1800"))
 
+MAX_HEIGHT = int(os.environ.get("DBOT_MAX_HEIGHT") or 1080)
+FRAGMENTS_AT_ONCE = max(1, int(os.environ.get("DBOT_YTDLP_FRAGMENTS") or 4))
+SIZE_MARGIN = 0.96
+
 SOCKET_TIMEOUT_S = int(os.environ.get("DBOT_SOCKET_TIMEOUT", "30"))
 
 logger = logging.getLogger(__name__)
 
 YT_PLAYER_CLIENTS = [
-    c.strip() for c in
-    os.environ.get("DBOT_YT_PLAYER_CLIENTS", "tv,web_safari,android_vr,web").split(",")
-    if c.strip()
+    c.strip() for c in (os.environ.get("DBOT_YT_PLAYER_CLIENTS") or "").split(",") if c.strip()
 ]
 
 COOKIEFILE = os.environ.get("DBOT_COOKIES_FILE") or None
@@ -950,6 +952,65 @@ def _reject_long(info, *, incomplete):
         )
     return None
 
+def _size_of(fmt: dict, duration) -> "int | None":
+    """A format's size in bytes, as yt-dlp states it or from its bitrate and the duration; None when neither is known."""
+    for key in ("filesize", "filesize_approx"):
+        value = fmt.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return int(value)
+    rate = fmt.get("tbr")
+    if isinstance(rate, (int, float)) and rate > 0 and duration:
+        return int(rate * 125 * duration)
+    return None
+
+def _wanted(fmt: dict) -> bool:
+    return (bool(fmt.get("format_id")) and fmt.get("ext") != "mhtml" and not fmt.get("has_drm")
+            and "storyboard" not in str(fmt.get("format_note") or "").lower())
+
+def _has(fmt: dict, kind: str) -> bool:
+    return str(fmt.get(kind) or "none") != "none"
+
+def _video_rank(fmt: dict) -> tuple:
+    codec = str(fmt.get("vcodec") or "")
+    plays = 2 if codec.startswith(("avc1", "h264")) else 1 if codec.startswith(("vp9", "vp09")) else 0
+    return plays, min(fmt.get("height") or 0, MAX_HEIGHT), fmt.get("tbr") or 0
+
+def _audio_rank(fmt: dict) -> tuple:
+    codec = str(fmt.get("acodec") or "")
+    return (1 if codec.startswith(("mp4a", "aac")) else 0), min(fmt.get("abr") or fmt.get("tbr") or 0, 192)
+
+def pick_format(info: dict, budget_bytes: int) -> "str | None":
+    """The best version with sound that fits the budget -- H.264 first, which every Telegram app plays, then the tallest up to MAX_HEIGHT -- as a yt-dlp format id, or None."""
+    duration = info.get("duration") or 0
+    formats = [fmt for fmt in info.get("formats") or () if _wanted(fmt)]
+    room = budget_bytes * SIZE_MARGIN
+    tall = lambda fmt: (fmt.get("height") or 0) <= MAX_HEIGHT
+    audios = sorted((fmt for fmt in formats if _has(fmt, "acodec") and not _has(fmt, "vcodec")),
+                    key=_audio_rank, reverse=True)
+    best = None
+    for fmt in formats:
+        if not _has(fmt, "vcodec") or not tall(fmt):
+            continue
+        size = _size_of(fmt, duration)
+        if size is None:
+            continue
+        if _has(fmt, "acodec"):
+            choice = (_video_rank(fmt) + (1, 0), fmt["format_id"]) if size <= room else None
+        else:
+            choice = None
+            for audio in audios:
+                extra = _size_of(audio, duration)
+                if extra is not None and size + extra <= room:
+                    choice = (_video_rank(fmt) + _audio_rank(audio), f"{fmt['format_id']}+{audio['format_id']}")
+                    break
+        if choice is not None and (best is None or choice[0] > best[0]):
+            best = choice
+    return None if best is None else best[1]
+
+def sizes_known(info: dict) -> bool:
+    duration = info.get("duration") or 0
+    return any(_size_of(fmt, duration) for fmt in info.get("formats") or () if _wanted(fmt) and _has(fmt, "vcodec"))
+
 def _format_selector(max_mb: int | None = None) -> str:
     mb = MAX_DOWNLOAD_MB if max_mb is None else max_mb
     return (
@@ -1046,7 +1107,7 @@ def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=Non
         def match_filter(info, *, incomplete):
 
             stop_if_asked()
-            return _reject_long(info, incomplete=incomplete)
+            return None
 
         path = None
         try:
@@ -1059,7 +1120,17 @@ def download_video(url: str, out_dir: str, max_mb: int | None = None, cancel=Non
         finally:
             _remove_leftovers(out_dir, unique_id, keep=path)
 
+def _blocked(exc: Exception, site: str) -> Exception:
+    """`exc` as BlockedBySource when the site turned the request away (a bot check or a login wall), else `exc` itself."""
+    lowered = str(exc).lower()
+    if any(marker in lowered for marker in BOT_CHECK_MARKERS):
+        return BlockedBySource(str(exc), "bot_check", site)
+    if any(marker in lowered for marker in LOGIN_WALL_MARKERS):
+        return BlockedBySource(str(exc), "login_required", site)
+    return exc
+
 def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filter) -> str:
+    """Read the video's versions first, choose the best one that fits `mb` (pick_format), then fetch only that one."""
     ydl_opts = {
         "outtmpl": outtmpl,
         "format": _format_selector(mb),
@@ -1067,7 +1138,10 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
         "match_filter": match_filter,
         "progress_hooks": [progress_hook],
         "socket_timeout": SOCKET_TIMEOUT_S,
-        "retries": 2,
+        "retries": 3,
+        "fragment_retries": 5,
+        "concurrent_fragment_downloads": FRAGMENTS_AT_ONCE,
+        "http_chunk_size": 10 * 1024 * 1024,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -1075,8 +1149,9 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
 
         "cachedir": False,
         "merge_output_format": "mp4",
-        "extractor_args": {"youtube": {"player_client": YT_PLAYER_CLIENTS}},
     }
+    if YT_PLAYER_CLIENTS:
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": YT_PLAYER_CLIENTS}}
     site = _site_of(url)
     cookiefile = cookiefile_for(site)
     if cookiefile:
@@ -1086,21 +1161,31 @@ def _download(yt_dlp, url: str, mb: int, outtmpl: str, progress_hook, match_filt
         ydl_opts["proxy"] = proxy
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url, download=False)
         except Exception as exc:
-            lowered = str(exc).lower()
-            if any(marker in lowered for marker in BOT_CHECK_MARKERS):
-
-                raise BlockedBySource(str(exc), "bot_check", site) from exc
-            if any(marker in lowered for marker in LOGIN_WALL_MARKERS):
-                raise BlockedBySource(str(exc), "login_required", site) from exc
-            raise
-        if info is None:
-
-            raise TooLarge(
-                f"That one is too long -- this bot caps downloads at "
-                f"{MAX_DURATION_S // 60} minutes and {mb} MB."
-            )
+            found = _blocked(exc, site)
+            if found is exc:
+                raise
+            raise found from exc
+    if info is None or info.get("_type") in ("playlist", "multi_video"):
+        raise TooLarge("That link is not one video this bot can fetch.")
+    too_long = _reject_long(info, incomplete=False)
+    if too_long:
+        raise TooLarge(f"Not fetched: {too_long} minutes.")
+    chosen = pick_format(info, mb * 1024 * 1024)
+    if chosen is None and sizes_known(info):
+        raise TooLarge(f"Even its smallest version is over this bot's {mb} MB limit.")
+    if chosen is not None:
+        ydl_opts["format"] = chosen
+        logger.info("yt-dlp: %s, %ss, format %s for a %d MB budget", site, info.get("duration"), chosen, mb)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.process_ie_result(info, download=True)
+        except Exception as exc:
+            found = _blocked(exc, site)
+            if found is exc:
+                raise
+            raise found from exc
         path = ydl.prepare_filename(info)
 
         if not os.path.exists(path):
@@ -1298,7 +1383,7 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_TIMEOUT_S = float(os.environ.get("DBOT_PROVIDER_TIMEOUT", "20"))
 
-YTDLP_TIMEOUT_S = float(os.environ.get("DBOT_YTDLP_TIMEOUT", "90"))
+YTDLP_TIMEOUT_S = float(os.environ.get("DBOT_YTDLP_TIMEOUT", "120"))
 YTDLP_SECONDS_PER_MB = float(os.environ.get("DBOT_YTDLP_SECONDS_PER_MB", "0.5"))
 
 COOLDOWN_AFTER_FAILURES = int(os.environ.get("DBOT_PROVIDER_COOLDOWN_AFTER", "3"))
@@ -1520,12 +1605,20 @@ async def _ig_downloadgram(url: str) -> Resolved:
     if not tokens:
         raise ProviderFailed("downloadgram returned no media", "missing")
 
-    items: list[MediaItem] = []
+    chosen: dict[str, tuple[str, str, bool]] = {}
     for tok in tokens:
         try:
-            name = str(_jwt_payload(tok).get("filename") or "")
+            payload = _jwt_payload(tok)
         except Exception:
-            name = ""
+            payload = {}
+        name = str(payload.get("filename") or "")
+        media = str(payload.get("url") or "").split("?", 1)[0] or name or tok
+        forced = bool(payload.get("force"))
+        if media not in chosen or (forced and not chosen[media][2]):
+            chosen[media] = (tok, name, forced)
+
+    items: list[MediaItem] = []
+    for tok, name, _forced in chosen.values():
         items.append(MediaItem(
             kind=_kind_of(name),
             url="https://cdn.downloadgram.org/?token=" + tok,
@@ -1916,8 +2009,8 @@ PROVIDERS: dict[str, list[tuple[str, object]]] = {
     ],
 
     "youtube": [
-        ("cobalt:youtube", _cobalt_provider("youtube")),
         ("ytdlp:youtube", _ytdlp_provider("youtube")),
+        ("cobalt:youtube", _cobalt_provider("youtube")),
     ],
 }
 
@@ -3300,6 +3393,14 @@ def take(user_id: int, platform: str, url: str):
     entry.last_used = now
     _hits += 1
     return entry
+
+def has(user_id: int, platform: str, url: str) -> bool:
+    """Whether take() would find this download now, without taking it."""
+    if not usable(user_id):
+        return False
+    entry = _entries.get(user_id)
+    return (entry is not None and entry.key == (platform, url) and entry.expires_at > _clock()
+            and all(os.path.exists(p) for _, p in entry.items))
 
 def release(entry) -> None:
     """The send from `entry` is over."""
