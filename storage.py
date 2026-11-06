@@ -3916,6 +3916,57 @@ def unique_people(schemas: list[str]) -> int:
                     skipped, schema)
         return len(people)
 
+def _real_ids_of(conn, schema: str, pseudonyms: set) -> "tuple[dict, bool]":
+    """AnonBot's pseudonyms -> the real ids sealed beside them, so a person is counted once; and whether every sealed id opened (False when the data key does not open them)."""
+    import vault
+    from psycopg import sql as pgsql
+    if not pseudonyms:
+        return {}, True
+    rows = conn.execute(
+        pgsql.SQL("SELECT user_id, user_sealed FROM {}.user_settings WHERE user_id = ANY(%s)")
+        .format(pgsql.Identifier(schema)),
+        (sorted(pseudonyms),),
+    ).fetchall()
+    real, opened = {}, True
+    for pseudonym, sealed in rows:
+        if sealed is None:
+            continue
+        try:
+            real[pseudonym] = vault.open_id(sealed, "anon.user", expected=pseudonym)
+        except (vault.VaultError, TypeError, ValueError):
+            opened = False
+    return real, opened
+
+def people_since(schemas: list[str], since) -> "tuple[int, bool]":
+    """(how many different people used any of these bots since `since`, each counted once, whether that is complete: AnonBot's people are sealed, and are left out when the data key does not open them)."""
+    if not schemas:
+        return 0, True
+    import family_link
+    import vault
+    not_people = set(family_link._GIFT_NOT_PEOPLE)
+    people: set = set()
+    complete = True
+    with pooled_read() as conn:
+        sealed = {row[0] for row in conn.execute(
+            "SELECT table_schema FROM information_schema.columns WHERE table_schema = ANY(%s) "
+            "AND table_name = 'user_settings' AND column_name = 'user_sealed'", (schemas,),
+        ).fetchall()}
+        for schema in sorted(_existing_tables(conn, schemas, "activity_events")):
+            seen = {row[0] for row in conn.execute(
+                f'SELECT DISTINCT user_id FROM "{schema}".activity_events WHERE occurred_at >= %s',
+                (since,),
+            ).fetchall()}
+            pseudonyms = {u for u in seen if vault.is_pseudonym(u)}
+            real = {}
+            if pseudonyms and schema in sealed:
+                real, opened = _real_ids_of(conn, schema, pseudonyms)
+                complete = complete and opened
+            for user_id in seen:
+                person = real.get(user_id, user_id)
+                if person > 0 and person not in not_people:
+                    people.add(person)
+    return len(people), complete
+
 def promo_seen_count(schema: str, promo: str) -> "int | None":
     """How many people that bot's schema says were shown this announcement, or None when the schema has no promo_seen table (a bot that never had one, or not created yet)."""
     with pooled_read() as conn:
