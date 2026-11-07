@@ -4070,6 +4070,16 @@ def build_status_text(start_time: datetime, users_last_hour: int, users_since_st
 PER_USER_WAITING_MAX = int(os.environ.get("PER_USER_WAITING_MAX") or 24)
 
 
+def waiting_updates(application, update) -> list:
+    """The updates of the same person (or chat) as `update` still waiting their turn behind it,
+    when the bot runs PerUserUpdateProcessor; [] otherwise."""
+    processor = getattr(application, "update_processor", None)
+    if not isinstance(processor, PerUserUpdateProcessor):
+        return []
+    key = PerUserUpdateProcessor.key_of(update)
+    return processor.waiting(key) if key is not None else []
+
+
 def per_user_updates(builder, prefix: str):
     if (os.environ.get(f"{prefix}_CONCURRENT_UPDATES") or "").strip().lower() in ("0", "off", "false", "no"):
         return builder
@@ -4091,6 +4101,8 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         super().__init__(max_concurrent_updates)
         # key -> [lock, number of updates holding or waiting for it]; dropped at zero.
         self._locks: "dict[tuple, list]" = {}
+        # key -> the updates still waiting their turn, oldest first (waiting()); dropped when empty.
+        self._waiting: "dict[tuple, list]" = {}
         self.waiting_max = waiting_max
         self.dropped = 0
 
@@ -4128,12 +4140,16 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
                 close()
             return
         entry[1] += 1
+        self._waiting.setdefault(key, []).append(update)
         started = False
         try:
             async with entry[0]:
                 started = True
+                self._unqueue(key, update)
                 await coroutine
         finally:
+            if not started:
+                self._unqueue(key, update)
             entry[1] -= 1
             if entry[1] == 0 and self._locks.get(key) is entry:
                 del self._locks[key]
@@ -4142,6 +4158,22 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
                 close = getattr(coroutine, "close", None)
                 if close is not None:
                     close()
+
+    def waiting(self, key) -> list:
+        """The updates of `key` still waiting their turn behind the one running, oldest first:
+        StickerBot counts a run of pictures from them (its _queued_items)."""
+        return list(self._waiting.get(key, ()))
+
+    def _unqueue(self, key, update) -> None:
+        queued = self._waiting.get(key)
+        if queued is None:
+            return
+        for n, item in enumerate(queued):
+            if item is update:
+                del queued[n]
+                break
+        if not queued:
+            del self._waiting[key]
 
     @staticmethod
     def must_keep(update) -> bool:

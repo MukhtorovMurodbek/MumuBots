@@ -40,8 +40,10 @@ outranks one written here.
   `2.2.0` first.
 - **No pull requests** until the owner confirms Railway's PR environments are off: one would start a
   second copy of the bots with production's tokens.
-- **Nothing deployed today may be lost.** Every command, button, job, setting and text of the
-  deployed version must keep working, and the code that migrates existing data stays.
+- **Nothing in an earlier version may be lost**, deployed or not (the 2.1.x parts on MumuCombined
+  count), unless the owner says to remove or roll it back. Every command, button, job, setting and
+  text keeps working, and the code that migrates existing data stays. A part shipped as 2.1.x is
+  ported here the same day.
 - YouTube works but is never mentioned in user-facing or public text.
 - Quality first. Say plainly when an idea isn't worth doing, and why; say when a request collides
   with something already built.

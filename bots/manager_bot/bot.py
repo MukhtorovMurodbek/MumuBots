@@ -758,7 +758,9 @@ COMMAND_SINCE = {
     "providers": "1.2.3",
     "stars": "1.2.3",
     "crashtest": "1.2.3",
-    "gift": "2.2.0",
+    # Since 2.1.1, where /gift arrived (2.1.2 said so): ManagerBot has its own service now and may
+    # run a newer version than the public bots.
+    "gift": "2.1.1",
 }
 
 
@@ -3194,7 +3196,7 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 
 <b>Still works, not in the menu</b>
 Renamed in 1.7.0, with the old names kept so a habit does not break:
-/problems → /nightly (its name from 1.7.0 to 2.2.0) · /finishupdates → /resume ·
+/problems → /nightly (its name from 1.7.0 to 2.1.2) · /finishupdates → /resume ·
 /errorlog, /botlog and /problemlog → /logs · /me → /status
 /crashtest &lt;bot&gt; makes a bot raise on purpose, to check the alert arrives
     (no bot named crashes ManagerBot itself)

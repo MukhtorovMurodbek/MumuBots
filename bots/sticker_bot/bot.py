@@ -481,7 +481,7 @@ async def _end_status(context: ContextTypes.DEFAULT_TYPE, final_note: str):
     live = LiveMessage.restore(context.user_data.get(STATUS_KEY))
     if live is not None:
         await live.finish(context.bot, final_note)
-    for key in (STATUS_KEY, "sticker_count", "status_intro"):
+    for key in (STATUS_KEY, "sticker_count", "status_intro", *BATCH_KEYS):
         context.user_data.pop(key, None)
 
 
@@ -1575,6 +1575,92 @@ async def _say(message, working, text: str, **kwargs):
     return await message.reply_text(text, **kwargs)
 
 
+# ---------- a run of pictures ----------
+# Several pictures at once (an album, or a quick run of pictures, videos or stickers): each reply
+# also counts the run -- "⏳ 5/7" while more are waiting, then "✅ 7/7", or "⚠️ 7/7 — 1 not added"
+# -- so that nobody reads the replies so far as all the bot saw. 2.1.4's status message did this
+# (the owner, 2026-11-07: "When multiple jobs are queued in a single chat, display it in the
+# message. Just writing 5/7 is ok."); since 2.2.0 each sticker has a reply of its own, so the
+# count rides on those. The waiting pictures are this person's updates queued behind the one being
+# made (shared_features.PerUserUpdateProcessor), or, with that switched off, python-telegram-bot's
+# own queue, as in 2.1.4.
+BATCH_MEDIA = (filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC | filters.ANIMATION
+               | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO)
+BATCH_KEYS = ("batch_open", "batch_seen", "batch_failed", "batch_chat", "batch_handled")
+
+
+def _queued_items(context: ContextTypes.DEFAULT_TYPE, update: Update) -> int:
+    """Pictures, videos and stickers from this chat waiting behind the one being made."""
+    chat_id = update.effective_chat.id if update.effective_chat is not None else None
+    application = getattr(context, "application", None)
+    if application is None:
+        return 0
+    if isinstance(getattr(application, "update_processor", None), shared_features.PerUserUpdateProcessor):
+        waiting = shared_features.waiting_updates(application, update)
+    else:
+        try:
+            waiting = list(application.update_queue._queue)
+        except Exception:
+            waiting = []
+    count = 0
+    for item in waiting:
+        try:
+            if (isinstance(item, Update) and item.effective_chat is not None
+                    and item.effective_chat.id == chat_id and BATCH_MEDIA.check_update(item)):
+                count += 1
+        except Exception:
+            continue
+    return count
+
+
+def _run_line(context: ContextTypes.DEFAULT_TYPE, update: Update, lang: str, failed_now: bool = False) -> str:
+    """This item's place in its run: "⏳ 5/7" while more wait; at the last one "✅ 7/7", or how
+    many were not added; "" outside a run of several."""
+    data = context.user_data
+    if not data.get("batch_open"):
+        return ""
+    seen = data.get("batch_seen", 0)
+    queued = _queued_items(context, update)
+    if queued:
+        return f"⏳ {seen}/{seen + queued}"
+    if seen < 2:
+        return ""
+    failed = data.get("batch_failed", 0) + (1 if failed_now else 0)
+    if not failed:
+        return f"✅ {seen}/{seen}"
+    return i18n.t(lang, "batch_not_added", done=seen, total=seen, failed=failed)
+
+
+def _with_run(text: str, line: str, failed: bool) -> str:
+    """A reply with its run line: after a confirmation, before an error, whose problem code stays
+    last, where the Report button looks for it."""
+    if not line:
+        return text
+    return f"{line}\n{text}" if failed else f"{text}\n{line}"
+
+
+async def _batch_item(update: Update, context: ContextTypes.DEFAULT_TYPE, handler):
+    """One picture's handler inside its run: the first of a run opens it, and the run ends with the
+    one after which nothing from this chat waits."""
+    data = context.user_data
+    chat_id = update.effective_chat.id
+    if not data.get("batch_open") or data.get("batch_chat") != chat_id:
+        data.update(batch_open=True, batch_seen=0, batch_failed=0, batch_chat=chat_id)
+    data["batch_seen"] = data.get("batch_seen", 0) + 1
+    data["batch_handled"] = False
+    before = data.get("sticker_count", 0)
+    handled = False
+    try:
+        result = await handler(update, context)
+        handled = data.get("sticker_count", 0) > before or bool(data.get("batch_handled"))
+        return result
+    finally:
+        if not handled:
+            data["batch_failed"] = data.get("batch_failed", 0) + 1
+        if data.get("batch_open") and not _queued_items(context, update):
+            data["batch_open"] = False
+
+
 async def _add_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str,
                            input_sticker: InputSticker, working=None) -> None:
     """Add one sticker to the session's pack and answer that one message: added as #N, or
@@ -1584,12 +1670,14 @@ async def _add_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     try:
         file_id, number = await _add_input_sticker(context, update.effective_user, input_sticker)
     except NoLongerEditor as exc:
-        await _say(msg, working, i18n.t(lang, "coedit_removed_access", title=str(exc)))
+        await _say(msg, working, _with_run(i18n.t(lang, "coedit_removed_access", title=str(exc)),
+                                           _run_line(context, update, lang, failed_now=True), failed=True))
         return
     except Exception as exc:
         logger.exception("Sticker set operation failed")
         record_error(exc)
-        await _say(msg, working, sticker_ops.error_note(exc, lang))
+        await _say(msg, working, _with_run(sticker_ops.error_note(exc, lang),
+                                           _run_line(context, update, lang, failed_now=True), failed=True))
         return
     context.user_data["last_sticker_id"] = file_id
     context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
@@ -1601,6 +1689,7 @@ async def _add_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     text = i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=DEFAULT_EMOJI)
     if number == 1:
         text = i18n.t(lang, "pack_created_link", pack_name=pack_name) + "\n" + text
+    text = _with_run(text, _run_line(context, update, lang), failed=False)
     sent = await _say(msg, working, text)
     sticker_ops.remember(msg.chat_id, msg.message_id, pack_name, file_id)
     sticker_ops.remember(sent.chat_id, sent.message_id, pack_name, file_id)
@@ -1651,6 +1740,7 @@ async def _sticker_already_in_pack(update: Update, context: ContextTypes.DEFAULT
     the owner, or a co-editor the owner allows (the co-edit screen's 🗑) -- chooses between
     adding it again and removing it; anybody else between adding it again or not, and is told
     that only the owner deletes. Until 2.2.0 it was removed at once, whoever sent it."""
+    context.user_data["batch_handled"] = True  # in a run, an answer of its own: not a failure
     user_id = update.effective_user.id
     pack_name = context.user_data["target_pack"]
     lang = await i18n.get_lang(user_id, context)
@@ -1778,6 +1868,11 @@ async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFA
 
 
 async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Static images / static stickers -> PNG sticker, counted in a run of several (_batch_item)."""
+    return await _batch_item(update, context, _receive_media)
+
+
+async def _receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Static images / static stickers -> PNG sticker."""
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
@@ -1797,7 +1892,8 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         input_sticker = await sticker_ops.static_sticker(await sticker_ops.download(context.bot, file_id))
     except Exception as exc:
         record_error(exc)
-        await msg.reply_text(i18n.t(lang, "image_process_failed", error=exc))
+        await msg.reply_text(_with_run(i18n.t(lang, "image_process_failed", error=exc),
+                                       _run_line(context, update, lang, failed_now=True), failed=True))
         return EDITING
 
     await _add_and_confirm(update, context, lang, input_sticker)
@@ -1805,6 +1901,11 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """GIFs / videos / video stickers -> WEBM video sticker, counted in a run of several (_batch_item)."""
+    return await _batch_item(update, context, _receive_video_media)
+
+
+async def _receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """GIFs / videos / video stickers -> WEBM video sticker (via ffmpeg)."""
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
@@ -1827,7 +1928,7 @@ async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE
     # costs the user a few seconds; not saying so costs them the file.
     refusal = await refuse_new_work(lang, update.effective_user.id, msg.chat_id)
     if refusal:
-        await msg.reply_text(refusal)
+        await msg.reply_text(_with_run(refusal, _run_line(context, update, lang, failed_now=True), failed=True))
         return EDITING
 
     raw = await sticker_ops.download(context.bot, file_id)
@@ -1846,12 +1947,15 @@ async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE
         # the file over there themselves.
         record_error(exc)
         kb = InlineKeyboardMarkup([sibling_bots_keyboard_row(BOT_NAME, only="convertbot")])
-        await working.edit_text(i18n.t(lang, "video_convert_failed_redirect", error=exc), reply_markup=kb)
+        await working.edit_text(_with_run(i18n.t(lang, "video_convert_failed_redirect", error=exc),
+                                          _run_line(context, update, lang, failed_now=True), failed=True),
+                                reply_markup=kb)
         return EDITING
     except Exception as exc:
         logger.exception("Video conversion failed")
         record_error(exc)
-        await working.edit_text(i18n.t(lang, "video_convert_generic_failed", error=exc))
+        await working.edit_text(_with_run(i18n.t(lang, "video_convert_generic_failed", error=exc),
+                                          _run_line(context, update, lang, failed_now=True), failed=True))
         return EDITING
 
     await _add_and_confirm(update, context, lang, input_sticker, working)
