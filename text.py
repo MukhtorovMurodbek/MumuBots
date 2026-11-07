@@ -362,6 +362,7 @@ STRINGS = {
         "pack_deleted_note": "❌ Pack deleted.",
         "image_process_failed": "Couldn't process that image: {error}",
         "added_default_emoji": "Added {emoji} — send an emoji to retag it.",
+        "batch_not_added": "⚠️ {done}/{total} — {failed} not added",
         "last_attempt_failed": "⚠️ Last attempt failed — send another item to retry, or /cancel.",
         "converting_video": "Converting to a video sticker...",
         "video_convert_failed_redirect": (
@@ -698,6 +699,7 @@ STRINGS = {
         "pack_deleted_note": "❌ To'plam o'chirildi.",
         "image_process_failed": "Rasmni qayta ishlab bo'lmadi: {error}",
         "added_default_emoji": "{emoji} bilan qo'shildi — boshqa emoji kerak bo'lsa, uni yuboring.",
+        "batch_not_added": "⚠️ {done}/{total} — {failed} tasi qo'shilmadi",
         "last_attempt_failed": "⚠️ Oxirgi urinish muvaffaqiyatsiz tugadi — qayta urinish uchun boshqa narsa yuboring yoki /cancel qiling.",
         "converting_video": "Video stikerga aylantirilmoqda...",
         "video_convert_failed_redirect": "{error}\n\nBundan stiker yasab bo'lmaydi, lekin faylni boshqa formatga o'girish kerak bo'lsa, @ConvertBot yordam beradi — faylni o'sha yerga yuboring 👇",
@@ -1105,6 +1107,7 @@ STRINGS = {
         "pack_deleted_note": "❌ Набор удалён.",
         "image_process_failed": "Не удалось обработать это изображение: {error}",
         "added_default_emoji": "Добавлено {emoji} — отправьте эмодзи, чтобы переметить.",
+        "batch_not_added": "⚠️ {done}/{total} — не добавлено: {failed}",
         "last_attempt_failed": "⚠️ Последняя попытка не удалась — отправьте другой файл, чтобы попробовать снова, или /cancel.",
         "converting_video": "Преобразование в видео-стикер...",
         "video_convert_failed_redirect": (

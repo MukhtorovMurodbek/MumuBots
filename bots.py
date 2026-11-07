@@ -291,7 +291,71 @@ def _sticker_error_note(exc: Exception, lang: str) -> str:
     return (_explain_sticker_error(exc, lang) + "\n" + i18n.t(lang, "last_attempt_failed")
             + problems.code_line(problems.STICKER_ERRORS[key]))
 
-def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "") -> str:
+# Several pictures at once. python-telegram-bot takes one update at a time from its queue here
+# (this bot does not set concurrent_updates), so while one picture becomes a sticker, the rest of an
+# album wait in that queue. The status message counts them -- "⏳ 5/7" while they are being added,
+# "✅ 7/7" when the last one is done -- so nobody thinks the bot saw only the first few. Pictures sent
+# meanwhile join the same count.
+BATCH_MEDIA = (filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC | filters.ANIMATION
+               | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO)
+BATCH_KEYS = ("batch_open", "batch_seen", "batch_failed", "batch_chat", "batch_removed", "status_note")
+
+def _queued_items(context: ContextTypes.DEFAULT_TYPE, chat_id) -> int:
+    """How many pictures, videos and stickers from this chat wait in the update queue behind the one being made (0 when the queue cannot be read)."""
+    try:
+        waiting = list(context.application.update_queue._queue)
+    except Exception:
+        return 0
+    count = 0
+    for item in waiting:
+        try:
+            if (isinstance(item, Update) and item.effective_chat is not None
+                    and item.effective_chat.id == chat_id and BATCH_MEDIA.check_update(item)):
+                count += 1
+        except Exception:
+            continue
+    return count
+
+def _batch_line(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """The count while a run of several items is being added ("⏳ 5/7"); nothing for a single one."""
+    data = context.user_data
+    if not data.get("batch_open"):
+        return ""
+    seen = data.get("batch_seen", 0)
+    total = seen + _queued_items(context, data.get("batch_chat"))
+    return f"⏳ {seen}/{total}" if total > 1 else ""
+
+async def _batch_item(update: Update, context: ContextTypes.DEFAULT_TYPE, handler):
+    """One item's handler, inside the count: the first item of a run opens it; the last one (nothing of this chat left waiting) closes it with "✅ 7/7", or with how many were not added."""
+    data = context.user_data
+    chat_id = update.effective_chat.id
+    if not data.get("batch_open") or data.get("batch_chat") != chat_id:
+        data.update(batch_open=True, batch_seen=0, batch_failed=0, batch_chat=chat_id)
+    data["batch_seen"] = data.get("batch_seen", 0) + 1
+    data["batch_removed"] = False
+    before = data.get("sticker_count", 0)
+    handled = False
+    try:
+        result = await handler(update, context)
+        handled = data.get("sticker_count", 0) > before or bool(data.get("batch_removed"))
+        return result
+    finally:
+        if not handled:
+            data["batch_failed"] = data.get("batch_failed", 0) + 1
+        if data.get("batch_open") and not _queued_items(context, chat_id):
+            seen, failed = data.get("batch_seen", 0), data.get("batch_failed", 0)
+            data["batch_open"] = False
+            if seen > 1 and _has_status(context):
+                try:
+                    lang = await i18n.get_lang(update.effective_user.id, context)
+                    line = (f"✅ {seen}/{seen}" if not failed
+                            else i18n.t(lang, "batch_not_added", done=seen, total=seen, failed=failed))
+                    await _refresh_status(context, lang, data.get("status_note", ""), batch_line=line)
+                except Exception:
+                    logger.debug("Couldn't show the run's last count", exc_info=True)
+
+def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "",
+                 batch_line: "str | None" = None) -> str:
     title = context.user_data.get("title") or i18n.t(lang, "status_default_title")
     created = context.user_data.get("pack_created")
     count = context.user_data.get("sticker_count", 0)
@@ -300,6 +364,9 @@ def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "") 
     text = i18n.t(lang, "status_line", verb=verb, title=title, count=count)
     if intro:
         text = f"{intro}\n\n{text}"
+    line = _batch_line(context) if batch_line is None else batch_line
+    if line:
+        text += f"\n{line}"
     if note:
         text += f"\n{note}"
     return text
@@ -328,11 +395,13 @@ async def _start_status(
     except Exception:
         logger.exception("Couldn't set up the status message")
 
-async def _refresh_status(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = ""):
+async def _refresh_status(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "",
+                          batch_line: "str | None" = None):
     live = LiveMessage.restore(context.user_data.get(STATUS_KEY))
     if live is None:
         return
-    await live.set(context.bot, _status_text(context, lang, note))
+    context.user_data["status_note"] = note
+    await live.set(context.bot, _status_text(context, lang, note, batch_line))
 
     context.user_data[STATUS_KEY] = live.save()
 
@@ -340,7 +409,7 @@ async def _end_status(context: ContextTypes.DEFAULT_TYPE, final_note: str):
     live = LiveMessage.restore(context.user_data.get(STATUS_KEY))
     if live is not None:
         await live.finish(context.bot, final_note)
-    for key in (STATUS_KEY, "sticker_count", "status_intro"):
+    for key in (STATUS_KEY, "sticker_count", "status_intro", *BATCH_KEYS):
         context.user_data.pop(key, None)
 
 async def _owns_pack_or_deny(pack_name: str, user_id: int) -> bool:
@@ -917,6 +986,7 @@ async def _is_own_pack_sticker(context: ContextTypes.DEFAULT_TYPE, sticker) -> b
 
 async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE, sticker) -> int:
     """Handles the 'sent a sticker that's already in this pack' case by removing it instead of trying (and failing) to re-add it -- Telegram rejects re-adding a sticker to the exact set it already belongs to with an unhelpful STICKERSET_INVALID error, so this sidesteps that entirely."""
+    context.user_data["batch_removed"] = True  # the item did what it was sent for: not a failure in the count
     lang = await i18n.get_lang(update.effective_user.id, context)
     try:
         sticker_set = await context.bot.get_sticker_set(sticker.set_name)
@@ -979,6 +1049,10 @@ async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Static images / static stickers -> PNG sticker, counted when several come at once (_batch_item)."""
+    return await _batch_item(update, context, _receive_media)
+
+async def _receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Static images / static stickers -> PNG sticker."""
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
@@ -1024,6 +1098,10 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return EDITING
 
 async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """GIFs / videos / video stickers -> WEBM video sticker, counted when several come at once (_batch_item)."""
+    return await _batch_item(update, context, _receive_video_media)
+
+async def _receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """GIFs / videos / video stickers -> WEBM video sticker (via ffmpeg)."""
     msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
