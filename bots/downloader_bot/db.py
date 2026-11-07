@@ -525,6 +525,17 @@ def forget_group(chat_id: int) -> None:
         conn.commit()
 
 
+def channel_ids() -> "list[int]":
+    """The channels the bot is in (channels.py: their rows here are marked kind "channel"), the
+    most recently changed first."""
+    with pooled_read() as conn:
+        rows = conn.execute(
+            "SELECT chat_id FROM group_settings WHERE settings->>'kind' = 'channel' "
+            "ORDER BY updated_at DESC LIMIT 500"
+        ).fetchall()
+        return [row[0] for row in rows]
+
+
 def move_group_settings(old_chat_id: int, new_chat_id: int) -> None:
     """The group became a supergroup, under a new id: its settings go with it."""
     with pooled() as conn:

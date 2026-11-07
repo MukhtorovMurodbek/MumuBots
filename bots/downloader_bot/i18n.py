@@ -113,7 +113,7 @@ STRINGS = {
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
         "privacy_stored": (
-            "• your Telegram ID, language, and caption and quality settings\n• your links: each while it's fetched, then the last five, for their buttons; dropped after 12 hours without using the bot\n• the last download, for 10 minutes, for its buttons and the same link sent again; your next link, /deletemydata or a restart deletes it sooner, and it never stays past 12 hours\n• Telegram's file IDs of posts already sent, filed under a scrambled post name, not under who asked, so a post can be resent without downloading it again; checked at least every 12 hours that the post is still public, deleted after 90 days unused\n• one row per download, with only the time, for the daily limit; deleted after 2 days\n• a timestamp each time you use the bot, to count users\n• daily button-tap counts for the whole bot, not per person\n• donations: the amount and Telegram's payment ID\n• whatever the bot is in the middle of doing with you, until it's done\n• in a group: its ID and /settings, until the bot leaves. It checks every message for a link and keeps nothing from the rest; a downloaded link counts as the poster's (the limit row, and the last download for 10 minutes)\n\nOtherwise the media isn't kept: it's fetched, sent and deleted."
+            "• your Telegram ID, language, and caption and quality settings\n• your links: each while it's fetched, then the last five, for their buttons; dropped after 12 hours without using the bot\n• the last download, for 10 minutes, for its buttons and the same link sent again; your next link, /deletemydata or a restart deletes it sooner, and it never stays past 12 hours\n• Telegram's file IDs of posts already sent, filed under a scrambled post name, not under who asked, so a post can be resent without downloading it again; checked at least every 12 hours that the post is still public, deleted after 90 days unused\n• one row per download, with only the time, for the daily limit; deleted after 2 days\n• a timestamp each time you use the bot, to count users\n• daily button-tap counts for the whole bot, not per person\n• donations: the amount and Telegram's payment ID\n• whatever the bot is in the middle of doing with you, until it's done\n• in a group: its ID and /settings, until the bot leaves. It checks every message for a link and keeps nothing from the rest; a downloaded link counts as the poster's (the limit row, and the last download for 10 minutes)\n• in a channel it's an admin of: its ID, settings and the credit line's language, until the bot leaves. It reads new posts for a link and keeps nothing from them; the media goes into the post, and nobody's limit is used\n\nOtherwise the media isn't kept: it's fetched, sent and deleted."
         ),
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
@@ -230,7 +230,7 @@ STRINGS = {
             "Hey! Send me a link (Instagram, TikTok, Pinterest, Reddit, or "
             "Twitter/X) and I'll grab it for you.\n\n"
         ),
-        "help_text": "Paste a link any time — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a picture of a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media, or a picture of a text post\n\nUnder an album: 📄 PDF puts its photos into one PDF, 🗜 ZIP puts everything into one archive.\n\nCommands:\n/settings - caption, quality and large files (over 48 MB, for ⚡)\n/caption on|off - the \"via @{username}\" caption\n/lossless on|off - downloads as uncompressed files\n/cancel - stop something I'm waiting for\n/feedback - write to whoever runs these bots (anonymous)\n/donate - help pay for hosting (optional)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/en, /uz, /rus - switch language (or /language)\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - start over\n/fullhelp - this guide (/help - the short one)\n\n⚠️ Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn.\n\n",
+        "help_text": "Paste a link any time — no command needed:\n  - Instagram: reels, photos, whole carousels\n  - TikTok: videos without the watermark, and photo slideshows\n  - Twitter/X: video and photos, or a picture of a text post\n  - Pinterest: the pin, at full size\n  - Reddit: the media, or a picture of a text post\n\nUnder an album: 📄 PDF puts its photos into one PDF, 🗜 ZIP puts everything into one archive.\n\nCommands:\n/settings - caption, quality and large files (over 48 MB, for ⚡)\n/channels - your channels: I put the video into each post with a link\n/caption on|off - the \"via @{username}\" caption\n/lossless on|off - downloads as uncompressed files\n/cancel - stop something I'm waiting for\n/feedback - write to whoever runs these bots (anonymous)\n/donate - help pay for hosting (optional)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/en, /uz, /rus - switch language (or /language)\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - start over\n/fullhelp - this guide (/help - the short one)\n\n⚠️ Payments are final — Stars are NOT refunded, and ⚡ credit can NOT be withdrawn.\n\n",
         "caption_state_on": "ON",
         "caption_state_off": "OFF",
         "settings_heading": "⚙️ Your settings. Tap to change any of them.",
@@ -313,6 +313,18 @@ STRINGS = {
         "group_admins_only": '🔒 Only admins can change these',
         "group_admins_alert": "Only this group's admins can change that.",
         "group_saved": 'Saved ✅',
+        "channel_hello": "✅ I'm in “{title}” now. When a post there is text with a link, I put its video or photos into that post, and the text becomes the caption. How I do it is below; /channels brings this back.",
+        "channel_settings_text": "⚙️ What I do in “{title}” — tap to change.\n\nA post holds one photo or video and a caption of up to 1024 characters. When a link gives several files, I can post them anew under the post's text and delete the link post. A post with a longer text stays as it is. Quality applies where the site offers a choice. Files over {free} MB are not sent in channels.",
+        "channel_needs_rights": "⚠️ For that I need these admin rights there: {rights}.",
+        "channel_right_edit": "Edit messages of others",
+        "channel_right_post": "Post messages",
+        "channel_right_delete": "Delete messages of others",
+        "channel_repost_on": "🔁 Several files: new post, link post deleted",
+        "channel_repost_off": "🔁 Several files: post left as it is",
+        "channels_none": "I'm not in any channel you run. Add me to your channel as an admin, with “Edit messages of others”, and I'll put the video into each post with a link.",
+        "channels_pick": "Which channel?",
+        "channel_admins_alert": "Only that channel's admins can change this.",
+        "channel_gone": "I'm not in that channel any more.",
     },
     "uz": {
         "transfer_waiting": "⏳ Boshqa katta fayl ko'chirilmoqda. Sizniki undan keyin boshlanadi.",
@@ -372,7 +384,7 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• havolalaringiz: har biri yuklanayotganda, keyin tugmalari ishlashi uchun oxirgi beshtasi; botdan 12 soat foydalanilmasa o'chiriladi\n• oxirgi yuklama — 10 daqiqa, tugmalari va xuddi shu havola qayta yuborilganda ishlashi uchun; keyingi havolangiz, /deletemydata yoki qayta ishga tushish uni ertaroq o'chiradi, 12 soatdan ortiq hech qachon qolmaydi\n• yuborilgan postlarning Telegram fayl ID lari — kim so'raganiga emas, postning shifrlangan nomiga bog'langan, postni qayta yuklamay yuborish uchun; post hali ochiqligi kamida 12 soatda bir tekshiriladi, 90 kun ishlatilmasa o'chiriladi\n• har bir yuklama uchun bitta yozuv, faqat vaqti bilan — kunlik limit uchun; 2 kundan keyin o'chiriladi\n• har safar botdan foydalanganingiz vaqti — foydalanuvchilarni sanash uchun\n• butun bot bo'yicha kunlik tugma bosishlar soni, odamlar bo'yicha emas\n• xayriyalar: miqdor va Telegram to'lov ID si\n• bot siz bilan hozir bajarayotgan ish, u tugaguncha\n• guruhda: uning ID si va /settings, bot guruhdan chiqquncha. U har bir xabarda havola qidiradi, qolganidan hech narsa saqlamaydi; yuklangan havola uni yuborgan odamniki hisoblanadi (limit yozuvi va 10 daqiqalik oxirgi yuklama)\n\nBoshqa hollarda media saqlanmaydi: yuklanadi, yuboriladi va o'chiriladi.",
+        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• havolalaringiz: har biri yuklanayotganda, keyin tugmalari ishlashi uchun oxirgi beshtasi; botdan 12 soat foydalanilmasa o'chiriladi\n• oxirgi yuklama — 10 daqiqa, tugmalari va xuddi shu havola qayta yuborilganda ishlashi uchun; keyingi havolangiz, /deletemydata yoki qayta ishga tushish uni ertaroq o'chiradi, 12 soatdan ortiq hech qachon qolmaydi\n• yuborilgan postlarning Telegram fayl ID lari — kim so'raganiga emas, postning shifrlangan nomiga bog'langan, postni qayta yuklamay yuborish uchun; post hali ochiqligi kamida 12 soatda bir tekshiriladi, 90 kun ishlatilmasa o'chiriladi\n• har bir yuklama uchun bitta yozuv, faqat vaqti bilan — kunlik limit uchun; 2 kundan keyin o'chiriladi\n• har safar botdan foydalanganingiz vaqti — foydalanuvchilarni sanash uchun\n• butun bot bo'yicha kunlik tugma bosishlar soni, odamlar bo'yicha emas\n• xayriyalar: miqdor va Telegram to'lov ID si\n• bot siz bilan hozir bajarayotgan ish, u tugaguncha\n• guruhda: uning ID si va /settings, bot guruhdan chiqquncha. U har bir xabarda havola qidiradi, qolganidan hech narsa saqlamaydi; yuklangan havola uni yuborgan odamniki hisoblanadi (limit yozuvi va 10 daqiqalik oxirgi yuklama)\n• admin bo'lgan kanalda: uning ID si, sozlamalari va bot nomi yozuvining tili, bot kanaldan chiqquncha. U yangi postlarda havola qidiradi va ulardan hech narsa saqlamaydi; media postning o'ziga qo'yiladi, hech kimning limiti ishlatilmaydi\n\nBoshqa hollarda media saqlanmaydi: yuklanadi, yuboriladi va o'chiriladi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
         "privacy_problems": "Har bir xato sizsiz yoziladi: kodi, hodisa raqami, vaqti va bot versiyasi.\n\nXato ostidagi «Ma'lumotlarimni qo'shish» o'sha hodisaga Telegram ID, @username, til va chat turini (shaxsiy yoki guruh) qo'shadi — faqat «Yuborish»ni bossangiz. Xabarlar va fayllar hech qachon qo'shilmaydi. Ular 30 kundan keyin yoki /deletemydata bilan darhol o'chiriladi. Xato yozuvlari 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
@@ -469,7 +481,7 @@ STRINGS = {
             "Salom! Menga havola yuboring (Instagram, TikTok, Pinterest, Reddit "
             "yoki Twitter/X) va men uni siz uchun yuklab beraman.\n\n"
         ),
-        "help_text": "Istalgan vaqt havola yuboring — buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar yoki matnli post rasmi\n  - Pinterest: pin, asl o'lchamda\n  - Reddit: media yoki matnli post rasmi\n\nAlbom ostida: 📄 PDF rasmlarni bitta PDF ga jamlaydi, 🗜 ZIP hammasini bitta arxivga soladi.\n\nBuyruqlar:\n/settings - izoh, sifat va katta fayllar (48 MB dan katta, ⚡ evaziga)\n/caption on|off - \"via @{username}\" yozuvi\n/lossless on|off - fayllarni siqilmagan holda olish\n/cancel - men kutayotgan narsani to'xtatish\n/feedback - botlarni yuritayotgan odamga yozish (anonim)\n/donate - server xarajatlariga yordam (ixtiyoriy)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/privacy - siz haqingizda nimalar saqlanadi\n/terms - botdan nima uchun foydalanish mumkin\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - boshidan boshlash\n/fullhelp - shu qo'llanma (/help - qisqasi)\n\n⚠️ To'lovlar qaytarilmaydi — Stars qaytarilMAYDI, ⚡ kreditni yechib olib BO'LMAYDI.\n\n",
+        "help_text": "Istalgan vaqt havola yuboring — buyruq kerak emas:\n  - Instagram: reels, rasmlar, butun karusel\n  - TikTok: suv belgisiz video va rasm-slaydlar\n  - Twitter/X: video va rasmlar yoki matnli post rasmi\n  - Pinterest: pin, asl o'lchamda\n  - Reddit: media yoki matnli post rasmi\n\nAlbom ostida: 📄 PDF rasmlarni bitta PDF ga jamlaydi, 🗜 ZIP hammasini bitta arxivga soladi.\n\nBuyruqlar:\n/settings - izoh, sifat va katta fayllar (48 MB dan katta, ⚡ evaziga)\n/channels - kanallaringiz: havolali har bir postga videoni qo'yaman\n/caption on|off - \"via @{username}\" yozuvi\n/lossless on|off - fayllarni siqilmagan holda olish\n/cancel - men kutayotgan narsani to'xtatish\n/feedback - botlarni yuritayotgan odamga yozish (anonim)\n/donate - server xarajatlariga yordam (ixtiyoriy)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/privacy - siz haqingizda nimalar saqlanadi\n/terms - botdan nima uchun foydalanish mumkin\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - boshidan boshlash\n/fullhelp - shu qo'llanma (/help - qisqasi)\n\n⚠️ To'lovlar qaytarilmaydi — Stars qaytarilMAYDI, ⚡ kreditni yechib olib BO'LMAYDI.\n\n",
         "caption_state_on": "YONIQ",
         "caption_state_off": "O'CHIQ",
         "settings_heading": "⚙️ Sozlamalaringiz. O'zgartirish uchun bosing.",
@@ -548,6 +560,18 @@ STRINGS = {
         "group_admins_only": "🔒 Faqat adminlar o'zgartiradi",
         "group_admins_alert": "Buni faqat guruh adminlari o'zgartira oladi.",
         "group_saved": 'Saqlandi ✅',
+        "channel_hello": "✅ Endi “{title}” kanalidaman. U yerdagi post havolali matn bo'lsa, videosini yoki rasmlarini o'sha postning o'ziga qo'yaman, matn esa izoh bo'ladi. Qanday ishlashim quyida; /channels buni qayta ochadi.",
+        "channel_settings_text": "⚙️ “{title}” kanalida nima qilaman — o'zgartirish uchun bosing.\n\nBitta postga bitta rasm yoki video va 1024 belgigacha izoh sig'adi. Havola bir nechta fayl bersa, ularni post matni bilan yangi post qilib, havolali postni o'chirishim mumkin. Matni uzunroq post o'zgarmaydi. Sifat sayt tanlov bergan joyda ishlaydi. {free} MB dan katta fayllar kanallarga yuborilmaydi.",
+        "channel_needs_rights": "⚠️ Buning uchun u yerda menga quyidagi admin huquqlari kerak: {rights}.",
+        "channel_right_edit": "Boshqalarning xabarlarini tahrirlash",
+        "channel_right_post": "Xabar joylash",
+        "channel_right_delete": "Boshqalarning xabarlarini o'chirish",
+        "channel_repost_on": "🔁 Bir nechta fayl: yangi post, havolali post o'chiriladi",
+        "channel_repost_off": "🔁 Bir nechta fayl: post o'zgarmaydi",
+        "channels_none": "Siz boshqaradigan birorta kanalda emasman. Meni kanalingizga “Boshqalarning xabarlarini tahrirlash” huquqi bilan admin qilib qo'shing — havolali har bir postga videoni qo'yaman.",
+        "channels_pick": "Qaysi kanal?",
+        "channel_admins_alert": "Buni faqat o'sha kanal adminlari o'zgartira oladi.",
+        "channel_gone": "Men endi o'sha kanalda emasman.",
     },
     "ru": {
         "transfer_waiting": "⏳ Сейчас переносится другой большой файл. Ваш начнётся сразу после.",
@@ -626,7 +650,7 @@ STRINGS = {
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• ваш Telegram ID, язык, настройки подписи и качества\n• ваши ссылки: каждая — пока скачивается, затем последние пять — для их кнопок; удаляются через 12 часов без использования бота\n• последняя загрузка — 10 минут, для её кнопок и повторной отправки той же ссылки; следующая ссылка, /deletemydata или перезапуск удаляют её раньше, дольше 12 часов она не хранится\n• ID файлов Telegram уже отправленных постов — по зашифрованному имени поста, а не по тому, кто просил, чтобы отправить пост снова без скачивания; не реже раза в 12 часов проверяется, что пост ещё открыт, неиспользуемые удаляются через 90 дней\n• одна запись на загрузку, только время — для дневного лимита; удаляется через 2 дня\n• время каждого использования бота — чтобы считать пользователей\n• дневное число нажатий кнопок по всему боту, не по людям\n• пожертвования: сумма и ID платежа в Telegram\n• то, что бот сейчас делает с вами, пока это не закончится\n• в группе: её ID и /settings, пока бот в ней. Он ищет ссылки в каждом сообщении и ничего не хранит из остальных; скачанная ссылка считается ссылкой отправителя (запись лимита и последняя загрузка на 10 минут)\n\nВ остальном медиа не хранятся: скачиваются, отправляются и удаляются."
+            "• ваш Telegram ID, язык, настройки подписи и качества\n• ваши ссылки: каждая — пока скачивается, затем последние пять — для их кнопок; удаляются через 12 часов без использования бота\n• последняя загрузка — 10 минут, для её кнопок и повторной отправки той же ссылки; следующая ссылка, /deletemydata или перезапуск удаляют её раньше, дольше 12 часов она не хранится\n• ID файлов Telegram уже отправленных постов — по зашифрованному имени поста, а не по тому, кто просил, чтобы отправить пост снова без скачивания; не реже раза в 12 часов проверяется, что пост ещё открыт, неиспользуемые удаляются через 90 дней\n• одна запись на загрузку, только время — для дневного лимита; удаляется через 2 дня\n• время каждого использования бота — чтобы считать пользователей\n• дневное число нажатий кнопок по всему боту, не по людям\n• пожертвования: сумма и ID платежа в Telegram\n• то, что бот сейчас делает с вами, пока это не закончится\n• в группе: её ID и /settings, пока бот в ней. Он ищет ссылки в каждом сообщении и ничего не хранит из остальных; скачанная ссылка считается ссылкой отправителя (запись лимита и последняя загрузка на 10 минут)\n• в канале, где бот админ: его ID, настройки и язык подписи бота, пока бот в нём. Он ищет ссылки в новых постах и ничего из них не хранит; медиа вставляется в сам пост, ничей лимит не расходуется\n\nВ остальном медиа не хранятся: скачиваются, отправляются и удаляются."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
         "privacy_problems": "Каждая ошибка записывается без вас: код, номер инцидента, время и версия бота.\n\n«Добавить мои данные» под ошибкой прикрепляет к этому инциденту ваш Telegram ID, @username, язык и тип чата (личный или группа) — только если нажать «Отправить». Сообщения и файлы — никогда. Это стирается через 30 дней или сразу через /deletemydata. Записи об ошибках удаляются через 180 дней.",
@@ -740,7 +764,7 @@ STRINGS = {
             "Здравствуйте! Пришлите мне ссылку (Instagram, TikTok, Pinterest, Reddit "
             "или Twitter/X), и я скачаю это для вас.\n\n"
         ),
-        "help_text": "Присылайте ссылку в любое время — команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото или картинка текстового поста\n  - Pinterest: пин в полном размере\n  - Reddit: медиа или картинка текстового поста\n\nПод альбомом: 📄 PDF собирает фото в один PDF, 🗜 ZIP — всё в один архив.\n\nКоманды:\n/settings - подпись, качество и большие файлы (больше 48 МБ, за ⚡)\n/caption on|off - подпись \"via @{username}\"\n/lossless on|off - загрузки несжатыми файлами\n/cancel - остановить то, чего я жду\n/feedback - написать тому, кто ведёт ботов (анонимно)\n/donate - помочь с хостингом (необязательно)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/en, /uz, /rus - сменить язык (или /language)\n/privacy - что я храню о вас\n/terms - для чего можно использовать бота\n/deletemydata - удалить всё, что я о вас храню\n/start - начать сначала\n/fullhelp - это руководство (/help - краткое)\n\n⚠️ Платежи окончательны — Stars НЕ возвращаются, ⚡ кредит НЕЛЬЗЯ вывести.\n\n",
+        "help_text": "Присылайте ссылку в любое время — команда не нужна:\n  - Instagram: reels, фото, карусели целиком\n  - TikTok: видео без водяного знака и фото-слайдшоу\n  - Twitter/X: видео и фото или картинка текстового поста\n  - Pinterest: пин в полном размере\n  - Reddit: медиа или картинка текстового поста\n\nПод альбомом: 📄 PDF собирает фото в один PDF, 🗜 ZIP — всё в один архив.\n\nКоманды:\n/settings - подпись, качество и большие файлы (больше 48 МБ, за ⚡)\n/channels - ваши каналы: вставляю видео в каждый пост со ссылкой\n/caption on|off - подпись \"via @{username}\"\n/lossless on|off - загрузки несжатыми файлами\n/cancel - остановить то, чего я жду\n/feedback - написать тому, кто ведёт ботов (анонимно)\n/donate - помочь с хостингом (необязательно)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/en, /uz, /rus - сменить язык (или /language)\n/privacy - что я храню о вас\n/terms - для чего можно использовать бота\n/deletemydata - удалить всё, что я о вас храню\n/start - начать сначала\n/fullhelp - это руководство (/help - краткое)\n\n⚠️ Платежи окончательны — Stars НЕ возвращаются, ⚡ кредит НЕЛЬЗЯ вывести.\n\n",
         "caption_state_on": "ВКЛ",
         "caption_state_off": "ВЫКЛ",
         "settings_heading": "⚙️ Ваши настройки. Нажмите, чтобы изменить.",
@@ -823,6 +847,18 @@ STRINGS = {
         "group_admins_only": '🔒 Менять могут только админы',
         "group_admins_alert": 'Это могут менять только админы группы.',
         "group_saved": 'Сохранено ✅',
+        "channel_hello": "✅ Теперь я в канале «{title}». Если пост там — текст со ссылкой, я вставлю видео или фото в сам пост, а текст станет подписью. Как именно — ниже; /channels откроет это снова.",
+        "channel_settings_text": "⚙️ Что я делаю в «{title}» — нажмите, чтобы изменить.\n\nВ пост помещается одно фото или видео и подпись до 1024 символов. Если по ссылке несколько файлов, я могу опубликовать их новым постом с тем же текстом и удалить пост со ссылкой. Пост с более длинным текстом остаётся как есть. Качество работает там, где сайт даёт выбор. Файлы больше {free} МБ в каналы не отправляются.",
+        "channel_needs_rights": "⚠️ Для этого мне там нужны права админа: {rights}.",
+        "channel_right_edit": "Редактирование чужих публикаций",
+        "channel_right_post": "Публикация сообщений",
+        "channel_right_delete": "Удаление чужих публикаций",
+        "channel_repost_on": "🔁 Несколько файлов: новый пост, пост со ссылкой удаляется",
+        "channel_repost_off": "🔁 Несколько файлов: пост остаётся как есть",
+        "channels_none": "Я не состою ни в одном канале, которым вы управляете. Добавьте меня в канал админом с правом «Редактирование чужих публикаций» — и я буду вставлять видео в каждый пост со ссылкой.",
+        "channels_pick": "Какой канал?",
+        "channel_admins_alert": "Это могут менять только админы этого канала.",
+        "channel_gone": "Меня больше нет в этом канале.",
     },
 }
 
@@ -879,6 +915,7 @@ COMMAND_MENU = {
     "uz": {
         "start": "Bu bot nima qiladi va qanday boshlash kerak",
         "settings": "Izoh va fayl sifati sozlamalari",
+        "channels": "Kanallaringiz: havolali postlarga video",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
         "feedback": "Taklif yoki muammo haqida yozish",
@@ -892,6 +929,7 @@ COMMAND_MENU = {
     "ru": {
         "start": "Что этот бот делает и с чего начать",
         "settings": "Подпись и качество файлов",
+        "channels": "Ваши каналы: видео в посты со ссылкой",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
         "feedback": "Предложить идею или сообщить о проблеме",

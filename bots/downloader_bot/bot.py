@@ -37,6 +37,7 @@ Env vars: DBOT_TOKEN, DBOT_USERNAME (no @), DBOT_ADMIN_ID (optional,
           the per-site cookie/proxy settings are documented in .env.example.
 """
 import asyncio
+import contextlib
 import contextvars
 import hashlib
 import logging
@@ -57,9 +58,9 @@ except ImportError:
 
 from telegram import (
     BotCommand, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
-    LinkPreviewOptions, Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    LinkPreviewOptions, MessageEntity, Update, InlineKeyboardButton, InlineKeyboardMarkup,
 )
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 
 # For any message whose text is an error. yt-dlp's failures quote their own
 # documentation URLs, and Telegram turns the first link in a message into a
@@ -81,6 +82,7 @@ from telegram.ext import (
 )
 
 import cards
+import channels
 import db
 import delivery_cache
 import family_link
@@ -125,6 +127,7 @@ from db import (
     set_group_settings,
     forget_group,
     move_group_settings,
+    channel_ids,
 )
 from shared_features import (
     note_active,
@@ -538,6 +541,7 @@ BOT_COMMANDS = [
     BotCommand("start", "What I do, and how to start"),
     BotCommand("language", "Choose your language / Tilni tanlash / Выбрать язык"),
     BotCommand("settings", "Captions and file quality"),
+    BotCommand("channels", "Your channels: the video in each post with a link"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
     BotCommand("feedback", "Suggest something, or report a problem"),
@@ -2664,8 +2668,12 @@ async def group_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def bot_membership_changed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Added to a group: say hello and what it needs. Removed: forget the group's settings."""
+    """Added to a group: say hello and what it needs. Removed: forget the group's settings.
+    A channel: _channel_membership_changed."""
     change = update.my_chat_member
+    if change is not None and change.chat.type == "channel":
+        await _channel_membership_changed(update, context)
+        return
     if change is None or change.chat.type not in GROUP_TYPES:
         return
     before, now = change.old_chat_member.status, change.new_chat_member.status
@@ -2673,6 +2681,344 @@ async def bot_membership_changed(update: Update, context: ContextTypes.DEFAULT_T
         await asyncio.to_thread(forget_group, change.chat.id)
     elif before in ("left", "kicked"):
         await _group_hello(update, context)
+
+
+# ---------------------------------------------------------------------------
+# Channels
+# ---------------------------------------------------------------------------
+# An admin of a channel, the bot puts what a link holds into the post itself (channels.py says how,
+# and why that way). Everything from a channel goes through channel_router, first in its handler
+# group, and stops there: a channel post carries no person, which every private-chat and group
+# handler assumes, and nothing the bot says anywhere else may ever land in a channel. Nor is a
+# failure said there -- every subscriber would read it: it is logged, and an unexpected one reaches
+# the error handler, which tells only private chats. The settings live in a private chat with the
+# bot: the admin who adds it gets them there at once, any admin later with /channels.
+CHANNEL_RIGHT_TEXTS = {"edit": "channel_right_edit", "post": "channel_right_post",
+                       "delete": "channel_right_delete"}
+# How many of the bot's channels /channels asks Telegram about, newest settings first: one
+# getChatMember each, to show a person only the channels they run.
+CHANNELS_LISTED = 50
+
+
+async def _channel_settings(chat_id: int) -> "tuple[dict, bool]":
+    """The channel's settings, and whether they are stored (False: the defaults, never saved)."""
+    raw = await asyncio.to_thread(get_group_settings, chat_id)
+    return channels.normalize(raw), channels.is_channel(raw)
+
+
+async def _bot_rights(bot, chat_id: int) -> "tuple[bool, bool, bool]":
+    """(edit, post, delete): what the bot may do with the channel's posts; all False when Telegram
+    cannot say."""
+    try:
+        member = await bot.get_chat_member(chat_id, bot.id)
+    except Exception:
+        return False, False, False
+    if member.status != "administrator":
+        return False, False, False
+    return (bool(getattr(member, "can_edit_messages", False)),
+            bool(getattr(member, "can_post_messages", False)),
+            bool(getattr(member, "can_delete_messages", False)))
+
+
+async def _is_channel_admin(bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    return member.status in ("administrator", "creator")
+
+
+async def _channel_title(bot, chat_id: int) -> str:
+    try:
+        return (await bot.get_chat(chat_id)).title or str(chat_id)
+    except Exception:
+        return str(chat_id)
+
+
+def _link_post(post) -> "tuple[str, str] | None":
+    """(platform, link) for a post the bot may put media into: text only -- a photo, video or file
+    of its own would be replaced -- not forwarded, which Telegram lets nobody edit, and with a link
+    to a site the bot knows."""
+    if post is None or not post.text or getattr(post, "forward_origin", None) is not None:
+        return None
+    return platforms.detect_platform(post.text)
+
+
+async def channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every update from a channel. A new post with a link gets its media, in a task of its own
+    (_channel_job); an edited post, and everything else, gets nothing. Always ends the update
+    here; an error goes to the error handler as a task of its own, as in group_router."""
+    post = update.channel_post  # None for an edit: edited posts are left alone
+    try:
+        detected = _link_post(post)
+        if detected is not None:
+            settings, stored = await _channel_settings(post.chat_id)
+            if not stored:
+                # Added before 2.2.0, when nothing was saved: saved now, so that /channels lists it.
+                await asyncio.to_thread(set_group_settings, post.chat_id, settings)
+            if settings["on"] and detected[0] in settings["platforms"]:
+                context.application.create_task(
+                    _channel_job(context.bot, post, detected[0], detected[1], settings), update=update)
+    except Exception as exc:
+        error = exc
+
+        async def report():
+            raise error
+
+        context.application.create_task(report(), update=update)
+    raise ApplicationHandlerStop
+
+
+async def _channel_job(bot, post, platform: str, url: str, settings: dict) -> None:
+    """One link post: what the link holds, within the free size, put into the post or posted anew
+    (_put_into_channel). A link that gives nothing, or too much, leaves the post as it is."""
+    if lifecycle.is_draining():
+        return
+    if settings["quality"] and platform not in ("reddit", "twitter"):
+        url = _with_height(url, settings["quality"], exact=False)
+    fetch_url, height, exact = _split_height(url)
+    paths: list = []
+    async with _slots():
+        if not _disk_room(video.MAX_DOWNLOAD_MB):
+            logger.warning("A channel post was left as it is: the disk is short of space")
+            return
+        try:
+            resolved = await resolvers.resolve(platform, fetch_url, height=height, exact=exact)
+        except resolvers.NothingWorked as exc:
+            logger.info("A channel post was left as it is: no route worked for %s (%s)", platform, exc.kind)
+            if exc.kind not in ("missing", "too_big"):
+                note_job(False)
+            return
+        held = _hold_disk(video.MAX_DOWNLOAD_MB)
+        try:
+            items = list(resolved.items)
+            for item in items:
+                paths.append(await resolvers.download(item))
+            if len(paths) > 1:
+                items, paths[:] = await asyncio.to_thread(_without_duplicates, items, list(paths))
+            if await _put_into_channel(bot, post, list(zip(items, paths)), settings):
+                note_job(True)
+        except (net.TooLarge, net.FetchError) as exc:
+            logger.info("A channel post was left as it is: %s", type(exc).__name__)
+        except Exception:
+            note_job(False)
+            raise
+        finally:
+            resources.release_disk(held)
+            _remove_files(paths)
+
+
+async def _video_shape(path: str, probing) -> dict:
+    """A video's width, height and duration, so that Telegram does not draw it square; {} when it
+    could not be measured (see _send_media's shape_of)."""
+    if probing.exhausted:
+        return {}
+    shape = await video.probe(path, probing)
+    if shape is None:
+        return {}
+    fields = {"width": shape.width, "height": shape.height}
+    if shape.duration is not None:
+        fields["duration"] = shape.duration
+    return fields
+
+
+def _channel_media(item, handle, path: str, as_file: bool, caption=None, entities=None, shape=None):
+    """One file, as the post's new media or as a member of an album."""
+    if as_file:
+        return InputMediaDocument(handle, caption=caption, caption_entities=entities,
+                                  filename=os.path.basename(item.filename or path),
+                                  disable_content_type_detection=True)
+    if item.kind == "video":
+        return InputMediaVideo(handle, caption=caption, caption_entities=entities,
+                               supports_streaming=True, **(shape or {}))
+    return InputMediaPhoto(handle, caption=caption, caption_entities=entities)
+
+
+async def _post_one(bot, chat_id: int, item, handle, path: str, as_file: bool, caption, entities,
+                    shape: dict) -> None:
+    """One file posted on its own (an album needs two or more), silently."""
+    common = {"caption": caption, "caption_entities": entities, "disable_notification": True,
+              "read_timeout": 120, "write_timeout": 120}
+    if as_file:
+        await bot.send_document(chat_id, handle, filename=os.path.basename(item.filename or path),
+                                disable_content_type_detection=True, **common)
+    elif item.kind == "video":
+        await bot.send_video(chat_id, handle, supports_streaming=True, **shape, **common)
+    else:
+        await bot.send_photo(chat_id, handle, **common)
+
+
+async def _put_into_channel(bot, post, items_with_paths, settings: dict) -> "str | None":
+    """What channels.plan says: the media edited into the post ("edit"), or posted anew, silently,
+    under the post's text, and the link post deleted ("repost"). None: the post stays as it is."""
+    credit = None
+    if settings["credit"] and BOT_USERNAME:
+        credit = i18n.t(settings["lang"], "download_credit_caption", username=BOT_USERNAME)
+    caption = channels.caption_for(post.text, credit)
+    # The post's own formatting and links stay. The credit line's @mention gets its entity here:
+    # Telegram finds none by itself in a text sent with entities.
+    entities = list(post.entities or ())
+    if caption != post.text:
+        mention = "@" + BOT_USERNAME
+        at = caption.rindex(mention)
+        entities.append(MessageEntity(MessageEntity.MENTION, channels.utf16_length(caption[:at]),
+                                      channels.utf16_length(mention)))
+    can_edit, can_post, can_delete = await _bot_rights(bot, post.chat_id)
+    choice = channels.plan(len(items_with_paths), caption, can_edit, can_post, can_delete,
+                           settings["repost"])
+    if choice is None:
+        logger.info("A channel post was left as it is: %d file(s), a %d-character caption, rights "
+                    "edit=%s post=%s delete=%s, repost %s", len(items_with_paths),
+                    channels.utf16_length(caption), can_edit, can_post, can_delete,
+                    "on" if settings["repost"] else "off")
+        return None
+    as_file, probing = settings["as_file"], video.ProbeRun()
+    with contextlib.ExitStack() as files:
+        # (item, path, open file, video shape, caption, entities): the caption on the first file only.
+        parts = []
+        for n, (item, path) in enumerate(items_with_paths):
+            shape = await _video_shape(path, probing) if item.kind == "video" and not as_file else {}
+            parts.append((item, path, files.enter_context(open(path, "rb")), shape,
+                          caption if n == 0 else None, (entities or None) if n == 0 else None))
+        if choice == "edit":
+            item, path, handle, shape, text, marks = parts[0]
+            await bot.edit_message_media(chat_id=post.chat_id, message_id=post.message_id,
+                                         media=_channel_media(item, handle, path, as_file, text, marks, shape),
+                                         read_timeout=120, write_timeout=120)
+            return "edit"
+        for start in range(0, len(parts), channels.ALBUM_MAX):
+            chunk = parts[start:start + channels.ALBUM_MAX]
+            if len(chunk) == 1:
+                item, path, handle, shape, text, marks = chunk[0]
+                await _post_one(bot, post.chat_id, item, handle, path, as_file, text, marks, shape)
+            else:
+                album = [_channel_media(item, handle, path, as_file, text, marks, shape)
+                         for item, path, handle, shape, text, marks in chunk]
+                await bot.send_media_group(post.chat_id, album, disable_notification=True,
+                                           read_timeout=120, write_timeout=120)
+    await bot.delete_message(post.chat_id, post.message_id)
+    return "repost"
+
+
+def _channel_view(lang: str, chat_id: int, title: str, settings: dict,
+                  rights: "tuple[bool, bool, bool]") -> "tuple[str, InlineKeyboardMarkup]":
+    def button(label: str, action: str, value: str = "") -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=channels.data(chat_id, action, value))
+
+    names = {"instagram": "Instagram", "tiktok": "TikTok", "twitter": "X", "pinterest": "Pinterest",
+             "reddit": "Reddit", "youtube": i18n.t(lang, "group_other_videos")}
+    rows = [[button(i18n.t(lang, "group_on" if settings["on"] else "group_paused"), "on")]]
+    sites = [button(("✅ " if site in settings["platforms"] else "▫️ ") + names[site], "p", site)
+             for site in channels.PLATFORMS]
+    rows += [sites[i:i + 2] for i in range(0, len(sites), 2)]
+    rows.append([button(("• " if settings["quality"] == q else "")
+                        + (i18n.t(lang, "group_quality_best") if q == 0 else f"{q}p"), "q", str(q))
+                 for q in channels.QUALITIES])
+    rows.append([button(i18n.t(lang, "group_as_file" if settings["as_file"] else "group_as_video"), "as_file")])
+    rows.append([button(i18n.t(lang, "group_credit_on" if settings["credit"] else "group_credit_off"), "credit")])
+    rows.append([button(i18n.t(lang, "channel_repost_on" if settings["repost"] else "channel_repost_off"),
+                        "repost")])
+    text = i18n.t(lang, "channel_settings_text", title=title, free=video.MAX_DOWNLOAD_MB)
+    missing = channels.missing_rights(*rights, settings["repost"])
+    if missing:
+        text += "\n\n" + i18n.t(lang, "channel_needs_rights",
+                                  rights=", ".join(i18n.t(lang, CHANNEL_RIGHT_TEXTS[m]) for m in missing))
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _channel_screen(bot, lang: str, chat_id: int, settings: dict,
+                          title: "str | None" = None) -> "tuple[str, InlineKeyboardMarkup]":
+    title = title or await _channel_title(bot, chat_id)
+    return _channel_view(lang, chat_id, title, settings, await _bot_rights(bot, chat_id))
+
+
+async def _channel_membership_changed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Added to a channel (a bot can only be added to one as an admin), its rights there changed,
+    or removed. Added or changed: the settings are saved, and whoever did it gets them in a private
+    chat -- if they have started the bot before, since Telegram lets a bot write only to them.
+    Nothing about them is kept. Removed: the settings go."""
+    change = update.my_chat_member
+    chat_id, now = change.chat.id, change.new_chat_member.status
+    if now in ("left", "kicked"):
+        await asyncio.to_thread(forget_group, chat_id)
+        return
+    if now != "administrator":
+        return
+    who = change.from_user
+    lang = await i18n.get_lang(who.id, context) if who is not None else "en"
+    settings, stored = await _channel_settings(chat_id)
+    if not stored:
+        settings["lang"] = lang if lang in channels.LANGS else "en"
+        await asyncio.to_thread(set_group_settings, chat_id, settings)
+    if who is None or who.is_bot:
+        return
+    text, markup = await _channel_screen(context.bot, lang, chat_id, settings, change.chat.title)
+    if change.old_chat_member.status in ("left", "kicked"):
+        text = i18n.t(lang, "channel_hello", title=change.chat.title or chat_id) + "\n\n" + text
+    try:
+        await context.bot.send_message(who.id, text, reply_markup=markup)
+    except Forbidden:
+        logger.info("Added to a channel by somebody who never started the bot: /channels is there for them")
+
+
+async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/channels in a private chat: the settings of the channels the bot is in that this person runs."""
+    chat, user = update.effective_chat, update.effective_user
+    if chat is None or chat.type != "private" or user is None:
+        return
+    lang = await i18n.get_lang(user.id, context)
+    ids = (await asyncio.to_thread(channel_ids))[:CHANNELS_LISTED]
+    runs = await asyncio.gather(*(_is_channel_admin(context.bot, cid, user.id) for cid in ids))
+    theirs = [cid for cid, yes in zip(ids, runs) if yes]
+    if not theirs:
+        await update.effective_message.reply_text(i18n.t(lang, "channels_none"))
+        return
+    if len(theirs) == 1:
+        settings, _ = await _channel_settings(theirs[0])
+        text, markup = await _channel_screen(context.bot, lang, theirs[0], settings)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+    titles = await asyncio.gather(*(_channel_title(context.bot, cid) for cid in theirs))
+    rows = [[InlineKeyboardButton(title, callback_data=channels.data(cid, "open"))]
+            for cid, title in zip(theirs, titles)]
+    await update.effective_message.reply_text(i18n.t(lang, "channels_pick"),
+                                              reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def channel_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A tap on a channel's settings, in a private chat. Checked with Telegram on every tap, not
+    only when the screen was drawn: admins come and go."""
+    query, user, chat = update.callback_query, update.effective_user, update.effective_chat
+    parsed = channels.parse(query.data or "")
+    if parsed is None or user is None or chat is None or chat.type != "private":
+        await query.answer()
+        return
+    lang = await i18n.get_lang(user.id, context)
+    chat_id, action, value = parsed
+    settings, stored = await _channel_settings(chat_id)
+    if not stored:
+        await query.answer(i18n.t(lang, "channel_gone"), show_alert=True)
+        return
+    if not await _is_channel_admin(context.bot, chat_id, user.id):
+        await query.answer(i18n.t(lang, "channel_admins_alert"), show_alert=True)
+        return
+    if action == "open":
+        await query.answer()
+    else:
+        changed = channels.apply(settings, action, value)
+        if changed is None:
+            await query.answer()
+            return
+        note_active(context, user)
+        await asyncio.to_thread(set_group_settings, chat_id, changed)
+        settings = changed
+        await query.answer(i18n.t(lang, "group_saved"))
+    text, markup = await _channel_screen(context.bot, lang, chat_id, settings)
+    try:
+        await query.edit_message_text(text, reply_markup=markup)
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
 
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2814,11 +3160,15 @@ def main():
     # Group chats first in the same handler group: python-telegram-bot runs the first
     # handler that matches, so a group message reaches group_router and never the
     # private-chat prompt-taker below it (see group_router).
+    # Channels before groups, and for the same reason: a channel's posts reach channel_router and
+    # stop there (see channel_router).
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, channel_router), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS, group_router), group=-1)
     app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,
                                    awaited_text_received), group=-1)
     app.add_handler(ChatMemberHandler(bot_membership_changed, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(CallbackQueryHandler(group_settings_callback, pattern="^" + groups.PREFIX))
+    app.add_handler(CallbackQueryHandler(channel_settings_callback, pattern="^" + channels.PREFIX))
     app.add_handler(CallbackQueryHandler(quality_chosen, pattern="^" + QUALITY_PREFIX))
 
     app.add_handler(CommandHandler("start", start))
@@ -2830,6 +3180,7 @@ def main():
     app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("channels", channels_command))
     app.add_handler(CommandHandler("caption", caption_toggle))
     app.add_handler(CommandHandler("lossless", lossless_toggle))
     app.add_handler(CommandHandler("dbdump", dbdump_command))  # owner-only

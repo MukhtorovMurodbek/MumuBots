@@ -287,6 +287,15 @@ Reddit or X and sends back the media behind it. Everything under
   off for it) and keeps nothing from those without one. A link it downloads is
   handled like one sent in a private chat, on the allowance of the person who
   posted it, who then counts as having used the bot; nobody else in the group does.
+- **For a channel the bot was added to (it can only be added as an admin):** the
+  channel's id and its settings (which sites' links, the quality, video or file, the
+  credit line and its language, whether to post anew), until the bot leaves the channel
+  or is removed from it. Nothing about the channel's subscribers or admins: the admin
+  who adds the bot gets the settings once in a private chat, and nothing about them is
+  kept. The bot reads the channel's new posts and keeps nothing from them. It puts the
+  media a link holds into the post itself (or posts it anew and deletes the link post),
+  and deletes the files from its server right after. A channel's links use nobody's
+  daily allowance and count nobody as having used the bot.
 - **References to files the bot has already sent** (Telegram's file IDs), filed
   under a scrambled name of the post and not under who asked for it. They let the
   bot send the same post again without downloading it. Before re-using one, the
