@@ -487,7 +487,7 @@ def init_db(dsn: str = DATABASE_URL) -> None:
                 post_key     UUID PRIMARY KEY,
                 items        BYTEA NOT NULL,
                 confirmed_at TIMESTAMPTZ NOT NULL,
-                last_used    DATE NOT NULL DEFAULT CURRENT_DATE
+                last_used    DATE NOT NULL DEFAULT ((now() AT TIME ZONE 'UTC')::date)
             ) WITH (fillfactor = 90)
             """
         )
@@ -1002,17 +1002,21 @@ def sent_files_get(post_key):
     return (bytes(row[0]), row[1], row[2]) if row else None
 
 
+# "Today" for the file-id store is the UTC date on both sides: sent_files.py compares what it reads
+# with its own UTC clock, while the database's own date follows the session's time zone (UTC on
+# Supabase, the laptop's zone on a local Postgres), so around midnight a row stored today could
+# read as yesterday's, or the other way round.
 def sent_files_put(post_key, items: bytes) -> None:
     """Store a delivery: the ids, seen public now, used today. Replaces what was there."""
     with pooled() as conn:
         conn.execute(
             """
             INSERT INTO sent_files (post_key, items, confirmed_at, last_used)
-            VALUES (%s, %s, now(), CURRENT_DATE)
+            VALUES (%s, %s, now(), (now() AT TIME ZONE 'UTC')::date)
             ON CONFLICT (post_key) DO UPDATE SET
                 items = EXCLUDED.items,
                 confirmed_at = now(),
-                last_used = CURRENT_DATE
+                last_used = (now() AT TIME ZONE 'UTC')::date
             """,
             (post_key, items),
         )
@@ -1023,7 +1027,8 @@ def sent_files_confirmed(post_key) -> None:
     """The post was seen public just now (a lookup found it), and the row was used."""
     with pooled() as conn:
         conn.execute(
-            "UPDATE sent_files SET confirmed_at = now(), last_used = CURRENT_DATE WHERE post_key = %s",
+            "UPDATE sent_files SET confirmed_at = now(), last_used = (now() AT TIME ZONE 'UTC')::date "
+            "WHERE post_key = %s",
             (post_key,),
         )
         conn.commit()
@@ -1036,8 +1041,8 @@ def sent_files_used(post_key) -> None:
     which for a post sent to many people a day was one dead row per delivery."""
     with pooled() as conn:
         conn.execute(
-            "UPDATE sent_files SET last_used = CURRENT_DATE "
-            "WHERE post_key = %s AND last_used < CURRENT_DATE",
+            "UPDATE sent_files SET last_used = (now() AT TIME ZONE 'UTC')::date "
+            "WHERE post_key = %s AND last_used < (now() AT TIME ZONE 'UTC')::date",
             (post_key,),
         )
         conn.commit()
@@ -1069,7 +1074,7 @@ def prune_old_data() -> int:
         # touched at most once a day (a date, not a moment), so "unused for N days"
         # is exact to the day.
         cur = conn.execute(
-            "DELETE FROM sent_files WHERE last_used < CURRENT_DATE - make_interval(days => %s)",
+            "DELETE FROM sent_files WHERE last_used < (now() AT TIME ZONE 'UTC')::date - make_interval(days => %s)",
             (SENT_FILES_KEEP_DAYS,),
         )
         removed += cur.rowcount

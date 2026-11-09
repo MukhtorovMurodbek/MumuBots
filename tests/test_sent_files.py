@@ -16,6 +16,11 @@ VIDEO_ID = "BAACAgIAAxkBAAIEZWZw8C2wE0OSUEsjSf2cZ7z5d9H_AAKbTQACmnmBS9Vhm7c2l5aB
 PHOTO_ID = "AgACAgIAAxkBAAIEZmZw8EBKq1d0cA6v2s0d8vYbXz1OAAJ-2zEbmnmBSyJ6Wm0P6jcXAQADAgADeQADNgQ"
 
 
+def _utc_today() -> date:
+    """The store's "today": the UTC date, in the bot and in the database alike."""
+    return datetime.now(timezone.utc).date()
+
+
 @pytest.fixture()
 def store():
     sent_files = load(DOWNLOADER, "sent_files")
@@ -119,7 +124,7 @@ def test_store_read_and_marks(db, store):
     db.sent_files_put(key, items)
     blob, confirmed_at, last_used = db.sent_files_get(key)
     assert store.decode_items(blob) == [("video", VIDEO_ID)]
-    assert store.is_fresh(confirmed_at) and last_used == date.today()
+    assert store.is_fresh(confirmed_at) and last_used == _utc_today()
     assert db.sent_files_get(store.post_key("instagram", "https://www.instagram.com/p/Other/", False)) is None
 
     table = f"{db.DB_SCHEMA}.sent_files"
@@ -134,10 +139,10 @@ def test_store_read_and_marks(db, store):
     assert version() == before
     # Marked on an earlier day: it is marked today.
     with connect() as conn:
-        conn.execute(f"UPDATE {table} SET last_used = CURRENT_DATE - 3 WHERE post_key = %s", (key,))
+        conn.execute(f"UPDATE {table} SET last_used = (now() AT TIME ZONE 'UTC')::date - 3 WHERE post_key = %s", (key,))
         conn.commit()
     db.sent_files_used(key)
-    assert db.sent_files_get(key)[2] == date.today()
+    assert db.sent_files_get(key)[2] == _utc_today()
 
     db.sent_files_drop(key)
     assert db.sent_files_get(key) is None
@@ -149,7 +154,7 @@ def test_unused_rows_are_swept(db, store):
     for key in (old, new):
         db.sent_files_put(key, store.encode_items([("photo", PHOTO_ID)]))
     with connect() as conn:
-        conn.execute(f"UPDATE {db.DB_SCHEMA}.sent_files SET last_used = CURRENT_DATE - %s WHERE post_key = %s",
+        conn.execute(f"UPDATE {db.DB_SCHEMA}.sent_files SET last_used = (now() AT TIME ZONE 'UTC')::date - %s WHERE post_key = %s",
                      (db.SENT_FILES_KEEP_DAYS + 1, old))
         conn.commit()
     db.prune_old_data()
@@ -161,8 +166,8 @@ def test_memory_of_recent_rows(store, monkeypatch):
     monkeypatch.setattr(store, "_monotonic", lambda: now[0])
     key = store.post_key("instagram", "https://www.instagram.com/p/C0de_1/", False)
     stamp = datetime.now(timezone.utc) - timedelta(hours=1)
-    store.remember(key, b"\x01", stamp, date.today() - timedelta(days=1))
-    assert store.recall(key) == (b"\x01", stamp, date.today() - timedelta(days=1))
+    store.remember(key, b"\x01", stamp, _utc_today() - timedelta(days=1))
+    assert store.recall(key) == (b"\x01", stamp, _utc_today() - timedelta(days=1))
     assert not store.used_today(key)
     store.note_used(key)
     assert store.used_today(key)
@@ -262,12 +267,12 @@ def test_resend_of_a_stale_row_asks_first_and_forgets_a_removed_post(resend, db,
     db.sent_files_put(key, store.encode_items([("video", VIDEO_ID)]))
     with connect() as conn:
         conn.execute(f"UPDATE {db.DB_SCHEMA}.sent_files SET confirmed_at = now() - interval '2 days', "
-                     f"last_used = CURRENT_DATE - 2 WHERE post_key = %s", (key,))
+                     f"last_used = (now() AT TIME ZONE 'UTC')::date - 2 WHERE post_key = %s", (key,))
         conn.commit()
     assert resend.run() is True
     assert resend.calls["confirmed"] == 1 and resend.calls["sent"] == [[VIDEO_ID]]
     row = db.sent_files_get(key)
-    assert store.is_fresh(row[1]) and row[2] == date.today()
+    assert store.is_fresh(row[1]) and row[2] == _utc_today()
 
     # Gone from the platform: the row goes, from the database and from memory.
     with connect() as conn:
