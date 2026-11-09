@@ -17,12 +17,14 @@ differently:
     can be replied to.
 """
 import asyncio
+import logging
 import secrets
 import time
 from collections import OrderedDict
+from datetime import timedelta
 
 from telegram import InputSticker
-from telegram.error import TimedOut
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 
 import i18n
 import problems
@@ -30,11 +32,15 @@ from emoji_utils import DEFAULT_EMOJI
 from image_utils import to_sticker_png
 from video_sticker import to_video_sticker_webm
 
+logger = logging.getLogger(__name__)
+
 REFS_MAX = 20000
 _refs: "OrderedDict[tuple[int, int], tuple[str, str]]" = OrderedDict()
 
 
-def remember(chat_id: int, message_id: int, pack_name: str, file_id: str) -> None:
+def remember(chat_id: int, message_id: int, pack_name: str, file_id: "str | None") -> None:
+    if not file_id:
+        return  # the pack could not be read back: nothing to point a retag at
     key = (chat_id, message_id)
     _refs[key] = (pack_name, file_id)
     _refs.move_to_end(key)
@@ -128,9 +134,64 @@ def media_of(message) -> "tuple[str, str] | None":
     return None
 
 
+# ---------- Telegram's limits and hiccups (2.1.5) ----------
+# Telegram limits how quickly stickers go into a pack. A run of pictures (an album) meets that
+# limit as "Flood control exceeded. Retry in 10 seconds" (production, 2026-10-30), and that
+# picture was lost. A request answered that way was not carried out, so it is sent again after the
+# wait: at most TELEGRAM_TRIES times, and only for waits of up to FLOOD_WAIT_MAX seconds -- a
+# longer one fails that picture with the usual note. Reads (fetching the picture, reading the pack
+# back) are also tried again after a timeout or a dropped connection: on 2026-11-04 a picture's
+# download timed out and the person got the crash reply. Creating a pack or adding a sticker is
+# never repeated after a timeout, since it may have gone through. Only the person who sent the
+# pictures waits: other people's updates are handled meanwhile (PerUserUpdateProcessor).
+TELEGRAM_TRIES = 3
+FLOOD_WAIT_MAX = 30
+# "Shortname_occupy_failed" (production, 2026-10-29): Telegram could not take a new pack's name.
+# Another random name is tried, up to NAME_TRIES names in all.
+NAME_TRIES = 3
+
+
+def retry_after_seconds(exc) -> float:
+    value = getattr(exc, "retry_after", None)
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(FLOOD_WAIT_MAX + 1)
+
+
+async def telegram_call(call, *args, read: bool = False, **kwargs):
+    """`call(*args, **kwargs)`, sent again when Telegram asks to wait, and with read=True also
+    after a timeout or a dropped connection."""
+    for attempt in range(1, TELEGRAM_TRIES + 1):
+        try:
+            return await call(*args, **kwargs)
+        except RetryAfter as exc:
+            wait = retry_after_seconds(exc)
+            if attempt == TELEGRAM_TRIES or wait > FLOOD_WAIT_MAX:
+                raise
+            logger.info("Telegram asked to wait %.0f s before %s; waiting", wait,
+                        getattr(call, "__name__", "the next call"))
+            await asyncio.sleep(wait + 0.5)
+        except NetworkError as exc:
+            # BadRequest is a NetworkError in python-telegram-bot: a refusal, never sent again.
+            if not read or isinstance(exc, BadRequest) or attempt == TELEGRAM_TRIES:
+                raise
+            await asyncio.sleep(2 * attempt)
+
+
+def name_refused(exc: Exception) -> bool:
+    """Telegram would not take a new pack's name: another one usually works."""
+    lower = str(exc).lower()
+    return isinstance(exc, BadRequest) and (
+        "shortname_occupy_failed" in lower or "name is already occupied" in lower
+        or "sticker_set_name_occupied" in lower)
+
+
 async def download(bot, file_id: str) -> bytes:
-    tg_file = await bot.get_file(file_id)
-    return bytes(await tg_file.download_as_bytearray())
+    tg_file = await telegram_call(bot.get_file, file_id, read=True)
+    return bytes(await telegram_call(tg_file.download_as_bytearray, read=True))
 
 
 async def static_sticker(raw: bytes) -> InputSticker:
@@ -153,16 +214,31 @@ async def add_to_pack(bot, owner_id: int, pack_name: str, input_sticker: InputSt
     which a bulk import does not need for every one of a hundred stickers."""
     # Uploading a converted video sticker can take longer than python-telegram-bot's
     # default 5 seconds, which showed as a "Timed out" on an upload that went through.
-    await bot.add_sticker_to_set(user_id=owner_id, name=pack_name, sticker=input_sticker,
-                                 read_timeout=60, write_timeout=60)
+    await telegram_call(bot.add_sticker_to_set, user_id=owner_id, name=pack_name, sticker=input_sticker,
+                        read_timeout=60, write_timeout=60)
     if not want_file_id:
         return None, None
     return await last_sticker(bot, pack_name)
 
 
-async def last_sticker(bot, pack_name: str) -> "tuple[str, int]":
-    sticker_set = await bot.get_sticker_set(pack_name)
+async def last_sticker(bot, pack_name: str) -> "tuple[str | None, int | None]":
+    """The pack's newest sticker's file id and how many stickers the pack has; (None, None)
+    when the pack cannot be read back. The sticker is in by then: only its number and the
+    handle for retagging it are missing."""
+    try:
+        sticker_set = await telegram_call(bot.get_sticker_set, pack_name, read=True)
+    except Exception:
+        logger.warning("Couldn't read the pack back after adding a sticker", exc_info=True)
+        return None, None
     return sticker_set.stickers[-1].file_id, len(sticker_set.stickers)
+
+
+def added_text(lang: str, title: str, number: "int | None", emoji: str) -> str:
+    """What an added sticker's reply says: its place in the pack, or just that it went in when
+    the pack could not be read back."""
+    if number is None:
+        return i18n.t(lang, "sticker_added_unnumbered", title=title, emoji=emoji)
+    return i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=emoji)
 
 
 # ---------- what a failed add says ----------

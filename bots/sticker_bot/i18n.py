@@ -328,6 +328,7 @@ STRINGS = {
         # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
         "status_line_open": '📝 {verb} "{title}"',
         "sticker_added_to": '✅ Added to “{title}” as #{n} with {emoji}. Reply to this with an emoji to change it.',
+        "sticker_added_unnumbered": '✅ Added to “{title}” with {emoji}.',
         "batch_not_added": "⚠️ {done}/{total} — {failed} not added",
         "emoji_target_unknown": "I can't tell which sticker that is any more. Reply to the sticker itself instead.",
         "emoji_not_ours": "That sticker isn't from a pack made with this bot, so I can't change it.",
@@ -656,6 +657,7 @@ STRINGS = {
         # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
         "status_line_open": '📝 "{title}" {verb}',
         "sticker_added_to": "✅ “{title}” to'plamiga #{n} sifatida {emoji} bilan qo'shildi. Emojini o'zgartirish uchun shu xabarga emoji bilan javob bering.",
+        "sticker_added_unnumbered": "✅ “{title}” to'plamiga {emoji} bilan qo'shildi.",
         "batch_not_added": "⚠️ {done}/{total} — {failed} tasi qo'shilmadi",
         "emoji_target_unknown": "Bu qaysi stiker ekanini endi aniqlay olmayman. Uning o'rniga stikerning o'ziga javob bering.",
         "emoji_not_ours": "Bu stiker shu bot yaratgan to'plamdan emas, shuning uchun uni o'zgartira olmayman.",
@@ -1018,6 +1020,7 @@ STRINGS = {
         # 2.2.0: per-sticker replies, emoji by reply, public packs, group chats.
         "status_line_open": '📝 {verb} «{title}»',
         "sticker_added_to": '✅ Добавлено в «{title}» как №{n} с {emoji}. Ответьте на это сообщение эмодзи, чтобы его поменять.',
+        "sticker_added_unnumbered": '✅ Добавлено в «{title}» с {emoji}.',
         "batch_not_added": "⚠️ {done}/{total} — не добавлено: {failed}",
         "emoji_target_unknown": 'Я уже не могу понять, какой это стикер. Ответьте лучше на сам стикер.',
         "emoji_not_ours": 'Этот стикер не из пака, созданного этим ботом, поэтому изменить его я не могу.',

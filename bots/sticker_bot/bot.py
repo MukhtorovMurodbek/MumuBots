@@ -64,7 +64,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InputSticker,
 )
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     ChatMemberHandler,
@@ -1501,19 +1501,28 @@ async def _add_input_sticker(
         # to the creator's numeric user id. Ownership is still tracked
         # server-side via add_pack()/get_pack_owner(), so nothing else here
         # depends on what's actually in the name.
-        pack_name = f"{slugify(title)}_{secrets.token_hex(5)}_by_{BOT_USERNAME}"
-        # Uploading a sticker (especially a converted video one) can take
-        # longer than PTB's default 5s read/write timeout, which was
-        # showing up as a spurious "Timed out" failure even when the
-        # upload was going through fine -- just slowly.
-        await context.bot.create_new_sticker_set(
-            user_id=owner_id,
-            name=pack_name,
-            title=title,
-            stickers=[input_sticker],
-            read_timeout=60,
-            write_timeout=60,
-        )
+        for attempt in range(1, sticker_ops.NAME_TRIES + 1):
+            pack_name = f"{slugify(title)}_{secrets.token_hex(5)}_by_{BOT_USERNAME}"
+            # Uploading a sticker (especially a converted video one) can take
+            # longer than PTB's default 5s read/write timeout, which was
+            # showing up as a spurious "Timed out" failure even when the
+            # upload was going through fine -- just slowly.
+            try:
+                await sticker_ops.telegram_call(
+                    context.bot.create_new_sticker_set,
+                    user_id=owner_id,
+                    name=pack_name,
+                    title=title,
+                    stickers=[input_sticker],
+                    read_timeout=60,
+                    write_timeout=60,
+                )
+                break
+            except BadRequest as exc:
+                # "Shortname_occupy_failed" (2026-10-29): another random name usually works.
+                if attempt == sticker_ops.NAME_TRIES or not sticker_ops.name_refused(exc):
+                    raise
+                logger.info("Telegram did not take a new pack's name (%s); trying another", exc)
         await asyncio.to_thread(
             add_pack, owner_id, pack_name, title, user.username, user.full_name
         )
@@ -1521,7 +1530,8 @@ async def _add_input_sticker(
         context.user_data["pack_created"] = True
         if not want_file_id:
             return None, None
-        return await sticker_ops.last_sticker(context.bot, pack_name)
+        file_id, number = await sticker_ops.last_sticker(context.bot, pack_name)
+        return file_id, number or 1  # a new pack holds this one sticker
     return await sticker_ops.add_to_pack(context.bot, owner_id, context.user_data["target_pack"],
                                          input_sticker, want_file_id)
 
@@ -1686,7 +1696,7 @@ async def _add_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     # Named every time: with nothing asking for /done any more, a pack can stay open for
     # days, and the reply is where the person sees which one a picture went into. The
     # first sticker of a new pack also carries its link -- what /done used to be for.
-    text = i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=DEFAULT_EMOJI)
+    text = sticker_ops.added_text(lang, title, number, DEFAULT_EMOJI)
     if number == 1:
         text = i18n.t(lang, "pack_created_link", pack_name=pack_name) + "\n" + text
     text = _with_run(text, _run_line(context, update, lang), failed=False)
@@ -1816,7 +1826,7 @@ async def _remove_asked(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
     sticker_ops.release(token)
     await query.answer()
     try:
-        await context.bot.delete_sticker_from_set(sticker=asked["file_id"])
+        await sticker_ops.telegram_call(context.bot.delete_sticker_from_set, sticker=asked["file_id"])
     except Exception as exc:
         logger.exception("Failed to delete a sticker from its set")
         record_error(exc)
@@ -1852,7 +1862,7 @@ async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFA
 
     target_pack = context.user_data.get("target_pack")
     try:
-        await context.bot.delete_sticker_from_set(sticker=file_id)
+        await sticker_ops.telegram_call(context.bot.delete_sticker_from_set, sticker=file_id)
     except Exception as exc:
         logger.exception("Failed to delete the last sticker / pack")
         record_error(exc)
@@ -1931,7 +1941,15 @@ async def _receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(_with_run(refusal, _run_line(context, update, lang, failed_now=True), failed=True))
         return EDITING
 
-    raw = await sticker_ops.download(context.bot, file_id)
+    try:
+        raw = await sticker_ops.download(context.bot, file_id)
+    except Exception as exc:
+        # Tried again already (sticker_ops.telegram_call): a note, not the crash reply.
+        logger.warning("Couldn't fetch a clip to make a sticker of", exc_info=True)
+        record_error(exc)
+        await msg.reply_text(_with_run(i18n.t(lang, "video_convert_generic_failed", error=exc),
+                                       _run_line(context, update, lang, failed_now=True), failed=True))
+        return EDITING
 
     # The reply this clip gets is its progress message too: "converting", then
     # "added as #N", or why not.
@@ -2062,12 +2080,17 @@ async def receive_whatsapp_import(update: Update, context: ContextTypes.DEFAULT_
         await msg.reply_text(refusal)
         return EDITING
 
-    tg_file = await context.bot.get_file(msg.document.file_id)
-    raw = await tg_file.download_as_bytearray()
+    try:
+        raw = await sticker_ops.download(context.bot, msg.document.file_id)
+    except Exception as exc:
+        logger.warning("Couldn't fetch a WhatsApp sticker pack", exc_info=True)
+        record_error(exc)
+        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        return EDITING
 
     await _refresh_status(context, lang, i18n.t(lang, "whatsapp_reading"))
     try:
-        items = await asyncio.to_thread(parse_whatsapp_zip, bytes(raw), lang)
+        items = await asyncio.to_thread(parse_whatsapp_zip, raw, lang)
     except PackImportError as exc:
         await _refresh_status(context, lang, str(exc) + problems.code_line("ST-IMPORT"))
         return EDITING

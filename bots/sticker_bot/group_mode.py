@@ -282,7 +282,7 @@ async def add_media(context, lang: str, chat_id: int, working, kind: str, file_i
         record_error(exc)
         await working.edit_text(sticker_ops.error_note(exc, lang))
         return None
-    await working.edit_text(i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=DEFAULT_EMOJI))
+    await working.edit_text(sticker_ops.added_text(lang, title, number, DEFAULT_EMOJI))
     sticker_ops.remember(chat_id, working.message_id, pack_name, new_id)
     if source_id is not None:
         sticker_ops.remember(chat_id, source_id, pack_name, new_id)
