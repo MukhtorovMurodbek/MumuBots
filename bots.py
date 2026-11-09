@@ -30,7 +30,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InputSticker,
 )
-from telegram.error import TimedOut
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -834,7 +834,7 @@ async def delete_pack_confirm2(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
-    if not _owns_pack_or_deny(pack_name, user.id):
+    if not await _owns_pack_or_deny(pack_name, user.id):
         await query.answer(i18n.t(lang, "only_owner_delete"), show_alert=True)
         return
     await query.answer()
@@ -922,6 +922,56 @@ async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return EDITING
 
+# Telegram limits how quickly stickers go into a pack. A run of pictures (an album) meets that
+# limit as "Flood control exceeded. Retry in 10 seconds" (production, 2026-10-30), and that
+# picture was lost. A request answered that way was not carried out, so it is sent again after the
+# wait: at most TELEGRAM_TRIES times, and only for waits of up to FLOOD_WAIT_MAX seconds -- a
+# longer one fails that picture with the usual note. Reads (fetching the picture, reading the pack
+# back) are also tried again after a timeout or a dropped connection: on 2026-11-04 a picture's
+# download timed out and the person got the crash reply. Creating a pack or adding a sticker is
+# never repeated after a timeout, since it may have gone through.
+TELEGRAM_TRIES = 3
+FLOOD_WAIT_MAX = 30
+# "Shortname_occupy_failed" (production, 2026-10-29): Telegram could not take a new pack's name.
+# Another random name is tried, up to NAME_TRIES names in all.
+NAME_TRIES = 3
+
+def _retry_after_seconds(exc: RetryAfter) -> float:
+    value = getattr(exc, "retry_after", None)
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(FLOOD_WAIT_MAX + 1)
+
+async def _telegram(call, *args, read: bool = False, **kwargs):
+    """`call(*args, **kwargs)`, sent again when Telegram asks to wait, and with read=True also after a timeout or a dropped connection."""
+    for attempt in range(1, TELEGRAM_TRIES + 1):
+        try:
+            return await call(*args, **kwargs)
+        except RetryAfter as exc:
+            wait = _retry_after_seconds(exc)
+            if attempt == TELEGRAM_TRIES or wait > FLOOD_WAIT_MAX:
+                raise
+            logger.info("Telegram asked to wait %.0f s before %s; waiting", wait,
+                        getattr(call, "__name__", "the next call"))
+            await asyncio.sleep(wait + 0.5)
+        except NetworkError as exc:
+            # BadRequest is a NetworkError in python-telegram-bot: a refusal, never sent again.
+            if not read or isinstance(exc, BadRequest) or attempt == TELEGRAM_TRIES:
+                raise
+            await asyncio.sleep(2 * attempt)
+
+async def _download_media(bot, file_id: str) -> bytes:
+    tg_file = await _telegram(bot.get_file, file_id, read=True)
+    return bytes(await _telegram(tg_file.download_as_bytearray, read=True))
+
+def _name_refused(exc: BadRequest) -> bool:
+    lower = str(exc).lower()
+    return ("shortname_occupy_failed" in lower or "name is already occupied" in lower
+            or "sticker_set_name_occupied" in lower)
+
 async def _add_input_sticker(
     context: ContextTypes.DEFAULT_TYPE, user, input_sticker: InputSticker,
     want_file_id: bool = True,
@@ -932,16 +982,23 @@ async def _add_input_sticker(
     if not context.user_data.get("pack_created"):
         title = context.user_data["title"]
 
-        pack_name = f"{slugify(title)}_{secrets.token_hex(5)}_by_{BOT_USERNAME}"
-
-        await context.bot.create_new_sticker_set(
-            user_id=owner_id,
-            name=pack_name,
-            title=title,
-            stickers=[input_sticker],
-            read_timeout=60,
-            write_timeout=60,
-        )
+        for attempt in range(1, NAME_TRIES + 1):
+            pack_name = f"{slugify(title)}_{secrets.token_hex(5)}_by_{BOT_USERNAME}"
+            try:
+                await _telegram(
+                    context.bot.create_new_sticker_set,
+                    user_id=owner_id,
+                    name=pack_name,
+                    title=title,
+                    stickers=[input_sticker],
+                    read_timeout=60,
+                    write_timeout=60,
+                )
+                break
+            except BadRequest as exc:
+                if attempt == NAME_TRIES or not _name_refused(exc):
+                    raise
+                logger.info("Telegram did not take a new pack's name (%s); trying another", exc)
         await asyncio.to_thread(
             add_pack, owner_id, pack_name, title, user.username, user.full_name
         )
@@ -949,7 +1006,8 @@ async def _add_input_sticker(
         context.user_data["pack_created"] = True
     else:
         pack_name = context.user_data["target_pack"]
-        await context.bot.add_sticker_to_set(
+        await _telegram(
+            context.bot.add_sticker_to_set,
             user_id=owner_id,
             name=pack_name,
             sticker=input_sticker,
@@ -959,7 +1017,12 @@ async def _add_input_sticker(
 
     if not want_file_id:
         return None
-    sticker_set = await context.bot.get_sticker_set(pack_name)
+    try:
+        sticker_set = await _telegram(context.bot.get_sticker_set, pack_name, read=True)
+    except Exception:
+        # The sticker is in the pack; only its id for retagging is missing.
+        logger.warning("Couldn't read the pack back after adding a sticker", exc_info=True)
+        return None
     return sticker_set.stickers[-1].file_id
 
 async def _remember_last_sticker(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1010,7 +1073,7 @@ async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE
         return EDITING
 
     try:
-        await context.bot.delete_sticker_from_set(sticker=sticker.file_id)
+        await _telegram(context.bot.delete_sticker_from_set, sticker=sticker.file_id)
     except Exception as exc:
         logger.exception("Failed to delete sticker from set")
         record_error(exc)
@@ -1068,12 +1131,9 @@ async def _receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         return EDITING
 
-    tg_file = await context.bot.get_file(file_id)
-    raw = await tg_file.download_as_bytearray()
-
     try:
-
-        png_bytes = (await asyncio.to_thread(to_sticker_png, bytes(raw))).getvalue()
+        raw = await _download_media(context.bot, file_id)
+        png_bytes = (await asyncio.to_thread(to_sticker_png, raw)).getvalue()
     except Exception as exc:
         record_error(exc)
         await msg.reply_text(i18n.t(lang, "image_process_failed", error=exc))
@@ -1124,8 +1184,13 @@ async def _receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(refusal)
         return EDITING
 
-    tg_file = await context.bot.get_file(file_id)
-    raw = await tg_file.download_as_bytearray()
+    try:
+        raw = await _download_media(context.bot, file_id)
+    except Exception as exc:
+        logger.warning("Couldn't fetch a clip to make a sticker of", exc_info=True)
+        record_error(exc)
+        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        return EDITING
 
     await _refresh_status(context, lang, i18n.t(lang, "converting_video"))
     try:
@@ -1241,12 +1306,17 @@ async def receive_whatsapp_import(update: Update, context: ContextTypes.DEFAULT_
         await msg.reply_text(refusal)
         return EDITING
 
-    tg_file = await context.bot.get_file(msg.document.file_id)
-    raw = await tg_file.download_as_bytearray()
+    try:
+        raw = await _download_media(context.bot, msg.document.file_id)
+    except Exception as exc:
+        logger.warning("Couldn't fetch a WhatsApp sticker pack", exc_info=True)
+        record_error(exc)
+        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        return EDITING
 
     await _refresh_status(context, lang, i18n.t(lang, "whatsapp_reading"))
     try:
-        items = await asyncio.to_thread(parse_whatsapp_zip, bytes(raw), lang)
+        items = await asyncio.to_thread(parse_whatsapp_zip, raw, lang)
     except PackImportError as exc:
         await _refresh_status(context, lang, str(exc) + problems.code_line("ST-IMPORT"))
         return EDITING
