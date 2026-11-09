@@ -4069,6 +4069,16 @@ def build_status_text(start_time: datetime, users_last_hour: int, users_since_st
 # person cannot queue up without end.
 PER_USER_WAITING_MAX = int(os.environ.get("PER_USER_WAITING_MAX") or 24)
 
+# And a crowd never holds more than UPDATES_IN_MEMORY_MAX updates in one bot's memory -- in its
+# queue, waiting their person's turn, or being handled (UpdateQueue); past that, polling waits
+# and the rest stay at Telegram, which keeps them 24 hours and hands them over in order. Measured
+# 2026-11-09, five bots in one process, 2,000 people sending 20,000 commands at once: without a
+# bound python-telegram-bot made a task of every update the moment it was fetched, the process
+# went from 94 to 399 MB, and stayed there once it was over -- Python's allocator keeps the arenas
+# the few surviving objects are scattered over. With 256: 170 MB, and the crowd was answered a
+# little sooner; 200 people at once cost the same as before (134 MB). 0 switches the bound off.
+UPDATES_IN_MEMORY_MAX = int(os.environ.get("UPDATES_IN_MEMORY_MAX") or 256)
+
 
 def waiting_updates(application, update) -> list:
     """The updates of the same person (or chat) as `update` still waiting their turn behind it,
@@ -4080,10 +4090,48 @@ def waiting_updates(application, update) -> list:
     return processor.waiting(key) if key is not None else []
 
 
+class UpdateQueue(asyncio.Queue):
+    """python-telegram-bot's queue of fetched updates, which holds polling back while this bot
+    already has `limit` updates in memory: in the queue, or with `processor` (waiting their turn
+    or being handled). See UPDATES_IN_MEMORY_MAX for why.
+
+    python-telegram-bot's fetcher takes every update off this queue at once and makes a task of
+    it, so the queue alone cannot bound anything: the count that matters is queue + processor.
+    The polling loop puts the updates of one getUpdates answer (at most 100) one by one, so the
+    bound can be passed by at most one answer's worth. Only updates wait: python-telegram-bot's
+    stop signal, and anything else that is not an Update, goes in at once."""
+
+    def __init__(self, processor: "PerUserUpdateProcessor", limit: int):
+        super().__init__()
+        self.processor, self.limit = processor, limit
+        self.held_back = 0
+
+    def full_now(self) -> bool:
+        return self.qsize() + self.processor.in_flight >= self.limit
+
+    async def put(self, item) -> None:
+        if self.limit > 0 and isinstance(item, Update) and self.full_now():
+            self.held_back += 1
+            while self.full_now():
+                self.processor.done.clear()
+                if not self.full_now():
+                    break
+                try:
+                    # A timeout too, so that a missed signal costs a second, never a stall.
+                    await asyncio.wait_for(self.processor.done.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+        await super().put(item)
+
+
 def per_user_updates(builder, prefix: str):
     if (os.environ.get(f"{prefix}_CONCURRENT_UPDATES") or "").strip().lower() in ("0", "off", "false", "no"):
         return builder
-    return builder.concurrent_updates(PerUserUpdateProcessor())
+    processor = PerUserUpdateProcessor()
+    builder = builder.concurrent_updates(processor)
+    if UPDATES_IN_MEMORY_MAX > 0:
+        builder = builder.update_queue(UpdateQueue(processor, UPDATES_IN_MEMORY_MAX))
+    return builder
 
 
 class PerUserUpdateProcessor(BaseUpdateProcessor):
@@ -4105,6 +4153,10 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         self._waiting: "dict[tuple, list]" = {}
         self.waiting_max = waiting_max
         self.dropped = 0
+        # Updates between arriving here and being done, and a signal each time one is done:
+        # what UpdateQueue holds polling back by.
+        self.in_flight = 0
+        self.done = asyncio.Event()
 
     @staticmethod
     def key_of(update) -> "tuple | None":
@@ -4122,6 +4174,14 @@ class PerUserUpdateProcessor(BaseUpdateProcessor):
         return None
 
     async def do_process_update(self, update, coroutine) -> None:
+        self.in_flight += 1
+        try:
+            await self._process_in_turn(update, coroutine)
+        finally:
+            self.in_flight -= 1
+            self.done.set()
+
+    async def _process_in_turn(self, update, coroutine) -> None:
         key = self.key_of(update)
         if key is None:
             await coroutine
