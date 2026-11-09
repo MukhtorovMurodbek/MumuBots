@@ -72,8 +72,8 @@ ERASURE_PURPOSE = "reserve.erasure"      # reserve.py
 INVITE_PURPOSE = "sticker.invite.username"
 INVITE_MARK_DOMAIN = "sticker.invite"
 
-# Columns that hold a plain Telegram id somewhere in the family: where a person whose
-# AnonBot rows carry only a pseudonym may still be found, so their rows can follow them.
+# Columns that hold a plain Telegram id somewhere in the family: where a person (or a group
+# chat) whose AnonBot rows carry only a pseudonym may still be found, so their rows can follow.
 PLAIN_ID_COLUMNS = ("user_id", "chat_id", "requested_by", "owner_user_id", "follower_user_id")
 
 # AnonBot's tables whose identity columns are pseudonyms with no seal beside them:
@@ -205,8 +205,10 @@ class Rotation:
                 "WHERE t.table_type = 'BASE TABLE' AND c.data_type = 'bigint' AND c.column_name = ANY(%s) "
                 "AND c.table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY 1, 2, 3",
                 (list(PLAIN_ID_COLUMNS),)).fetchall():
-            for (value,) in conn.execute(sql.SQL("SELECT DISTINCT {} FROM {} WHERE {} > 0").format(
-                    sql.Identifier(column), _q(schema, table), sql.Identifier(column))).fetchall():
+            # Every id that is not a pseudonym: people, and group chats (negative ids) too.
+            for (value,) in conn.execute(sql.SQL("SELECT DISTINCT {} FROM {} WHERE {} >= %s AND {} <> 0").format(
+                    sql.Identifier(column), _q(schema, table), sql.Identifier(column), sql.Identifier(column)),
+                    (self.old.PSEUDONYM_CEILING,)).fetchall():
                 self.learn(value)
         self._pseudo = {self.old.pseudonym(p): self.new.pseudonym(p) for p in self.people}
         self._payer = {self.old.pseudonym_in(p, PAYER_DOMAIN): self.new.pseudonym_in(p, PAYER_DOMAIN)
