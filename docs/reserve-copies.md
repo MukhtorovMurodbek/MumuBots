@@ -7,12 +7,14 @@ Supabase's free plan keeps no backups, so the bots keep their own. They are for 
 | Copy | What | Where | When |
 |---|---|---|---|
 | **Nightly** | the whole database | your Telegram chat with ManagerBot, pinned, never deleted | right after the 22:00 nightly report (`MBOT_NIGHTLY_UTC`) |
-| **Nightly, sealed** | the same | the Railway volume, `nightly.mumu-reserve` (only the newest) | the same moment |
+| **Nightly, on the volume** | the same | the Railway volume, `nightly.mumu-reserve` (only the newest) | the same moment |
 | **Current** | everything except logs and counters: settings, packs, links, payments, ⚡ credit, feedback, erasure notes | the Railway volume, `latest.mumu-reserve` | within about 2 minutes of any change to those tables |
-| **Erasure notes** | who used `/deletemydata`, the id sealed | the `family.erasures` table, and `erasures.jsonl` on the volume (written at once) | at each erase; dropped after 30 days |
+| **Erasure notes** | who used `/deletemydata`, the id encrypted | the `family.erasures` table, and `erasures.jsonl` on the volume (written at once) | at each erase; dropped after 30 days |
 
 - `/backup` in ManagerBot sends the same whole-database copy whenever you ask.
-- *Sealed* means encrypted with the data key. The Telegram copy is not sealed as a whole, so it can still be restored if the key is ever lost. The personal parts inside it are sealed column by column already.
+- Every copy and note is **encrypted to your offline key** (`BACKUP_PUBLIC_KEY`, `docs/data-protection.md`). The bots hold only its public half, so nothing on the server can open them; the private half, in your password manager, opens them on the day of a restore.
+  - The volume copies are written only when `BACKUP_PUBLIC_KEY` is set: the volume also holds the data key, so anything sealed with that key would leak with it. Until it is set, ManagerBot says so once.
+  - Without `BACKUP_PUBLIC_KEY`, the Telegram copy goes as a plain zip (the personal parts inside are sealed column by column), and the erasure notes are sealed with the data key. The caption says which.
 - **No copy older than 30 days is ever restored.** LEGAL.md promises this, and the restore script refuses older copies. The erasure notes only need to live that long.
 - Nothing is kept on your laptop.
 
@@ -29,12 +31,12 @@ Known limit: if someone erased and then used the same bot again before the emerg
 Without a volume, the nightly Telegram copy still works. Only the "Current" copy and the journal need it.
 
 1. Railway → the bots' service → **+ New → Volume**. Mount path `/data`.
-   - A Railway service can have only one volume. If yours already has one for the data key file, use a folder on it, or better, move the key into the sealed `DATA_KEY` variable first (`docs/data-key-options.md`). A key on the same volume as the sealed copies would open them for anyone who got the volume.
+   - A Railway service can have only one volume. If yours already has one for the data key file, use a folder on it: the copies are encrypted to your offline key, which is not on the volume.
 2. Variables → `RESERVE_DIR` = `/data/reserve`.
 3. Deploy. Within a minute ManagerBot writes the first `latest.mumu-reserve`.
    - If it can't write, it tells you once in Telegram. Railway mounts volumes as root and the bots run as their own user. The fix is the variable `RAILWAY_RUN_UID=0`, which runs the container as root (a little less contained, but the bots hold the same data and key either way).
 4. Side effect: Railway doesn't overlap two deployments of a service that has a volume, so each deploy has a short gap (seconds) where no bot answers. Updates people send meanwhile wait at Telegram and are answered after.
-5. Check: the next nightly copy's caption says "Volume: sealed copy kept; the current one is N min old".
+5. Check: the next nightly copy's caption says "Encrypted to your offline key …" and "Volume: encrypted copy kept; the current one is N min old".
 
 `MBOT_RESERVE_MIN_SECONDS` (default 120) is the shortest gap between two "Current" copies.
 
@@ -44,12 +46,13 @@ Only in an emergency. Practise once on a scratch database first (for example the
 
 1. **Stop the bots** (Railway → the service → remove the active deployment, or set `BOTS` to a bot name that doesn't exist).
 2. **Get the files.**
-   - The newest nightly copy: from Telegram (`botfamily_<date>.zip`) or the volume (`nightly.mumu-reserve`).
+   - The newest nightly copy: from Telegram (`botfamily_<date>.zip.age`) or the volume (`nightly.mumu-reserve`).
+   - Your offline key's private half, from the password manager, in a file of its own (`offline_key.txt`). Delete that file afterwards.
    - From the volume, if it survived: `latest.mumu-reserve` and `erasures.jsonl`. With the Railway CLI: `railway ssh`, then copy them out, or attach the volume to a temporary service.
 3. **A working, empty database.** If the old one is gone, create a new Supabase project and put its session-pooler URL (port 5432) in `DATABASE_URL`. Start the bots once so they create their tables, then stop them again.
 4. **Restore.** With the target address in an environment variable (never on the command line):
    ```bash
-   python scripts/restore_reserve.py --database-url-env DATABASE_URL --key-file <key file> --copy botfamily_<date>.zip --latest latest.mumu-reserve --erasures erasures.jsonl
+   python scripts/restore_reserve.py --database-url-env DATABASE_URL --key-file <key file> --backup-key-file offline_key.txt --copy botfamily_<date>.zip.age --latest latest.mumu-reserve --erasures erasures.jsonl
    ```
    - `--latest` and `--erasures` are optional. Leave them out if the volume is gone too.
    - With the key in a password manager, use `--key-env DATA_KEY` instead of `--key-file`.

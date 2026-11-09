@@ -25,7 +25,8 @@ Checks:
   scratch cluster in `TempTools/postgres`).
 - The version shown by the bots is `RELEASE` in `bots/shared/family_link.py` (or `FAMILY_RELEASE`).
 
-Never commit `.env`, cookie files, or the data key.
+Never commit `.env`, cookie files, or the data key, and never put the data key in a Railway variable
+(Railway keeps every deployment's variables): `docs/data-protection.md`.
 
 ## The owner's standing rules
 

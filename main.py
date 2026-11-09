@@ -1304,12 +1304,41 @@ def _clear_per_bot_settings() -> None:
 KEY_VARIABLE = "DATA_KEY"
 _KEY_COPY: "str | None" = None
 
+# Said at every start while the data key reaches a Railway service through a variable. Railway
+# keeps each deployment's variables for rollbacks and redeploys, and its breach of 2026-10-21
+# decrypted customers' variables: a key that has ever been in one is best treated as known. The
+# owner, 2026-11-09: "In case of another outage, data key contents can also be leaked."
+# docs/data-protection.md says how to put the key on the volume without a variable (railway ssh)
+# and how to replace a key that was in one (scripts/rotate_data_key.py).
+KEY_IN_VARIABLE_WARNING = (
+    "The data key reached this service through the Railway variable %s. Railway keeps every "
+    "deployment's variables, and they leaked on 2026-10-21: write the key file on the volume "
+    "instead (railway ssh), delete the variable, and rotate the key -- docs/data-protection.md.")
+
+
+def _on_railway() -> bool:
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
+                or os.environ.get("RAILWAY_PROJECT_ID"))
+
+
+def _key_in_variable_note() -> None:
+    """Warn, and leave a mark ManagerBot's /status shows, when the key came through a Railway
+    variable: DATA_KEY, or DATA_KEY_INIT (vault.py writes it to the volume once, but the
+    deployment that carried it keeps it)."""
+    for name in (KEY_VARIABLE, "DATA_KEY_INIT"):
+        if os.environ.get(name, "").strip() and _on_railway():
+            os.environ["DATA_KEY_CAME_FROM"] = name
+            log.warning(KEY_IN_VARIABLE_WARNING, name)
+            return
+
 
 def _key_from_variable() -> None:
-    """DATA_KEY (a sealed variable on Railway) in place of a key file on a volume. The key goes to
-    a private file in memory-backed /dev/shm for this run's bots to read, and out of the
-    environment, so ffmpeg, yt-dlp, the conversion workers and the rest never inherit it."""
+    """DATA_KEY in place of a key file on a volume -- for local runs and tests; on Railway it is
+    warned against (KEY_IN_VARIABLE_WARNING). The key goes to a private file in memory-backed
+    /dev/shm for this run's bots to read, and out of the environment, so ffmpeg, yt-dlp, the
+    conversion workers and the rest never inherit it."""
     global _KEY_COPY
+    _key_in_variable_note()
     text = os.environ.pop(KEY_VARIABLE, "").strip()
     if not text:
         return

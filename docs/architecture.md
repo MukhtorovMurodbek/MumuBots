@@ -99,7 +99,9 @@ caught), is reloaded alone; the others keep polling.
   (commands/events between ManagerBot and the others), the shared wallet, heartbeats, usage,
   redeploy state.
 - Personal data (AnonBot's conversations, usernames, saved state) is sealed with the **data key**
-  (`vault.py`), given as `DATA_KEY` or `DATA_KEY_FILE`. See `docs/data-key-options.md`.
+  (`vault.py`), a file on a volume (`DATA_KEY_FILE`). Backups are encrypted to the owner's offline
+  key instead (`offline_key.py`, `BACKUP_PUBLIC_KEY`), which the bots never hold. See
+  `docs/data-protection.md`.
 
 ## Commands
 

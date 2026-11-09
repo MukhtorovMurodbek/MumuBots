@@ -69,6 +69,7 @@ from telegram.ext import (
 import db
 import family_link
 import lifecycle
+import offline_key
 import problems
 import reserve
 import reserve_copies
@@ -1936,6 +1937,21 @@ RESTORE_HINT = ("To restore: <code>python scripts/restore_reserve.py</code> (it 
                 "whoever used /deletemydata since). docs/reserve-copies.md has the steps.")
 
 
+def _for_telegram(archive: bytes, info: dict, name: str) -> "tuple[bytes, dict, str, str]":
+    """What goes to Telegram: (file, its numbers, its name, a line about it). Encrypted to
+    the owner's offline key when BACKUP_PUBLIC_KEY is set (offline_key.py), so the copy
+    is safe in a chat, a forward or a stolen account, and only the private key in the
+    owner's password manager opens it. Without the key it goes as it always has. A key
+    that is set but does not parse raises: a copy is not sent plainer than asked."""
+    public = offline_key.recipient()
+    if not public:
+        return archive, info, name, ("Not encrypted: set BACKUP_PUBLIC_KEY to have copies only your "
+                                     "offline key opens (docs/data-protection.md).")
+    sealed = offline_key.encrypt(archive, public)
+    numbers = dict(info, size=len(sealed), sha256=hashlib.sha256(sealed).hexdigest())
+    return sealed, numbers, name + ".age", f"Encrypted to your offline key {offline_key.fingerprint(public)}."
+
+
 async def _deliver_backup(bot, chat_id: int, name: str, archive: bytes, info: dict,
                           heading: str) -> "tuple[int, int, str | None]":
     """Send `archive` to `chat_id` and pin it: (pinned, parts, what went wrong or None).
@@ -1993,12 +2009,13 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = f"botfamily_{stamp}.zip"
     try:
         archive, info = await asyncio.to_thread(_build_backup)
+        archive, info, name, sealing = await asyncio.to_thread(_for_telegram, archive, info, name)
     except Exception as exc:
         logger.exception("Backup failed")
         await edit_in_place(note, context.bot, f"⚠️ Backup failed: {type(exc).__name__}: {exc}")
         return
     pinned, parts, problem = await _deliver_backup(
-        context.bot, chat_id, name, archive, info, "🗄 Database backup — lossless, restorable")
+        context.bot, chat_id, name, archive, info, f"🗄 Database backup — lossless, restorable\n{sealing}")
     if problem:
         await edit_in_place(note, context.bot, f"⚠️ The backup was made but {problem}")
         return
@@ -2029,6 +2046,7 @@ async def _nightly_reserve_copy(context: ContextTypes.DEFAULT_TYPE) -> None:
     name = f"botfamily_{taken_at.strftime('%Y-%m-%d_%H%M')}.zip"
     try:
         archive, info = await asyncio.to_thread(_build_backup)
+        sent, sent_info, name, sealing = await asyncio.to_thread(_for_telegram, archive, info, name)
     except Exception as exc:
         logger.exception("The nightly reserve copy failed")
         await notify_owner(context, f"🗄 The nightly reserve copy failed: {html.escape(f'{type(exc).__name__}: {exc}')}")
@@ -2036,12 +2054,15 @@ async def _nightly_reserve_copy(context: ContextTypes.DEFAULT_TYPE) -> None:
     volume = ""
     if reserve.RESERVE_DIR:
         try:
+            problem = await asyncio.to_thread(reserve_copies.volume_problem)
+            if problem:
+                raise RuntimeError(problem)
             await asyncio.to_thread(reserve_copies.write_nightly, archive, taken_at)
             pruned = await asyncio.to_thread(reserve_copies.prune_erasures, db.DATABASE_URL)
             written = _RESERVE["written_at"]
             age = (f"{max(0, int((taken_at - written).total_seconds() // 60))} min old" if written
                    else "not written since the bots started")
-            volume = f"\nVolume: sealed copy kept; the current one is {age}"
+            volume = f"\nVolume: encrypted copy kept; the current one is {age}"
             if pruned:
                 volume += f"; {pruned} erasure note(s) past {reserve.KEEP_DAYS} days dropped"
         except Exception as exc:
@@ -2049,7 +2070,8 @@ async def _nightly_reserve_copy(context: ContextTypes.DEFAULT_TYPE) -> None:
             volume = f"\n⚠️ Not kept on the volume: {type(exc).__name__}: {exc}"
     for admin_id in ADMIN_IDS:
         _, _, problem = await _deliver_backup(
-            context.bot, admin_id, name, archive, info, "🗄 Nightly reserve copy — for emergencies only" + volume)
+            context.bot, admin_id, name, sent, sent_info,
+            f"🗄 Nightly reserve copy — for emergencies only\n{sealing}" + volume)
         if problem:
             await notify_owner(context, f"🗄 The nightly reserve copy was made but {html.escape(problem)}")
 

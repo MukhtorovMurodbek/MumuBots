@@ -34,9 +34,10 @@ python main.py                     # runs every bot that has a token
 2. Add a service from this repository. It builds from the `Dockerfile` (`railway.json` sets this up).
 3. Set the variables from `.env.example` on the service: at least `DATABASE_URL`, `ADMIN_ID`, and
    `<PREFIX>_TOKEN` / `<PREFIX>_USERNAME` for each bot you want to run.
-4. Set the data key as a sealed `DATA_KEY` variable, or put it on a volume and point `DATA_KEY_FILE`
-   at it. See [docs/data-key-options.md](docs/data-key-options.md). Keep a copy somewhere safe:
-   sealed data cannot be read without it.
+4. Put the data key in a file on a volume and point `DATA_KEY_FILE` at it, never in a variable
+   (Railway keeps every deployment's variables). Set `BACKUP_PUBLIC_KEY` to your offline key's public
+   half. See [docs/data-protection.md](docs/data-protection.md). Keep a copy of both private keys
+   somewhere safe: sealed data cannot be read without the data key, nor backups without the other.
 
 Run a single replica: two copies polling the same token split its updates between them.
 To split the bots across services, give each service the same image and its own `BOTS=` list.
@@ -47,7 +48,8 @@ To split the bots across services, give each service the same image and its own 
 ## Documentation
 
 - [Architecture](docs/architecture.md): how one process runs five bots, settings, processes, database.
-- [Data key options](docs/data-key-options.md): protecting user data if something leaks.
+- [Data protection](docs/data-protection.md): the data key, the offline key for backups, what a leak
+  would expose, and what to do when one happens.
 - [Release notes](docs/releases/): what changed in each version and how to deploy it.
 
 ## Development

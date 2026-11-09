@@ -12,10 +12,16 @@ Two copies, both family_db.py archives (the format /backup has always sent):
             about two minutes of any change to it. This is what makes a loss in
             the afternoon cost minutes rather than everything since 22:00.
 
-Sealed means vault.seal (AES-256-GCM with the data key): the volume is on the
-same host as the key, so this guards against the volume leaking on its own, not
-against the host. The Telegram copy is not sealed, so it can be restored even
-if the key were lost; what is personal in it is sealed column by column already.
+Encrypted means encrypted to the owner's offline key (offline_key.py,
+BACKUP_PUBLIC_KEY): the bots hold only the public half, so nothing on the
+server opens a copy -- not the volume, which also holds the data key, and not
+leaked variables. Until 2026-11-09 the volume copies were sealed with the data
+key itself, so the volume alone gave the whole database away; a copy is now
+written to the volume only when BACKUP_PUBLIC_KEY is set (volume_problem). The
+Telegram copy is encrypted the same way when the key is set, and sent as it is
+otherwise (what is personal in it is sealed column by column already); the
+private key that opens them stays in the owner's password manager, and
+scripts/restore_reserve.py takes it on the day of a restore.
 
 A change is seen without touching the bots' writes: Postgres counts every
 insert, update and delete per table (pg_stat_user_tables), and a sum of those
@@ -34,10 +40,12 @@ import psycopg
 
 import family_db
 import family_link
+import offline_key
 import reserve
-import vault
 
-MAGIC = b"MUMU-RESERVE 1\n"
+# 1 was sealed with the data key (2.2.0 before release; never deployed), 2 is
+# encrypted to the owner's offline key. Only 2 is written or read.
+MAGIC = b"MUMU-RESERVE 2\n"
 LATEST_NAME = "latest.mumu-reserve"
 NIGHTLY_NAME = "nightly.mumu-reserve"
 
@@ -55,30 +63,35 @@ LEAVE_OUT = frozenset((
 MIN_SECONDS = int(os.environ.get("MBOT_RESERVE_MIN_SECONDS") or 120)
 
 
-def _purpose(header: bytes) -> str:
-    # The header is bound into the seal, so a copy cannot be relabelled (made to
-    # look newer, or of the other kind) without failing to open.
-    return "reserve.copy " + header.decode("ascii")
-
-
 def seal_archive(archive: bytes, kind: str, taken_at: datetime) -> bytes:
+    """The copy encrypted to the owner's offline key, behind a header that says what
+    it is without opening it. The header is inside the encrypted part too, so a copy
+    cannot be relabelled (made to look newer, or of the other kind) without the
+    restore noticing (open_archive)."""
+    public = offline_key.recipient()
+    if not public:
+        raise offline_key.OfflineKeyError(f"{offline_key.RECIPIENT_VARIABLE} is not set")
     header = json.dumps({"kind": kind, "taken_at": taken_at.isoformat(),
-                         "key": vault.fingerprint()}, sort_keys=True).encode("ascii")
-    return MAGIC + header + b"\n" + vault.seal(archive, _purpose(header))
+                         "to": offline_key.fingerprint(public)}, sort_keys=True).encode("ascii")
+    return MAGIC + header + b"\n" + offline_key.encrypt(header + b"\n" + archive, public)
 
 
 def read_header(blob: bytes) -> "dict | None":
-    """A sealed copy's kind, time and key fingerprint, readable without the key;
-    None for anything else (a plain archive from Telegram)."""
+    """A copy's kind, time and the public key it was encrypted to, readable without
+    the private key; None for anything else (a plain archive from Telegram)."""
     if not blob.startswith(MAGIC):
         return None
     header, _, _ = blob[len(MAGIC):].partition(b"\n")
     return json.loads(header)
 
 
-def open_archive(blob: bytes) -> bytes:
+def open_archive(blob: bytes, identity: str) -> bytes:
+    """The archive in a copy, with the owner's private key (AGE-SECRET-KEY-1...)."""
     header, _, sealed = blob[len(MAGIC):].partition(b"\n")
-    return vault.unseal(sealed, _purpose(header))
+    inner, _, archive = offline_key.decrypt(sealed, identity).partition(b"\n")
+    if inner != header:
+        raise offline_key.OfflineKeyError("the copy's label was changed after it was written")
+    return archive
 
 
 def build_archive(dsn: str, leave_out: frozenset = frozenset()) -> bytes:
@@ -106,9 +119,18 @@ def write_atomic(path: Path, data: bytes) -> None:
 
 def volume_problem() -> "str | None":
     """Why the volume can't be written, in words, or None. Railway mounts a
-    volume as root, and the bots run as their own user."""
+    volume as root, and the bots run as their own user. And a copy goes there
+    only encrypted to the owner's offline key: the volume holds the data key
+    too, so anything sealed with that key would leak with it."""
     if not reserve.RESERVE_DIR:
         return None
+    try:
+        if not offline_key.recipient():
+            return (f"Reserve copies on the volume need {offline_key.RECIPIENT_VARIABLE}, the public half of "
+                    f"your offline key (docs/data-protection.md): the volume also holds the data key, so a "
+                    f"copy sealed with that key would give the database away with the volume.")
+    except offline_key.OfflineKeyError as exc:
+        return str(exc)
     folder = Path(reserve.RESERVE_DIR)
     try:
         folder.mkdir(parents=True, exist_ok=True)

@@ -31,9 +31,9 @@ export default defineRailway(() => {
     replicas: 1,
     env: {
       DATABASE_URL: preserve(),
-      // The sealed data key (docs/data-key-options.md). Once DATA_KEY is set, never drop this
-      // line: apply deletes variables the file doesn't list, and a sealed value cannot be read back.
-      DATA_KEY: preserve(),
+      // No DATA_KEY: the data key is a file on the volume (DATA_KEY_FILE), never a variable --
+      // Railway keeps every deployment's variables (docs/data-protection.md). BACKUP_PUBLIC_KEY
+      // is public and comes in with `config pull` like the other plain variables.
     },
   });
 

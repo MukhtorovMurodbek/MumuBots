@@ -775,6 +775,25 @@ async def _usage_sample_job(context) -> None:
     await asyncio.to_thread(_sample_usage_now)
 
 
+def data_protection_lines() -> "list[str]":
+    """How this service's data is kept safe, in a line or two for the owner: where the data
+    key came from, and whether the backups are encrypted to the offline key
+    (docs/data-protection.md). Only what needs doing is flagged."""
+    import offline_key
+    lines = []
+    came = os.environ.get("DATA_KEY_CAME_FROM")
+    if came:
+        lines.append(f"⚠️ Data key: came through the Railway variable {came}. Put it on the volume and "
+                     f"rotate it (docs/data-protection.md).")
+    try:
+        public = offline_key.recipient()
+        lines.append(f"Backups: encrypted to your offline key {offline_key.fingerprint(public)}" if public
+                     else "⚠️ Backups: not encrypted. Set BACKUP_PUBLIC_KEY (docs/data-protection.md).")
+    except offline_key.OfflineKeyError as exc:
+        lines.append(f"⚠️ Backups: {exc}")
+    return lines
+
+
 def build_status_text(start_time: datetime, users_last_hour: int, users_since_start: int) -> str:
     now = datetime.now(timezone.utc)
     uptime = now - start_time
@@ -790,6 +809,7 @@ def build_status_text(start_time: datetime, users_last_hour: int, users_since_st
         f"Active users (last hour): {users_last_hour}",
         f"Active users (since this start): {users_since_start}",
         process_footprint(),
+        *data_protection_lines(),
         "",
         error_summary(),
     ])

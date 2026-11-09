@@ -2,8 +2,14 @@
 """Restore the family's database from its reserve copies, for an emergency only.
 
     python scripts/restore_reserve.py --database-url-env TARGET_URL --key-file /path/to/mumu_data_key \\
-        --copy botfamily_2026-11-03_1300.zip \\
+        --backup-key-file /path/to/offline_key.txt \\
+        --copy botfamily_2026-11-03_1300.zip.age \\
         [--latest latest.mumu-reserve] [--erasures erasures.jsonl]
+
+--backup-key-file is the private half of BACKUP_PUBLIC_KEY (the AGE-SECRET-KEY-1...
+line from your password manager, in a file of its own): what opens the copies and
+the erasure notes once BACKUP_PUBLIC_KEY is set (docs/data-protection.md). Delete
+that file when the restore is done.
 
 docs/reserve-copies.md is the manual; bots/shared/reserve.py says why the
 erasure notes exist. In order, it:
@@ -11,7 +17,8 @@ erasure notes exist. In order, it:
   1. refuses a copy older than reserve.KEEP_DAYS (the promise in LEGAL.md),
      and a database whose bots look alive (a heartbeat in the last 3 minutes);
   2. restores --copy, the whole database: the nightly copy from the owner's
-     Telegram (a plain .zip) or from the volume (nightly.mumu-reserve, sealed),
+     Telegram (.zip.age, or a plain .zip from before BACKUP_PUBLIC_KEY was set)
+     or from the volume (nightly.mumu-reserve),
      into the tables the bots made when they were started once against this
      database ("replace": each table is emptied, then loaded);
   3. restores --latest over it, if it is newer: the volume's current copy of
@@ -66,15 +73,28 @@ class Refusal(Exception):
     pass
 
 
-def read_copy(path: Path, copies) -> "tuple[bytes, datetime, str]":
-    """(archive, when it was taken, its kind): a sealed reserve file or a plain family_db zip."""
+def _need(identity: "str | None", what: str) -> str:
+    if not identity:
+        raise Refusal(f"{what} is encrypted to your offline key: give --backup-key-file, the file "
+                      f"holding its AGE-SECRET-KEY-1... line.")
+    return identity
+
+
+def read_copy(path: Path, copies, identity: "str | None" = None) -> "tuple[bytes, datetime, str]":
+    """(archive, when it was taken, its kind): a volume copy, a Telegram copy encrypted to
+    the offline key (.zip.age), or a plain family_db zip."""
     blob = path.read_bytes()
     header = copies.read_header(blob)
     if header is not None:
-        return copies.open_archive(blob), datetime.fromisoformat(header["taken_at"]), header["kind"]
+        archive = copies.open_archive(blob, _need(identity, path.name))
+        return archive, datetime.fromisoformat(header["taken_at"]), header["kind"]
+    offline_key = importlib.import_module(f"{MANAGER}.offline_key")
+    kind = "plain"
+    if offline_key.is_encrypted(blob):
+        blob, kind = offline_key.decrypt(blob, _need(identity, path.name)), "encrypted"
     with zipfile.ZipFile(io.BytesIO(blob)) as archive:
         manifest = json.loads(archive.read("MANIFEST.json"))
-    return blob, datetime.fromisoformat(manifest["created_at"]), "plain"
+    return blob, datetime.fromisoformat(manifest["created_at"]), kind
 
 
 def journal_notes(path: "Path | None") -> list:
@@ -100,17 +120,23 @@ def table_notes(url: str, family_schema: str) -> list:
             f"SELECT bot, db_schema, erased_at, sealed_user FROM {family_schema}.erasures").fetchall()]
 
 
-def erase_again(notes: list, since: datetime, script, reserve, say=print) -> "tuple[int, int, int]":
+def erase_again(notes: list, since: datetime, script, reserve, say=print,
+                identity: "str | None" = None) -> "tuple[int, int, int]":
     """Each bot's own erase for every note newer than `since`: (people, rows, failed).
     One that fails is counted and the rest go on: the data is restored by now, and
-    every other erasure still has to happen."""
+    every other erasure still has to happen. A note is encrypted to the offline key
+    (`identity` opens it) or, from a bot without BACKUP_PUBLIC_KEY, sealed with the
+    data key."""
     people, rows, failed = set(), 0, 0
+    offline_key = importlib.import_module(f"{MANAGER}.offline_key")
     for bot, schema, at, sealed in sorted(notes, key=lambda note: note[2]):
         if at <= since:
             continue
         try:
-            vault = importlib.import_module(f"{bot}.vault")
-            user_id = vault.open_id(sealed, reserve.ERASURE_PURPOSE)
+            if offline_key.is_encrypted(sealed):
+                user_id = int(offline_key.decrypt(sealed, _need(identity, "an erasure note")).decode("ascii"))
+            else:
+                user_id = importlib.import_module(f"{bot}.vault").open_id(sealed, reserve.ERASURE_PURPOSE)
             if (bot, user_id) in people:
                 continue
             db = script.load_bot_db(bot)
@@ -139,20 +165,20 @@ def keep_journal_notes(url: str, family_schema: str, notes: list, present: list)
 
 
 def restore(url: str, copy_path: Path, latest_path: "Path | None", journal: "Path | None",
-            script, now: "datetime | None" = None, say=print) -> None:
+            script, now: "datetime | None" = None, say=print, identity: "str | None" = None) -> None:
     now = now or datetime.now(timezone.utc)
     copies = importlib.import_module(f"{MANAGER}.reserve_copies")
     family_db = importlib.import_module(f"{MANAGER}.family_db")
     reserve = importlib.import_module(f"{MANAGER}.reserve")
     link = script.load_family_link()
 
-    archive, taken_at, kind = read_copy(copy_path, copies)
+    archive, taken_at, kind = read_copy(copy_path, copies, identity)
     if now - taken_at > timedelta(days=reserve.KEEP_DAYS):
         raise Refusal(f"that copy was taken {taken_at:%Y-%m-%d}, more than {reserve.KEEP_DAYS} days ago. "
                       f"No copy that old is ever restored (LEGAL.md).")
     latest = None
     if latest_path is not None:
-        latest_archive, latest_at, latest_kind = read_copy(latest_path, copies)
+        latest_archive, latest_at, latest_kind = read_copy(latest_path, copies, identity)
         if latest_kind != "latest":
             raise Refusal("--latest takes the volume's latest.mumu-reserve")
         if latest_at > taken_at:
@@ -179,7 +205,7 @@ def restore(url: str, copy_path: Path, latest_path: "Path | None", journal: "Pat
 
     present = table_notes(url, link.FAMILY_SCHEMA)
     from_journal = journal_notes(journal)
-    people, rows, failed = erase_again(present + from_journal, taken_at, script, reserve, say)
+    people, rows, failed = erase_again(present + from_journal, taken_at, script, reserve, say, identity)
     added = keep_journal_notes(url, link.FAMILY_SCHEMA, from_journal, present)
     say(f"\nErased again: {people} person/bot pair(s) who used /deletemydata after the copy "
         f"({rows} row(s)). {added} note(s) from the journal kept in the table.")
@@ -199,8 +225,10 @@ def main(argv=None) -> int:
     keys = parser.add_mutually_exclusive_group(required=True)
     keys.add_argument("--key-file", metavar="PATH")
     keys.add_argument("--key-env", metavar="NAME")
+    parser.add_argument("--backup-key-file", type=Path, metavar="PATH",
+                        help="your offline key's private half (AGE-SECRET-KEY-1...), for encrypted copies and notes")
     parser.add_argument("--copy", required=True, type=Path,
-                        help="the nightly copy: botfamily_<date>.zip from Telegram, or the volume's nightly.mumu-reserve")
+                        help="the nightly copy: botfamily_<date>.zip.age from Telegram, or the volume's nightly.mumu-reserve")
     parser.add_argument("--latest", type=Path, help="the volume's latest.mumu-reserve")
     parser.add_argument("--erasures", type=Path, help="the volume's erasures.jsonl")
     parser.add_argument("--yes", action="store_true", help="don't ask before replacing the tables")
@@ -231,7 +259,8 @@ def main(argv=None) -> int:
     try:
         script = _encrypt_script()
         script.hand_over_key(args.key_file, {})
-        restore(url, args.copy, args.latest, args.erasures, script)
+        identity = args.backup_key_file.read_text(encoding="ascii") if args.backup_key_file else None
+        restore(url, args.copy, args.latest, args.erasures, script, identity=identity)
         return 0
     except Refusal as exc:
         print(f"Refused: {exc}", file=sys.stderr)

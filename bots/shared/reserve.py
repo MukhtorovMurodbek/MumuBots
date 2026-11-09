@@ -8,8 +8,9 @@ this part is every bot's, because every bot has a /deletemydata.
 
 THE PROBLEM IT SOLVES. Someone erases their data at noon; the database is lost
 at three; it comes back from last night's copy, which still holds them. So each
-erasure leaves a note -- which bot, the person's id sealed with the data key,
-and when -- in two places: the family's `erasures` table (which the volume copy
+erasure leaves a note -- which bot, the person's id encrypted to the owner's
+offline key (offline_key.py; sealed with the data key when BACKUP_PUBLIC_KEY is
+not set), and when -- in two places: the family's `erasures` table (which the volume copy
 carries within minutes) and, when the volume is mounted here, a line appended
 to RESERVE_DIR/erasures.jsonl at once. The restore (scripts/restore_reserve.py)
 erases again everyone whose note is newer than the copy it restored.
@@ -28,6 +29,7 @@ from pathlib import Path
 
 import db
 import family_link
+import offline_key
 import vault
 
 logger = logging.getLogger(__name__)
@@ -49,14 +51,29 @@ def journal_path() -> "Path | None":
     return Path(RESERVE_DIR) / JOURNAL_NAME if RESERVE_DIR else None
 
 
+def _sealed_id(user_id: int) -> bytes:
+    """The person's id as a note keeps it. Only a restore ever reads a note, so it is
+    encrypted to the owner's offline key when there is one: then nothing on the
+    server can tell who erased. A BACKUP_PUBLIC_KEY that does not parse is logged and
+    the data key is used instead -- a typo in a setting must not cost the note."""
+    try:
+        public = offline_key.recipient()
+    except offline_key.OfflineKeyError:
+        logger.exception("Erasure notes fall back to the data key")
+        public = None
+    if public:
+        return offline_key.encrypt(b"%d" % int(user_id), public)
+    if not family_link.vault_usable():
+        raise vault.VaultError("the data key does not open")
+    return vault.seal_id(user_id, ERASURE_PURPOSE)
+
+
 def note_erasure(user_id: int) -> bool:
     """Called by /deletemydata once the erase has happened. False when no note
     could be kept anywhere: then a restore would bring this person back, which
     is worth an error in the log, not a different answer to them."""
     try:
-        if not family_link.vault_usable():
-            raise vault.VaultError("the data key does not open")
-        sealed = vault.seal_id(user_id, ERASURE_PURPOSE)
+        sealed = _sealed_id(user_id)
     except Exception:
         logger.exception("An erasure could not be noted")
         return False

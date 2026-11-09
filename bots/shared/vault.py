@@ -29,14 +29,17 @@ What it does not protect against: whoever holds both the database and the key.
 The bots need the key to run, so this covers a leaked DATABASE_URL, a stolen
 backup, a breach of the database host -- not the machine the bots run on.
 Losing the key loses every sealed value and every way to find a person by id.
-Keep a copy offline.
+Keep a copy offline. What the bots only write and never read back (backups,
+erasure notes) is encrypted to the owner's offline key instead (offline_key.py).
 
-A HOST WITHOUT SECRET FILES (Railway) gets the key once, through the variable
-DATA_KEY_INIT: the first start writes it to DATA_KEY_FILE, which points at the
-host's volume, and from then on the variable is deleted, so the host's
-variables hold the key for one deploy and no longer. A key file that is there
-already is never written over: DATA_KEY_INIT must then be the same key, or the
-bot does not start.
+DATA_KEY_INIT, a variable whose first start writes the key to DATA_KEY_FILE on
+the host's volume, still works, but is warned against on Railway (main.py): it
+was meant to hold the key "for one deploy and no longer", and it does not --
+Railway keeps every deployment's variables for rollbacks, and they leaked on
+2026-10-21. docs/data-protection.md puts the key file on the volume with
+`railway ssh` instead, and scripts/rotate_data_key.py replaces a key that was in
+a variable. A key file that is there already is never written over:
+DATA_KEY_INIT must then be the same key, or the bot does not start.
 """
 from __future__ import annotations
 
