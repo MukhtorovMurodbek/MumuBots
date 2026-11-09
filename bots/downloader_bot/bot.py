@@ -957,7 +957,8 @@ def _sent_files_status_line() -> str:
     stats = sent_files.stats()
     if not stats["enabled"]:
         return "Sent-file store: off"
-    return (f"Sent-file store: rows read {stats['hit']} fresh / {stats['stale']} stale / {stats['miss']} none; "
+    return (f"Sent-file store: rows read {stats['hit']} fresh / {stats['stale']} stale / {stats['miss']} none "
+            f"({stats['remembered']} from memory); "
             f"lookups {stats['present']} present / {stats['missing']} missing / {stats['unknown']} unknown; "
             f"{stats['invalid']} invalid ids, {stats['stored']} stored since start")
 
@@ -1831,16 +1832,19 @@ async def _store_sent_files(user_id: int, platform: str, url: str, lossless: boo
     if not sent_files.usable(user_id) or not sent:
         return
     try:
-        text = sent_files.encode_items(sent)
-        if text is None:
+        items = sent_files.encode_items(sent)
+        if items is None:
             return
-        await asyncio.to_thread(sent_files_put, sent_files.post_key(platform, url, lossless), text)
+        key = sent_files.post_key(platform, url, lossless)
+        await asyncio.to_thread(sent_files_put, key, items)
+        sent_files.remember(key, items, sent_files._clock(), sent_files._clock().date())
         sent_files.note("stored")
     except Exception as exc:
         logger.warning("The sent-file store could not be written (%s)", type(exc).__name__)
 
 
-async def _forget_sent_files(key: str) -> None:
+async def _forget_sent_files(key) -> None:
+    sent_files.forget(key)
     try:
         await asyncio.to_thread(sent_files_drop, key)
     except Exception as exc:
@@ -1870,7 +1874,15 @@ async def _resend_by_file_id(update, context, lang, status, platform: str, url: 
         else:
             lossless = lossless_override
         key = sent_files.post_key(platform, url, lossless)
-        row = await asyncio.to_thread(sent_files_get, key)
+        # A post many people send within minutes is read from the database once
+        # (sent_files.recall); trust is still decided below, from the stored time.
+        row = sent_files.recall(key)
+        if row is not None:
+            sent_files.note("remembered")
+        else:
+            row = await asyncio.to_thread(sent_files_get, key)
+            if row is not None:
+                sent_files.remember(key, *row)
     except Exception as exc:
         # A database that hiccups costs a normal fetch, never a failed delivery.
         logger.warning("The sent-file store could not be read (%s)", type(exc).__name__)
@@ -1932,7 +1944,13 @@ async def _resend_by_file_id(update, context, lang, status, platform: str, url: 
     try:
         # Used today. Seen public just now only if a lookup said so: a fresh row is
         # trusted, not renewed, which is what makes "gone within 12 hours" true.
-        await asyncio.to_thread(sent_files_used if fresh else sent_files_confirmed, key)
+        # A fresh row this process already marked today needs no round trip at all.
+        if not fresh:
+            await asyncio.to_thread(sent_files_confirmed, key)
+            sent_files.note_used(key, confirmed_at=sent_files._clock())
+        elif not sent_files.used_today(key):
+            await asyncio.to_thread(sent_files_used, key)
+            sent_files.note_used(key)
     except Exception as exc:
         logger.warning("The sent-file store could not be updated (%s)", type(exc).__name__)
     return True

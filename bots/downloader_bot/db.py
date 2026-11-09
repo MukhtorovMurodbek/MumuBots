@@ -471,14 +471,24 @@ def init_db(dsn: str = DATABASE_URL) -> None:
         # sent again without being downloaded again (sent_files.py has the whole
         # argument). The row holds nothing about people: the key is a keyed hash of
         # the post, not the post and not the person; the day is a day, not a moment.
+        #
+        # 2.2.0 keeps it compact (sent_files.py says how and why): a 16-byte key,
+        # the ids as bytes, room on each page for the daily "used" mark. A table
+        # from 2.1.x has a hex text key and JSON ids, and other keys (2.2.0 names a
+        # post by its identity, STORE_VERSION 2), so none of its rows could be
+        # found again: it is a cache, and it is dropped and made anew -- what it
+        # held costs one more download of each post, once.
+        old = _column(conn, "sent_files", "post_key")
+        if old is not None and old[0] != "uuid":
+            conn.execute("DROP TABLE IF EXISTS sent_files")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sent_files (
-                post_key     TEXT PRIMARY KEY,
-                items        TEXT NOT NULL,
+                post_key     UUID PRIMARY KEY,
+                items        BYTEA NOT NULL,
                 confirmed_at TIMESTAMPTZ NOT NULL,
                 last_used    DATE NOT NULL DEFAULT CURRENT_DATE
-            )
+            ) WITH (fillfactor = 90)
             """
         )
         # A group chat's settings (groups.py), as JSON so a setting added later
@@ -980,18 +990,19 @@ def _days_from_env(name: str, default: int) -> int:
 SENT_FILES_KEEP_DAYS = _days_from_env("DBOT_FILEID_KEEP_DAYS", 90)
 
 
-def sent_files_get(post_key: str):
-    """(items text, confirmed_at) of this post's row, or None. A read: any error
-    is the caller's to treat as "no row"."""
+def sent_files_get(post_key):
+    """(items bytes, confirmed_at, last_used) of this post's row, or None. `post_key`
+    is the UUID sent_files.post_key gives. A read: any error is the caller's to treat
+    as "no row"."""
     with pooled_read() as conn:
         row = conn.execute(
-            "SELECT items, confirmed_at FROM sent_files WHERE post_key = %s",
+            "SELECT items, confirmed_at, last_used FROM sent_files WHERE post_key = %s",
             (post_key,),
         ).fetchone()
-    return (row[0], row[1]) if row else None
+    return (bytes(row[0]), row[1], row[2]) if row else None
 
 
-def sent_files_put(post_key: str, items_text: str) -> None:
+def sent_files_put(post_key, items: bytes) -> None:
     """Store a delivery: the ids, seen public now, used today. Replaces what was there."""
     with pooled() as conn:
         conn.execute(
@@ -1003,12 +1014,12 @@ def sent_files_put(post_key: str, items_text: str) -> None:
                 confirmed_at = now(),
                 last_used = CURRENT_DATE
             """,
-            (post_key, items_text),
+            (post_key, items),
         )
         conn.commit()
 
 
-def sent_files_confirmed(post_key: str) -> None:
+def sent_files_confirmed(post_key) -> None:
     """The post was seen public just now (a lookup found it), and the row was used."""
     with pooled() as conn:
         conn.execute(
@@ -1018,18 +1029,21 @@ def sent_files_confirmed(post_key: str) -> None:
         conn.commit()
 
 
-def sent_files_used(post_key: str) -> None:
+def sent_files_used(post_key) -> None:
     """The row was used today. confirmed_at stays: only a fetch or a lookup proves
-    that the post is still public."""
+    that the post is still public. A row already marked today is left alone: in
+    Postgres an UPDATE that changes nothing still writes a new version of the row,
+    which for a post sent to many people a day was one dead row per delivery."""
     with pooled() as conn:
         conn.execute(
-            "UPDATE sent_files SET last_used = CURRENT_DATE WHERE post_key = %s",
+            "UPDATE sent_files SET last_used = CURRENT_DATE "
+            "WHERE post_key = %s AND last_used < CURRENT_DATE",
             (post_key,),
         )
         conn.commit()
 
 
-def sent_files_drop(post_key: str) -> None:
+def sent_files_drop(post_key) -> None:
     with pooled() as conn:
         conn.execute("DELETE FROM sent_files WHERE post_key = %s", (post_key,))
         conn.commit()
