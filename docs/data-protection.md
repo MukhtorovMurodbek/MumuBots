@@ -8,16 +8,16 @@ This replaces `data-key-options.md`. That page recommended the key as a sealed R
 
 - **2026-10-21: Railway's breach.** An attacker decrypted customers' environment variables (bot tokens, `DATABASE_URL`, anything else set there). Railway told everyone to rotate them.
 - **Railway keeps every deployment's variables.** A rollback or a redeploy of an old deployment brings back its image *and its variables*. So a variable you delete is gone from the service, not from Railway's records.
-- **So the data key must never be a Railway variable.** That means neither `DATA_KEY` nor `DATA_KEY_INIT`, even once. The production key went through `DATA_KEY_INIT` (2026-11-07 for MumuManager, and that is how 2.1.1CH and later take a key, so very likely for MumuCombined too). So it's in Railway's deployment history: treat it as known and replace it once (step 4 below).
+- **So the data key must never be a Railway variable.** That means neither `DATA_KEY` nor `DATA_KEY_INIT`, even once. 2.1.x took the key through `DATA_KEY_INIT`, so a key set up that way is in Railway's deployment history: treat it as known and replace it once (step 4 below).
 
 ## What each kind of leak would expose
 
 "Sealed" = encrypted with the data key. "Plain" = readable by whoever has the copy.
 
-| What leaks | 2.1.3 (deployed today) | 2.2.0, set up as below |
+| What leaks | A key that went through a variable, copies sealed with it | 2.2.0, set up as below |
 |---|---|---|
-| **Railway variables** (like 2026-10-21) | Bot tokens and `DATABASE_URL`: the attacker can read the whole database. The data key, if it is still reachable through an old deployment's `DATA_KEY_INIT`: then everything sealed opens too. | Tokens and `DATABASE_URL`: the database, with its sealed parts still sealed. The key was never in a variable. |
-| **The Railway volume** | The key file. | The key file; reserve copies and erasure notes that only your offline key opens. Without the database, the key opens nothing. *(Before this change, the volume also held a copy of the database sealed with that same key: the volume alone gave everything away.)* |
+| **Railway variables** (like 2026-10-21) | Bot tokens and `DATABASE_URL`: the attacker can read the whole database. And the data key, through an old deployment's variables: then everything sealed opens too. | Tokens and `DATABASE_URL`: the database, with its sealed parts still sealed. The key was never in a variable. |
+| **The Railway volume** | The key file, and a reserve copy sealed with that same key: the whole database. | The key file; reserve copies and erasure notes that only your offline key opens. Without the database, the key opens nothing. |
 | **Supabase** (a dump, a stolen backup, a breach) | Everything, sealed parts sealed. | The same. |
 | **Railway variables + volume together** (Railway fully compromised) | Everything. | Everything the bots can read. See "What is left". |
 | **A nightly copy in Telegram** (a forward, a stolen account) | The whole database, sealed parts sealed. | Nothing: only your offline key opens it. |
@@ -51,7 +51,7 @@ What "sealed parts" covers: everything AnonBot keeps about people and who wrote 
    ```
    Paste the key line, press Enter, then Ctrl-D. Then run `chown bots /data/mumu_data_key; exit`. Do the same for `-s MumuManager` with its path.
 3. **Delete `DATA_KEY` and `DATA_KEY_INIT`** from both services' variables, if they're there. ManagerBot's `/status` shows a ⚠️ line while a key came through a variable.
-4. **Replace the key once.** The current key has been in Railway's deployment history, so it gets replaced, with the bots stopped:
+4. **Replace the key once, if it ever went through a variable** (`DATA_KEY_INIT` included). With the bots stopped:
    ```bash
    python scripts/rotate_data_key.py --database-url-env DATABASE_URL --key-file old.key --new-key-file new.key --dry-run
    ```
