@@ -504,6 +504,11 @@ async def fetch_bytes(url: str, limit: int = MAX_RESPONSE_BYTES,
     return b"".join(chunks)
 
 
+# How far past the ceiling a server's guess at a file's length (Estimated-Content-Length) has
+# to be before the file is refused unread.
+ESTIMATE_SLACK = 1.25
+
+
 class TooLarge(FetchError):
     """Over the size ceiling this download was given. A FetchError still, so
     whoever only cares that it failed catches it as before; DownloaderBot
@@ -535,6 +540,13 @@ async def stream_to_file(url: str, path: str, limit: int = MAX_RESPONSE_BYTES,
             response.raise_for_status()
             declared = response.headers.get("content-length")
             if declared and int(declared) > limit:
+                raise too_big()
+            # A relay that builds the file while it sends it (cobalt's tunnel) cannot say how
+            # long it will be, and says what it expects instead. That is a guess from the
+            # bitrate, so only one well past the ceiling is believed: the file is then refused
+            # now, not after minutes of fetching it.
+            guessed = response.headers.get("estimated-content-length")
+            if guessed and guessed.isdigit() and int(guessed) > limit * ESTIMATE_SLACK:
                 raise too_big()
             async for chunk in body_chunks(response, limit, too_big):
                 total += len(chunk)

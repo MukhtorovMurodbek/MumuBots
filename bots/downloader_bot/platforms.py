@@ -66,8 +66,14 @@ TWITTER_RE = re.compile(
 # command list or help text. It is also the one platform with no provider but
 # yt-dlp, so it is the one most likely to be refusing a server on any given
 # day; advertising it would be promising something the bot cannot keep.
+#
+# The shapes a link is copied in: the app's share button (youtu.be/ID?si=...), a browser's
+# address bar with other parameters ahead of the video (watch?app=desktop&v=ID,
+# watch?list=...&v=ID), the music site, and an embedded player's address (embed/ID). Up to
+# 2.1.4 only "watch?v=" was read, and the others were answered as links the bot does not know.
 YOUTUBE_RE = re.compile(
-    r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|shorts/|live/)|youtu\.be/)\S+",
+    r"https?://(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?(?:[^\s#]*&)?v=|shorts/|live/|embed/)"
+    r"|youtu\.be/)\S+",
     re.IGNORECASE,
 )
 
@@ -116,7 +122,7 @@ _IG_NOT_USERS = {"share", "stories"}
 _TT_HOSTS = {"tiktok.com", "www.tiktok.com", "m.tiktok.com"}
 _TT_SHORT_HOSTS = {"vm.tiktok.com", "vt.tiktok.com"}
 
-_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com"}
+_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
 _YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 
 _TW_HOSTS = {"twitter.com", "www.twitter.com", "mobile.twitter.com",
@@ -173,7 +179,7 @@ def _canonical(platform: str, url: str) -> str:
             if path.rstrip("/") == "/watch":
                 values = [v for k, v in parse_qsl(parts.query, keep_blank_values=True) if k == "v"]
                 video = values[0] if values else ""
-            elif len(segments) >= 2 and segments[0] in ("shorts", "live"):
+            elif len(segments) >= 2 and segments[0] in ("shorts", "live", "embed"):
                 video = segments[1]
         elif host == "youtu.be":
             segments = [s for s in path.split("/") if s]

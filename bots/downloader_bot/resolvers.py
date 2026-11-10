@@ -53,12 +53,13 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlsplit
 
 import httpx
 
@@ -810,9 +811,16 @@ COBALT_API_KEY = os.environ.get("DBOT_COBALT_API_KEY") or None
 # 720p rather than "max": the bot sends through the cloud Bot API's 50 MB, and
 # a 1080p minute of video is most of that on its own.
 COBALT_QUALITY = os.environ.get("DBOT_COBALT_QUALITY", "720")
-# Per instance. Several of them fit inside PROVIDER_TIMEOUT_S that way, and an
-# instance that has not answered in this long is not going to.
-COBALT_INSTANCE_TIMEOUT_S = float(os.environ.get("DBOT_COBALT_INSTANCE_TIMEOUT", "10"))
+# Per instance, for its answer (the address of the file, not the file). Production,
+# 2026-11-07: the one instance that still fetched was given up on at 10 s.
+COBALT_INSTANCE_TIMEOUT_S = float(os.environ.get("DBOT_COBALT_INSTANCE_TIMEOUT", "15"))
+# For the whole route, file included. Since 2.1.5 the file is fetched here, inside the route
+# (see _cobalt_take), and a public instance's tunnel is slow: about 100 KB/s when measured on
+# 2026-11-10. A file over the free ceiling gets YTDLP_SECONDS_PER_MB more for each megabyte.
+COBALT_TIMEOUT_S = float(os.environ.get("DBOT_COBALT_TIMEOUT", "240"))
+# The heights asked for next when the file at COBALT_QUALITY is over the size ceiling: cobalt
+# has no "the best that fits", so the bot walks down itself.
+COBALT_STEP_DOWN = (480, 360)
 
 # cobalt's error codes, sorted into the verdicts the chain understands. The
 # codes are namespaced ("error.api.content.video.unavailable",
@@ -823,7 +831,7 @@ _COBALT_MISSING = ("content.video.unavailable", "content.post.unavailable",
                    "content.video.age", "content.post.age", "link.invalid",
                    "link.unsupported", "content.video.live")
 _COBALT_TOO_BIG = ("content.too_long", "content.too_large")
-_COBALT_BLOCKED = (".login", "auth.", "fetch.rate", "rate_exceeded",
+_COBALT_BLOCKED = (".login", "auth.", "fetch.rate", "rate_exceeded", "too_many_requests",
                    "content.video.region", "youtube.decipher", "youtube.token",
                    "no_valid_content", "fetch.critical")
 
@@ -870,11 +878,12 @@ def _cobalt_items(data: dict, platform: str) -> list[MediaItem]:
     return []
 
 
-async def _cobalt_one(host: str, url: str, platform: str, key: str | None) -> Resolved:
+async def _cobalt_one(host: str, url: str, platform: str, key: str | None,
+                      quality: "str | None" = None) -> Resolved:
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Api-Key {key}"
-    body = {"url": url, "videoQuality": _cobalt_quality(), "filenameStyle": "basic"}
+    body = {"url": url, "videoQuality": quality or _cobalt_quality(), "filenameStyle": "basic"}
     resp = await _post(host + "/", json=body, headers=headers, timeout=COBALT_INSTANCE_TIMEOUT_S)
     try:
         data = resp.json()
@@ -909,6 +918,123 @@ def _cobalt_quality() -> str:
     return str(under[-1] if under else COBALT_HEIGHTS[0])
 
 
+# ---------------------------------------------------------------------------
+# Files fetched inside a route
+# ---------------------------------------------------------------------------
+# Up to 2.1.4 a relay's answer was an address, and the file behind it was fetched after the
+# chain had ended (download(), below). Production, 2026-11-07, and a check from a datacenter
+# address on 2026-11-10: an instance YouTube has blocked still answers with a tunnel address,
+# and the tunnel then sends nothing. The chain had already stopped at that instance, so the
+# person got an empty file's error while the next instance, or the next route, would have
+# worked. The relays that front YouTube therefore fetch the file themselves and look at it,
+# and an instance whose file is no good is one more instance that failed.
+
+# Under this a "video" is an error page or nothing at all.
+MIN_MEDIA_BYTES = 1024
+
+
+def _unlink(path: "str | None") -> None:
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _looks_like_video(path: str) -> bool:
+    """Does the file start the way an MP4 (the "ftyp" box) or a WebM/Matroska file does."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(12)
+    except OSError:
+        return False
+    return head[4:8] == b"ftyp" or head[:4] == b"\x1a\x45\xdf\xa3"
+
+
+def _limit_bytes() -> int:
+    """The size ceiling of the download being resolved (see _LIMIT_MB)."""
+    asked = _LIMIT_MB.get()
+    return asked * 1024 * 1024 if asked else net.MAX_RESPONSE_BYTES
+
+
+async def _take(url: str, ext: str, limit: int) -> str:
+    """`url` into a new file in the work folder; its path. On any failure, a cancellation
+    included (the chain's time limit, the bot stopping), nothing is left on disk."""
+    os.makedirs(_WORK_DIR, exist_ok=True)
+    path = os.path.join(_WORK_DIR, f"{uuid.uuid4().hex}.{ext}")
+    parsed = urlparse(url)
+    try:
+        await net.stream_to_file(url, path, limit=limit,
+                                 headers={"Referer": f"{parsed.scheme}://{parsed.netloc}/"})
+    except BaseException:
+        _unlink(path)
+        raise
+    return path
+
+
+def _instances_verdict(failures: "list[ProviderFailed]") -> str:
+    """What a route says when every one of its instances failed."""
+    kinds = {f.kind for f in failures}
+    return "blocked" if "blocked" in kinds else "missing" if kinds == {"missing"} else "error"
+
+
+async def _cobalt_take(resolved: Resolved, netloc: str) -> None:
+    """Fetch every item of a cobalt answer to disk and check it; the items then carry paths.
+    net.TooLarge goes up as it is (the caller asks for a smaller version)."""
+    taken: list[str] = []
+    try:
+        for item in resolved.items:
+            ext = _ext_of(item.filename, "mp4" if item.kind == "video" else "jpg")
+            taken.append(await _take(item.url, ext, _limit_bytes()))
+            size = os.path.getsize(taken[-1])
+            if size < MIN_MEDIA_BYTES or (item.kind == "video" and not _looks_like_video(taken[-1])):
+                raise ProviderFailed(f"{netloc}: its tunnel sent {size:,} bytes that are not a {item.kind}",
+                                     "blocked")
+    except BaseException:
+        for path in taken:
+            _unlink(path)
+        raise
+    for item, path in zip(resolved.items, taken):
+        item.path = path
+
+
+def _cobalt_qualities() -> "list[str]":
+    """The qualities to ask one instance for, in turn: the first one, then -- unless one height
+    and no other was asked for -- the lower ones of COBALT_STEP_DOWN."""
+    first = _cobalt_quality()
+    asked = _HEIGHT.get()
+    if asked and asked[0] and asked[1]:
+        return [first]
+    top = int(first) if first.isdigit() else COBALT_HEIGHTS[-1]
+    return [first] + [str(height) for height in COBALT_STEP_DOWN if height < top]
+
+
+async def _cobalt_fetch(host: str, url: str, platform: str, key: "str | None") -> Resolved:
+    """One instance, as far as files on disk (as far as its answer, for lookup())."""
+    netloc = urlparse(host).netloc
+    qualities = _cobalt_qualities()
+    for number, quality in enumerate(qualities, start=1):
+        try:
+            # A hard deadline, not httpx's: its timeout is per read, and
+            # an instance trickling bytes would never trip it.
+            resolved = await asyncio.wait_for(_cobalt_one(host, url, platform, key, quality),
+                                              timeout=COBALT_INSTANCE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise ProviderFailed(f"{netloc}: no answer in {COBALT_INSTANCE_TIMEOUT_S:.0f}s", "error") from None
+        if _LOOKUP.get():
+            return resolved
+        try:
+            await _cobalt_take(resolved, netloc)
+        except net.TooLarge:
+            if number < len(qualities):
+                logger.info("cobalt %s: over the size limit at %s, asking for %s",
+                            netloc, quality, qualities[number])
+                continue
+            raise ProviderFailed(f"{netloc}: over the size limit at {quality}", "too_big") from None
+        return resolved
+    raise ProviderFailed(f"{netloc}: nothing asked for", "error")      # qualities is never empty
+
+
 def _cobalt_provider(platform: str):
     async def provider(url: str) -> Resolved:
         global _cobalt_last_good
@@ -918,14 +1044,14 @@ def _cobalt_provider(platform: str):
         if _cobalt_last_good in hosts:
             hosts.remove(_cobalt_last_good)
             hosts.insert(0, _cobalt_last_good)
+        # One instance may not use up the whole route: the next one is still asked.
+        budget = _timeout_for("cobalt:") * INSTANCE_SHARE
         failures: list[ProviderFailed] = []
         for host in hosts:
             key = COBALT_API_KEY if host == COBALT_INSTANCES[0] else None
+            netloc = urlparse(host).netloc
             try:
-                # A hard deadline, not httpx's: its timeout is per read, and
-                # an instance trickling bytes would never trip it.
-                resolved = await asyncio.wait_for(_cobalt_one(host, url, platform, key),
-                                                  timeout=COBALT_INSTANCE_TIMEOUT_S)
+                resolved = await asyncio.wait_for(_cobalt_fetch(host, url, platform, key), timeout=budget)
             except ProviderFailed as exc:
                 failures.append(exc)
                 if exc.kind == "too_big":
@@ -936,19 +1062,314 @@ def _cobalt_provider(platform: str):
                     raise
                 continue
             except asyncio.TimeoutError:
-                failures.append(ProviderFailed(
-                    f"{urlparse(host).netloc}: no answer in {COBALT_INSTANCE_TIMEOUT_S:.0f}s", "error"))
+                failures.append(ProviderFailed(f"{netloc}: its file was not here in {budget:.0f}s", "error"))
                 continue
-            except (httpx.HTTPError, KeyError, TypeError) as exc:
-                failures.append(ProviderFailed(
-                    f"{urlparse(host).netloc}: {type(exc).__name__}: {exc}", "error"))
+            except (httpx.HTTPError, FetchError, OSError, KeyError, TypeError) as exc:
+                failures.append(ProviderFailed(f"{netloc}: {type(exc).__name__}: {exc}", "error"))
                 continue
             _cobalt_last_good = host
             return resolved
-        kinds = {f.kind for f in failures}
-        verdict = ("blocked" if "blocked" in kinds
-                   else "missing" if kinds == {"missing"} else "error")
-        raise ProviderFailed("; ".join(str(f) for f in failures), verdict)
+        raise ProviderFailed("; ".join(str(f) for f in failures), _instances_verdict(failures))
+    return provider
+
+
+# ---------------------------------------------------------------------------
+# Invidious: a second family of relays for YouTube
+# ---------------------------------------------------------------------------
+# Written 2026-11-10 for 2.1.5. A check from a datacenter address that day: YouTube refused
+# every one of yt-dlp's 14 player clients (a bot check, or HTTP 403 on the file), with and
+# without a token provider, and of 24 public cobalt instances one still fetched -- the rest
+# want a browser's Turnstile token, or are blocked themselves. One hobby server is not a route
+# to rely on, so this is another kind of server doing the same job: Invidious, a front end
+# people run for themselves, whose API lists a video's versions and, asked with local=true,
+# hands out addresses on the instance itself, which passes the bytes on from YouTube.
+#
+# It lists picture and sound as separate files (the joined ones YouTube used to offer are
+# gone), so this route fetches two and joins them with ffmpeg, without re-encoding. It reads
+# the sizes first, so, unlike cobalt, it can choose the best version that fits.
+#
+# Instances come and go, so there are two sources: DBOT_INVIDIOUS_INSTANCES (yours first), and
+# the project's own list of public instances (DBOT_INVIDIOUS_DIRECTORY), read a few times a day
+# and used only for the instances that say their API is open.
+
+INVIDIOUS_INSTANCES = [
+    host.strip().rstrip("/") for host in os.environ.get(
+        "DBOT_INVIDIOUS_INSTANCES", "https://yt.chocolatemoo53.com").split(",") if host.strip()
+]
+# "" or "0" turns the directory off: then only the instances above are asked.
+INVIDIOUS_DIRECTORY = os.environ.get("DBOT_INVIDIOUS_DIRECTORY", "https://api.invidious.io/instances.json").strip()
+INVIDIOUS_DIRECTORY_MAX = 6
+INVIDIOUS_DIRECTORY_EVERY_S = 6 * 3600.0
+INVIDIOUS_DIRECTORY_RETRY_S = 900.0
+INVIDIOUS_INSTANCE_TIMEOUT_S = float(os.environ.get("DBOT_INVIDIOUS_INSTANCE_TIMEOUT", "15"))
+INVIDIOUS_TIMEOUT_S = float(os.environ.get("DBOT_INVIDIOUS_TIMEOUT", "240"))
+# The share of a route's time one instance may use (cobalt's instances too).
+INSTANCE_SHARE = 0.75
+# The same margin video.py keeps under the ceiling (SIZE_MARGIN): the joined file is a little
+# longer than its two parts.
+INVIDIOUS_SIZE_MARGIN = 0.96
+MUX_TIMEOUT_S = 120.0
+
+_invidious_listed: list[str] = []
+_invidious_listed_next = 0.0
+_invidious_last_good: str | None = None
+
+_YT_ID_RE = re.compile(r"(?:[?&]v=|youtu\.be/|/shorts/|/live/|/embed/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
+
+_INVIDIOUS_BLOCKED = ("sign in", "not a bot", "login", "rate limit", "too many", "captcha", "blocked")
+_INVIDIOUS_MISSING = ("unavailable", "private", "removed", "not available", "does not exist",
+                      "terminated", "not found")
+
+
+def _invidious_verdict(text: str) -> str:
+    text = text.lower()
+    if any(part in text for part in _INVIDIOUS_BLOCKED):
+        return "blocked"
+    if any(part in text for part in _INVIDIOUS_MISSING):
+        return "missing"
+    return "error"
+
+
+def _invidious_from_directory(data) -> "list[str]":
+    """The instances of the directory's answer that are reached over https and say their API is
+    open, in the directory's order (it sorts by health), at most INVIDIOUS_DIRECTORY_MAX. Pure."""
+    hosts: list[str] = []
+    for entry in data if isinstance(data, list) else ():
+        meta = entry[1] if isinstance(entry, (list, tuple)) and len(entry) == 2 else None
+        if not isinstance(meta, dict) or meta.get("type") != "https" or meta.get("api") is not True:
+            continue
+        uri = str(meta.get("uri") or "").rstrip("/")
+        if re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?", uri) and uri not in hosts:
+            hosts.append(uri)
+    return hosts[:INVIDIOUS_DIRECTORY_MAX]
+
+
+async def _invidious_hosts() -> "list[str]":
+    """The instances to ask, in order: the one that answered last, the configured ones, then
+    the directory's. The directory is read again every few hours; when it cannot be read, the
+    list from last time stays."""
+    global _invidious_listed, _invidious_listed_next
+    now = time.monotonic()
+    if INVIDIOUS_DIRECTORY not in ("", "0") and now >= _invidious_listed_next:
+        _invidious_listed_next = now + INVIDIOUS_DIRECTORY_RETRY_S
+        try:
+            resp = await asyncio.wait_for(_get(INVIDIOUS_DIRECTORY, timeout=10.0), timeout=10.0)
+            resp.raise_for_status()
+            _invidious_listed = _invidious_from_directory(resp.json())
+            _invidious_listed_next = now + INVIDIOUS_DIRECTORY_EVERY_S
+        except Exception as exc:        # the directory is a convenience: the configured instances remain
+            logger.info("the Invidious directory was not read (%s: %s)", type(exc).__name__, exc)
+    hosts = list(INVIDIOUS_INSTANCES) + [h for h in _invidious_listed if h not in INVIDIOUS_INSTANCES]
+    if _invidious_last_good in hosts:
+        hosts.remove(_invidious_last_good)
+        hosts.insert(0, _invidious_last_good)
+    return hosts
+
+
+def _number(value) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _invidious_height(fmt: dict) -> int:
+    """A version's picture height: from its size ("720x1280" is 1280 high, the way yt-dlp
+    counts it and MAX_HEIGHT caps it), else from its label ("720p")."""
+    size = re.fullmatch(r"(\d+)x(\d+)", str(fmt.get("size") or ""))
+    if size:
+        return int(size.group(2))
+    label = re.match(r"(\d+)p", str(fmt.get("resolution") or fmt.get("qualityLabel") or ""))
+    return int(label.group(1)) if label else 0
+
+
+def _invidious_track(fmt: dict) -> int:
+    """How much a sound track is the video's own: 2 the original, 1 the only one (nothing
+    said), 0 a dubbed or described one. YouTube says which in the address ("xtags")."""
+    tags = (parse_qs(urlsplit(str(fmt.get("url") or "")).query).get("xtags") or [""])[0]
+    if "acont=" not in tags:
+        return 1
+    return 2 if "acont=original" in tags else 0
+
+
+def _invidious_pick(formats, budget_bytes: int, height: "int | None" = None, exact: bool = False,
+                    max_height: int = 1080) -> "tuple[dict, dict]":
+    """(picture, sound) for the best version that fits `budget_bytes`: H.264 with AAC, which
+    every Telegram app plays and which go into one MP4 as they are; the tallest picture up to
+    `max_height` (or `height`; with `exact`, that height and no other). Pure. ProviderFailed
+    when there is none: "too_big" when the size is why, "error" otherwise."""
+    formats = [fmt for fmt in formats or () if isinstance(fmt, dict) and fmt.get("url")]
+    sounds = [fmt for fmt in formats
+              if str(fmt.get("type") or "").startswith("audio/mp4") and _number(fmt.get("clen"))]
+    if not sounds:
+        raise ProviderFailed("no AAC sound is listed", "error")
+    sound = max(sounds, key=lambda fmt: (_invidious_track(fmt), min(_number(fmt.get("bitrate")), 192_000)))
+    cap = max_height if height is None else min(height, max_height)
+    pictures = [fmt for fmt in formats
+                if str(fmt.get("type") or "").startswith("video/mp4") and "avc1" in str(fmt.get("type"))
+                and _number(fmt.get("clen")) and _invidious_height(fmt)
+                and (_invidious_height(fmt) == height if exact and height is not None
+                     else _invidious_height(fmt) <= cap)]
+    if not pictures:
+        raise ProviderFailed("no H.264 picture of that height is listed", "error")
+    room = budget_bytes * INVIDIOUS_SIZE_MARGIN - _number(sound.get("clen"))
+    fitting = [fmt for fmt in pictures if _number(fmt.get("clen")) <= room]
+    if not fitting:
+        raise ProviderFailed("even the smallest version listed is over the size limit", "too_big")
+    picture = max(fitting, key=lambda fmt: (_invidious_height(fmt), _number(fmt.get("fps")),
+                                            _number(fmt.get("bitrate"))))
+    return picture, sound
+
+
+def _invidious_local(host: str, media_url: str) -> str:
+    """The address of a file on the instance itself. With local=true the instance writes these
+    itself; whatever it wrote, the request goes to the instance asked and to nowhere it names:
+    its /videoplayback, with YouTube's parameters, and YouTube's server as the `host` parameter
+    when the instance left the address pointing at YouTube."""
+    parts = urlsplit(media_url)
+    if parts.path != "/videoplayback" or not parts.query:
+        raise ProviderFailed(f"{urlparse(host).netloc}: a file address that is not a videoplayback one", "error")
+    query = parts.query
+    theirs = (parts.hostname or "").lower()
+    if theirs.endswith(".googlevideo.com") and "host=" not in query:
+        query += f"&host={theirs}"
+    return f"{host}/videoplayback?{query}"
+
+
+async def _mux(picture: str, sound: str, out: str) -> None:
+    """One MP4 from a picture file and a sound file, nothing re-encoded, the index at the
+    front (Telegram plays it while it loads). The inputs are files a stranger's server sent:
+    ffmpeg is told they are MP4 and may open files and nothing else, so one that is really a
+    playlist cannot make it fetch an address or read another file."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise ProviderFailed("ffmpeg is not installed", "error")
+    argv = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
+    for path in (picture, sound):
+        argv += ["-protocol_whitelist", "file", "-f", "mp4", "-i", path]
+    argv += ["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", out]
+    proc = await asyncio.create_subprocess_exec(
+        *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE)
+    try:
+        _, said = await asyncio.wait_for(proc.communicate(), timeout=MUX_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise ProviderFailed(f"ffmpeg had not joined the two files in {MUX_TIMEOUT_S:.0f}s", "error") from None
+    finally:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+    if proc.returncode != 0:
+        raise ProviderFailed("ffmpeg could not join the picture and the sound: "
+                             + (said or b"").decode("utf-8", "replace").strip()[-200:], "error")
+
+
+async def _invidious_fetch(netloc: str, picture_url: str, sound_url: str,
+                           picture_bytes: int, sound_bytes: int) -> str:
+    """Both files, checked, joined; the path of the MP4. Nothing else is left on disk."""
+    limit = _limit_bytes()
+    parts: list = [None, None]
+    out = None
+    tasks = [asyncio.ensure_future(_take(picture_url, "mp4", limit)),
+             asyncio.ensure_future(_take(sound_url, "m4a", limit))]
+    try:
+        try:
+            parts = list(await asyncio.gather(*tasks))
+        except BaseException:
+            # gather leaves the other fetch running when one fails. It is stopped here, and
+            # _take removes what it had written; a fetch that had already finished left a
+            # whole file, which goes too.
+            for task in tasks:
+                task.cancel()
+            for ended in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(ended, str):
+                    _unlink(ended)
+            raise
+        for path, expected, what in ((parts[0], picture_bytes, "picture"), (parts[1], sound_bytes, "sound")):
+            size = os.path.getsize(path)
+            if size < MIN_MEDIA_BYTES or size < expected or not _looks_like_video(path):
+                raise ProviderFailed(f"{netloc}: sent {size:,} of the {what}'s {expected:,} bytes", "blocked")
+        out = os.path.join(_WORK_DIR, f"{uuid.uuid4().hex}.mp4")
+        await _mux(parts[0], parts[1], out)
+        if os.path.getsize(out) < MIN_MEDIA_BYTES or not _looks_like_video(out):
+            raise ProviderFailed("ffmpeg wrote no video", "error")
+        done, out = out, None
+        return done
+    finally:
+        for path in (parts[0], parts[1], out):
+            _unlink(path)
+
+
+async def _invidious_one(host: str, video_id: str, platform: str) -> Resolved:
+    import video  # for its ceilings; deferred as in _ytdlp_provider
+    netloc = urlparse(host).netloc
+    try:
+        resp = await asyncio.wait_for(
+            _get(f"{host}/api/v1/videos/{video_id}", params={"local": "true"},
+                 timeout=INVIDIOUS_INSTANCE_TIMEOUT_S),
+            timeout=INVIDIOUS_INSTANCE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise ProviderFailed(f"{netloc}: no answer in {INVIDIOUS_INSTANCE_TIMEOUT_S:.0f}s", "error") from None
+    try:
+        data = resp.json()
+    except ValueError:
+        raise ProviderFailed(f"{netloc} answered HTTP {resp.status_code}, not JSON",
+                             "blocked" if resp.status_code in (401, 403, 429) else "error") from None
+    if not isinstance(data, dict):
+        raise ProviderFailed(f"{netloc} answered something that is not an object", "error")
+    if resp.status_code != 200 or data.get("error"):
+        said = str(data.get("error") or f"HTTP {resp.status_code}")[:120]
+        raise ProviderFailed(f"{netloc}: {said}", _invidious_verdict(said))
+    if data.get("liveNow") or data.get("isUpcoming"):
+        raise ProviderFailed(f"{netloc}: a live stream, not a video", "missing")
+    seconds = _number(data.get("lengthSeconds"))
+    if seconds > video.MAX_DURATION_S:
+        raise ProviderFailed(f"that clip is {seconds // 60} minutes long, and this bot caps downloads "
+                             f"at {video.MAX_DURATION_S // 60}", "too_big")
+    height, exact = _HEIGHT.get() or (None, False)
+    picture, sound = _invidious_pick(data.get("adaptiveFormats"), _limit_bytes(), height, exact,
+                                     video.MAX_HEIGHT)
+    picture_url, sound_url = _invidious_local(host, picture["url"]), _invidious_local(host, sound["url"])
+    if _LOOKUP.get():
+        return Resolved(platform, "invidious", [MediaItem("video", url=picture_url, filename=f"{platform}.mp4")])
+    logger.info("invidious %s: %ss, %sp picture, %s + %s bytes", netloc, seconds, _invidious_height(picture),
+                picture.get("clen"), sound.get("clen"))
+    path = await _invidious_fetch(netloc, picture_url, sound_url,
+                                  _number(picture.get("clen")), _number(sound.get("clen")))
+    return Resolved(platform, "invidious", [MediaItem("video", path=path, filename=f"{platform}.mp4")])
+
+
+def _invidious_provider(platform: str):
+    async def provider(url: str) -> Resolved:
+        global _invidious_last_good
+        found = _YT_ID_RE.search(url)
+        if not found:
+            raise ProviderFailed("no video id in that link", "missing")
+        hosts = await _invidious_hosts()
+        if not hosts:
+            raise ProviderFailed("no Invidious instances configured", "error")
+        budget = _timeout_for("invidious:") * INSTANCE_SHARE
+        failures: list[ProviderFailed] = []
+        for host in hosts:
+            netloc = urlparse(host).netloc
+            try:
+                resolved = await asyncio.wait_for(_invidious_one(host, found.group(1), platform), timeout=budget)
+            except ProviderFailed as exc:
+                failures.append(exc)
+                if exc.kind == "too_big":       # the clip's own size: as for cobalt
+                    raise
+                continue
+            except asyncio.TimeoutError:
+                failures.append(ProviderFailed(f"{netloc}: its files were not here in {budget:.0f}s", "error"))
+                continue
+            except (httpx.HTTPError, FetchError, OSError, KeyError, TypeError, ValueError) as exc:
+                failures.append(ProviderFailed(f"{netloc}: {type(exc).__name__}: {exc}", "error"))
+                continue
+            _invidious_last_good = host
+            return resolved
+        raise ProviderFailed("; ".join(str(f) for f in failures), _instances_verdict(failures))
     return provider
 
 
@@ -1027,12 +1448,15 @@ PROVIDERS: dict[str, list[tuple[str, object]]] = {
     "reddit": [
         ("ytdlp:reddit", _ytdlp_provider("reddit")),
     ],
-    # yt-dlp first (with deno it can answer YouTube's challenges), cobalt when it
+    # yt-dlp first (with deno it can answer YouTube's challenges), the relays when it
     # fails: yt-dlp asks from this container's own address, which is the address
-    # YouTube challenges, and cobalt asks from its own. See the cobalt section.
+    # YouTube challenges, and a relay asks from its own. See the cobalt and Invidious
+    # sections. On a host YouTube refuses, yt-dlp fails in a second or two and is then
+    # rested by its health score, so the order costs little there.
     "youtube": [
         ("ytdlp:youtube", _ytdlp_provider("youtube")),
         ("cobalt:youtube", _cobalt_provider("youtube")),
+        ("invidious:youtube", _invidious_provider("youtube")),
     ],
 }
 
@@ -1062,15 +1486,28 @@ _LIMIT_MB: contextvars.ContextVar = contextvars.ContextVar("download_limit_mb", 
 # quality picker asks for one height exactly, a group's setting caps it. Only yt-dlp and
 # cobalt can choose, so, like _LIMIT_MB, a context variable rather than an argument.
 _HEIGHT: contextvars.ContextVar = contextvars.ContextVar("download_height", default=None)
+# True while lookup() asks: the routes that fetch the file inside the route (the relays for
+# YouTube) then stop at the instance's answer and fetch nothing.
+_LOOKUP: contextvars.ContextVar = contextvars.ContextVar("lookup_only", default=False)
 
 
 def _timeout_for(name: str) -> float:
-    """How long the route called `name` gets before the chain moves on."""
-    if not name.startswith("ytdlp:"):
+    """How long the route called `name` gets before the chain moves on: PROVIDER_TIMEOUT_S,
+    except for the routes that fetch the file while they resolve it (yt-dlp, and the relays for
+    YouTube unless lookup() is asking), which get their own time and more for a large file."""
+    if name.startswith("ytdlp:"):
+        base = YTDLP_TIMEOUT_S
+    elif _LOOKUP.get():
+        return PROVIDER_TIMEOUT_S
+    elif name.startswith("cobalt:"):
+        base = COBALT_TIMEOUT_S
+    elif name.startswith("invidious:"):
+        base = INVIDIOUS_TIMEOUT_S
+    else:
         return PROVIDER_TIMEOUT_S
     free_mb = net.MAX_RESPONSE_BYTES // (1024 * 1024)
     over_mb = max(0, (_LIMIT_MB.get() or free_mb) - free_mb)
-    return max(PROVIDER_TIMEOUT_S, YTDLP_TIMEOUT_S + over_mb * YTDLP_SECONDS_PER_MB)
+    return max(PROVIDER_TIMEOUT_S, base + over_mb * YTDLP_SECONDS_PER_MB)
 
 
 async def resolve(platform: str, url: str, max_mb: int | None = None,
@@ -1172,23 +1609,27 @@ async def lookup(platform: str, url: str) -> str:
     is "unknown", and the caller then does not trust the stored file ids."""
     asked = said_missing = 0
     skipped: set[str] = set()
-    for name, fn in _ordered(platform):
-        if name.startswith("ytdlp:") or name in skipped:
-            continue
-        asked += 1
-        try:
-            found = await asyncio.wait_for(fn(url), timeout=_timeout_for(name))
-        except ProviderFailed as exc:
-            skipped.update(exc.skip)
-            if exc.kind == "missing":
-                said_missing += 1
-            continue
-        except Exception as exc:        # a timeout, a network error, a route's own bug: no answer
-            logger.info("lookup: route %s gave no answer for %s (%s)", name, platform, type(exc).__name__)
-            continue
-        if found.items:
-            return "present"
-        said_missing += 1               # a route that returns nothing says what _resolve counts it as
+    only_asking = _LOOKUP.set(True)     # the relays that fetch inside the route: the answer, no file
+    try:
+        for name, fn in _ordered(platform):
+            if name.startswith("ytdlp:") or name in skipped:
+                continue
+            asked += 1
+            try:
+                found = await asyncio.wait_for(fn(url), timeout=_timeout_for(name))
+            except ProviderFailed as exc:
+                skipped.update(exc.skip)
+                if exc.kind == "missing":
+                    said_missing += 1
+                continue
+            except Exception as exc:        # a timeout, a network error, a route's own bug: no answer
+                logger.info("lookup: route %s gave no answer for %s (%s)", name, platform, type(exc).__name__)
+                continue
+            if found.items:
+                return "present"
+            said_missing += 1               # a route that returns nothing says what _resolve counts it as
+    finally:
+        _LOOKUP.reset(only_asking)
     return "missing" if asked and said_missing == asked else "unknown"
 
 
@@ -1227,7 +1668,12 @@ PROBE_FETCH_TIMEOUT_S = 20.0
 
 async def probe_route(name, fn, url: str, fetch: bool = False,
                       timeout: float | None = None) -> dict:
-    """One route, one link. Never raises."""
+    """One route, one link. Never raises.
+
+    The relays that fetch the file inside the route are asked the way lookup() asks them:
+    for their answer. A check is given seconds, not the minutes a whole file may take, and
+    `fetch` then proves the address serves with its first bytes, as for every other route."""
+    only_asking = _LOOKUP.set(True)
     timeout = _timeout_for(name) if timeout is None else timeout
     started = time.perf_counter()
     row = {"provider": name, "url": url, "ok": False, "detail": "", "items": 0,
@@ -1253,6 +1699,8 @@ async def probe_route(name, fn, url: str, fetch: bool = False,
                 # "fetch failed" exactly: routewatch.check_platform reads the
                 # start of this text to tell a route whose media does not serve.
                 row["fetched"] = f"fetch failed: no media in {PROBE_FETCH_TIMEOUT_S:.0f}s"
+    finally:
+        _LOOKUP.reset(only_asking)
     row["seconds"] = round(time.perf_counter() - started, 1)
     return row
 
@@ -1295,6 +1743,10 @@ async def _probe_fetch(item: MediaItem) -> str:
                     got = max(got, PROBE_FETCH_BYTES)     # more than the cap arrived: success
                 finally:
                     await pieces.aclose()
+                if not got:
+                    # A relay the site has blocked answers with an address that sends nothing.
+                    last = "it sent nothing"
+                    continue
                 return f"{got:,} bytes, {resp.headers.get('content-type', '?')}"
         except Exception as exc:
             last = f"{type(exc).__name__}: {exc}"
