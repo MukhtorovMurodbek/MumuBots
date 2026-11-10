@@ -1,4 +1,4 @@
-"""StickerBot and Telegram's limits and hiccups (2.1.5, ported the same day). What production
+"""StickerBot and Telegram's limits and hiccups (2.1.4, ported the same day). What production
 showed between 2026-10-29 and 11-04: an album met the flood limit ("Retry in 10 seconds") and the
 picture was lost; a new pack's first sticker failed with "Shortname_occupy_failed"; a picture's
 download timed out and the person got the crash reply."""

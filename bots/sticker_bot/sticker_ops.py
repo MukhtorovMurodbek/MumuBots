@@ -134,7 +134,7 @@ def media_of(message) -> "tuple[str, str] | None":
     return None
 
 
-# ---------- Telegram's limits and hiccups (2.1.5) ----------
+# ---------- Telegram's limits and hiccups (2.1.4) ----------
 # Telegram limits how quickly stickers go into a pack. A run of pictures (an album) meets that
 # limit as "Flood control exceeded. Retry in 10 seconds" (production, 2026-10-30), and that
 # picture was lost. A request answered that way was not carried out, so it is sent again after the
