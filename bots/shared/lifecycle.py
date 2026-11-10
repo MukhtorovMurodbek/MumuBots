@@ -6,9 +6,10 @@ one of them is the obvious one:
 
   1. **Two bots, one token.** If the new container starts polling before the
      old one has stopped, Telegram answers one of them with 409 Conflict and
-     both flap. `hold_the_lease()` below settles it with a Postgres advisory
-     lock: exactly one process at a time holds the right to poll, and the
-     new one waits for the old one's grip to relax rather than fighting it.
+     both flap. `hold_the_lease()` below settles it with a lease row in the
+     shared database: exactly one process at a time holds the right to poll,
+     and the new one waits for the old one to hand it back (or for it to
+     expire) rather than fighting it.
 
   2. **Everything the bot was in the middle of is forgotten.** user_data and
      every ConversationHandler state live in that process's memory and go
@@ -48,7 +49,10 @@ import hashlib
 import logging
 import os
 import signal
+import secrets
+import socket
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -77,8 +81,8 @@ ENABLED = os.environ.get("DEPLOY_SAFETY", "on").lower() not in ("off", "0", "fal
 # With this lease in place, the old container can keep serving while the new
 # one builds and boots. The new one blocks HERE, in post_init -- before its
 # first getUpdates, before its first heartbeat -- until Railway stops the old
-# one and Postgres releases its session-level lock. The gap becomes the drain
-# alone, which is seconds.
+# one and the old one hands the lease back. The gap becomes the drain alone,
+# which is seconds.
 #
 # The wait therefore has to outlast the whole handover: the overlap window
 # (30s) plus a worst-case drain (drainingSeconds, 120s), with room to spare.
@@ -106,7 +110,10 @@ PERSIST_SECONDS = float(os.environ.get("DEPLOY_PERSIST_SECONDS", "180"))
 _app = None
 _draining = False
 _drain_started: float | None = None
-_lease_conn = None
+_lease_task: "asyncio.Task | None" = None
+_lease_table_ready = False
+_lease_lock = threading.Lock()
+_lease_handed_back = False
 _bot_id: str | None = None
 
 
@@ -117,47 +124,143 @@ _bot_id: str | None = None
 # degraded mode, it is a coin flip per update: 409 Conflict to whichever
 # asked second, and updates split unpredictably between the two.
 #
-# A Postgres *session*-level advisory lock is the right shape for this. It is
-# free (no table, no rows, no cleanup), it is held by a connection rather
-# than by a row anybody has to remember to delete, and -- the part that
-# matters here -- the server drops it the moment that connection goes away,
-# including when the process holding it was killed rather than asked. So a
-# hard-killed old container releases it too, just less promptly.
+# The lease is a row in the family schema saying which process may poll for
+# a bot, and until when. Its holder renews it every LEASE_RENEW_SECONDS and
+# deletes it on the way out; a holder that dies without deleting it (an OOM
+# kill, or SIGKILL at the end of the drain) loses it when it expires.
 #
-# It needs its own connection, deliberately not one from db.py's pool: a
-# pooled connection is handed back after every query, and a session lock
-# released with it.
+# Up to 2.1.4 the lease was a session-level advisory lock, which the server
+# drops when the connection that took it closes. Behind a connection pooler
+# that connection is the pooler's, not the bot's: it outlives the bot, keeps
+# the lock, and is handed to whoever connects next, the new container
+# included. Production showed exactly that on 2026-11-10 (Supabase's
+# Supavisor): the five locks sat on pooler connections opened on 2026-10-23,
+# and each new container "got" its lease within two seconds, while the old
+# one was still polling. A row with an expiry works through any pooler,
+# because every statement stands on its own.
 
-def _lease_key(bot_id: str) -> int:
-    """A stable 64-bit key per bot. Signed, because that is what
-    pg_advisory_lock takes."""
-    digest = hashlib.blake2b(bot_id.encode("utf-8"), digest_size=8).digest()
+LEASE_TABLE = "poll_lease"
+
+# How long a lease lasts unless it is renewed. This is what a holder that
+# died without handing the lease back costs whoever comes next: up to this
+# long before it may poll. Renewed three times a period, so one slow round
+# trip to the database does not lose it.
+LEASE_TTL_SECONDS = float(os.environ.get("DEPLOY_LEASE_TTL_SECONDS", "30"))
+LEASE_RENEW_SECONDS = LEASE_TTL_SECONDS / 3
+
+# Who holds a lease: this machine, this process, and a token of its own. The
+# token tells two lives of one process id apart -- the first process in a
+# container usually gets the same number every time it starts.
+_HOST = socket.gethostname()
+_HOLDER = f"{_HOST}:{os.getpid()}:{secrets.token_hex(4)}"
+
+
+def _lock_key(name: str) -> int:
+    """A stable signed 64-bit key, which is what pg_advisory_xact_lock takes."""
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big", signed=True)
 
 
-def _try_lease(bot_id: str) -> bool:
-    global _lease_conn
-    import psycopg
-
-    if _lease_conn is None or _lease_conn.closed:
-        # A connect timeout, so that a database that does not answer costs one
-        # attempt's wait and not the operating system's several minutes: the
-        # lease's own deadline is only looked at between attempts.
-        #
-        # The same keepalives and unacknowledged-data limit as db.py's pools
-        # (a lease on a dead network path should be found dead in about a
-        # minute, not in the operating system's several), but deliberately NOT
-        # their statement_timeout or idle_in_transaction_session_timeout: the
-        # lease is a session-level advisory lock held by this connection, and a
-        # server that cut the connection for being idle would drop the lease
-        # with it. Nothing else runs on this connection but a one-row SELECT.
-        _lease_conn = psycopg.connect(
-            db.DATABASE_URL, autocommit=True, connect_timeout=15,
-            keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
-            tcp_user_timeout=30000,
+def init_lease_table() -> None:
+    """Blocking. Every bot starts at once, so on the first start they would all
+    create the table together, and two CREATE TABLE IF NOT EXISTS that meet can
+    still fail. A transaction-level advisory lock lines them up: unlike the
+    session-level kind it ends with its transaction, and a pooler keeps a
+    transaction on one connection from start to finish."""
+    global _lease_table_ready
+    schema = _family_schema()
+    with db.pooled() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_lock_key(f"{schema}.{LEASE_TABLE}"),))
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.{LEASE_TABLE} (
+                bot_id     TEXT PRIMARY KEY,
+                holder     TEXT NOT NULL,
+                taken_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+            """
         )
-    cur = _lease_conn.execute("SELECT pg_try_advisory_lock(%s)", (_lease_key(bot_id),))
-    return bool(cur.fetchone()[0])
+    _lease_table_ready = True
+
+
+def _take(bot_id: str) -> bool:
+    """Take the lease if it is free or has expired, or renew it if it is ours.
+    True if it is ours now. Blocking."""
+    schema = _family_schema()
+    with db.pooled() as conn:
+        row = conn.execute(
+            f"""
+            INSERT INTO {schema}.{LEASE_TABLE} AS lease (bot_id, holder, taken_at, expires_at)
+            VALUES (%(bot)s, %(me)s, now(), now() + make_interval(secs => %(ttl)s))
+            ON CONFLICT (bot_id) DO UPDATE
+               SET holder = EXCLUDED.holder,
+                   taken_at = CASE WHEN lease.holder = EXCLUDED.holder
+                                   THEN lease.taken_at ELSE now() END,
+                   expires_at = EXCLUDED.expires_at
+             WHERE lease.holder = EXCLUDED.holder OR lease.expires_at <= now()
+            RETURNING holder
+            """,
+            {"bot": bot_id, "me": _HOLDER, "ttl": LEASE_TTL_SECONDS},
+        ).fetchone()
+    return row is not None
+
+
+def _gone(holder: str) -> bool:
+    """A holder on this machine that is no longer running: a process that
+    crashed and was started again in the same container. Whoever comes next
+    need not wait out its expiry."""
+    host, _, rest = holder.partition(":")
+    pid, _, _token = rest.partition(":")
+    if host != _HOST or holder == _HOLDER or not pid.isdigit():
+        return False
+    if int(pid) == os.getpid():
+        # The same number with another token: an earlier life of this process.
+        return True
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        # There, just not ours to signal: running.
+        return False
+    return False
+
+
+def _take_from_the_gone(bot_id: str) -> bool:
+    schema = _family_schema()
+    with db.pooled() as conn:
+        row = conn.execute(
+            f"SELECT holder FROM {schema}.{LEASE_TABLE} WHERE bot_id = %s AND expires_at > now()",
+            (bot_id,),
+        ).fetchone()
+        if row is None or not _gone(row[0]):
+            return False
+        row = conn.execute(
+            f"""
+            UPDATE {schema}.{LEASE_TABLE}
+               SET holder = %(me)s, taken_at = now(),
+                   expires_at = now() + make_interval(secs => %(ttl)s)
+             WHERE bot_id = %(bot)s AND holder = %(gone)s
+            RETURNING holder
+            """,
+            {"bot": bot_id, "me": _HOLDER, "ttl": LEASE_TTL_SECONDS, "gone": row[0]},
+        ).fetchone()
+    return row is not None
+
+
+def _try_lease(bot_id: str) -> bool:
+    """One attempt at taking (or renewing) the lease. Blocking.
+
+    Under a lock, so that a renewal already on its way cannot put the row back
+    after release_lease() has deleted it."""
+    with _lease_lock:
+        if _lease_handed_back:
+            return False
+        if not _lease_table_ready:
+            init_lease_table()
+        return _take(bot_id) or _take_from_the_gone(bot_id)
 
 
 async def hold_the_lease(bot_id: str) -> bool:
@@ -167,47 +270,86 @@ async def hold_the_lease(bot_id: str) -> bool:
     start anyway -- if it could not be had: an unreachable database must not
     be able to stop a bot from serving its users, and a lease nobody can
     check is no worse than the no-lease-at-all this family ran with before.
+    Either way it then minds the lease in the background, renewing it or
+    taking it once it is free, so that the next container waits for this one.
     """
+    global _lease_task, _lease_handed_back
     if not ENABLED:
         return False
+    _lease_handed_back = False
     deadline = time.monotonic() + LEASE_WAIT_SECONDS
     complained = False
+    ours = False
     while True:
         try:
             if await asyncio.to_thread(_try_lease, bot_id):
                 if complained:
                     logger.info("Poll lease acquired -- the previous instance has stopped.")
-                return True
+                ours = True
+                break
         except Exception as exc:
             logger.warning("Could not check the poll lease (%s) -- starting without it.", exc)
-            return False
+            break
         if time.monotonic() >= deadline:
             logger.warning(
                 "Another instance of %s still holds the poll lease after %.0fs. Starting "
                 "anyway -- expect 409 Conflict from Telegram until it stops.",
                 bot_id, LEASE_WAIT_SECONDS,
             )
-            return False
+            break
         if not complained:
             logger.info("Waiting for the previous instance of %s to let go of the poll lease...", bot_id)
             complained = True
         await asyncio.sleep(1.0)
+    if _lease_task is None or _lease_task.done():
+        _lease_task = asyncio.get_running_loop().create_task(_mind_the_lease(bot_id, ours))
+    return ours
+
+
+async def _mind_the_lease(bot_id: str, ours: bool) -> None:
+    """For as long as this process runs: renew the lease, or take it once it
+    is free."""
+    failing = False
+    while True:
+        await asyncio.sleep(LEASE_RENEW_SECONDS)
+        try:
+            now_ours = await asyncio.to_thread(_try_lease, bot_id)
+        except Exception as exc:
+            if not failing:
+                logger.warning("Could not renew the poll lease (%s); trying again.", exc)
+            failing = True
+            continue
+        failing = False
+        if ours and not now_ours:
+            logger.warning(
+                "Another instance of %s has taken the poll lease: this one went %.0fs without "
+                "renewing it. Expect 409 Conflict from Telegram until one of them stops.",
+                bot_id, LEASE_TTL_SECONDS,
+            )
+        elif now_ours and not ours:
+            logger.info("Poll lease for %s taken -- the instance that held it has stopped.", bot_id)
+        ours = now_ours
 
 
 def release_lease() -> None:
-    global _lease_conn
-    if _lease_conn is None:
-        return
-    try:
-        if not _lease_conn.closed:
-            _lease_conn.execute("SELECT pg_advisory_unlock(%s)", (_lease_key(_bot_id or ""),))
-    except Exception:
-        logger.debug("Could not release the poll lease; closing the connection does it too", exc_info=True)
-    try:
-        _lease_conn.close()
-    except Exception:
-        pass
-    _lease_conn = None
+    """Hand the lease back on the way out, once polling has stopped, so the
+    next container need not wait for it to expire. Blocking."""
+    global _lease_task, _lease_handed_back
+    if _lease_task is not None:
+        _lease_task.cancel()
+        _lease_task = None
+    with _lease_lock:
+        _lease_handed_back = True
+        if not ENABLED or _bot_id is None or not _lease_table_ready:
+            return
+        try:
+            with db.pooled() as conn:
+                conn.execute(
+                    f"DELETE FROM {_family_schema()}.{LEASE_TABLE} WHERE bot_id = %s AND holder = %s",
+                    (_bot_id, _HOLDER),
+                )
+        except Exception:
+            logger.debug("Could not hand the poll lease back; it expires on its own", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
