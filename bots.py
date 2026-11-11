@@ -7000,6 +7000,7 @@ COMMAND_SINCE = {
     "crashtest": "1.2.3",
     "gift": "2.1.1",
     "softstop": "2.1.6",
+    "softstopbot": "2.1.6",
 }
 
 def _version_key(version: str | None):
@@ -7067,7 +7068,7 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
         return
 
-    if command in ("softstop", "restart"):
+    if command in ("softstop", "softstopbot", "restart"):
         args = [arg for arg in args if not arg.replace(".", "", 1).isdigit()] + [str(int(time_module.time()))]
     command_id = await asyncio.to_thread(
         db.queue_command, bot["id"], command, " ".join(args),
@@ -7076,47 +7077,134 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     await update.effective_message.reply_text(f"→ {bot['name']} · {command} — queued as #{command_id}")
 
+SERVICE_ASK_SECONDS = 120
+_SERVICE_ASKS: "OrderedDict[str, dict]" = OrderedDict()
+
+async def _service_of(update: Update, bot_word: str):
+    """(bot, the ids of every bot in its service) -- or None, having said why not."""
+    bot = resolve_bot(bot_word)
+    if bot is None or bot["id"] == BOT_NAME:
+        await update.message.reply_text(
+            "That one is me -- stop or restart me from the host." if bot else
+            f"No such bot: {bot_word}. Known: {bot_list_hint()}")
+        return None
+    try:
+        beats = {row["bot_id"]: row for row in await asyncio.to_thread(db.all_heartbeats)}
+    except Exception as exc:
+        await update.message.reply_text(f"Could not read the heartbeats, so nothing was asked: {exc}")
+        return None
+    beat = beats.get(bot["id"])
+    if beat is None or beat["seconds_ago"] > DOWN_AFTER_SECONDS:
+        await update.message.reply_text(f"{bot['name']} is not running, so there is nothing to do.")
+        return None
+    host = beat.get("host")
+    together = sorted(row["bot_id"] for row in beats.values()
+                      if host and row.get("host") == host and row["seconds_ago"] <= DOWN_AFTER_SECONDS)
+    together = together or [bot["id"]]
+    mine = beats.get(BOT_NAME) or {}
+    if BOT_NAME in together or (host and mine.get("host") == host):
+        await update.message.reply_text(
+            f"{bot['name']} runs in the same service as me, so this would take me down too. "
+            "Do it from the host.")
+        return None
+    return bot, together
+
+def _names(bot_ids) -> str:
+    return ", ".join((resolve_bot(bot_id) or {}).get("name", bot_id) for bot_id in bot_ids)
+
+def _ask_service(kind: str, bot: dict, together: list, force: bool = False) -> str:
+    nonce = secrets.token_hex(4)
+    _SERVICE_ASKS[nonce] = {"kind": kind, "bot": bot["id"], "together": together, "force": force,
+                            "at": time_module.monotonic()}
+    while len(_SERVICE_ASKS) > 32:
+        _SERVICE_ASKS.popitem(last=False)
+    return nonce
+
 async def shutdown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/shutdown <bot> -- stop the one service that bot runs in, and keep it down, only if nobody is using it."""
+    """/shutdown <bot> -- stop that bot, or the whole service it runs in, after asking which; only if nobody is using it."""
     if not await guard(update, context):
         return
     if len(context.args) != 1:
         await update.message.reply_text(
             "Usage: /shutdown <bot>\n"
-            "Stops the service that bot runs in -- every bot in it, and only that service -- once nobody "
-            "is using any of them; otherwise it refuses and says why. The service then stays down until "
-            "it is deployed or redeployed. /restart <bot> is the same check, then a start again.\n"
+            "Asks first: that bot alone, or the whole service it runs in. Either way it stops only if "
+            "nobody is using it; otherwise you get the reasons and nothing stops. A stopped bot stays "
+            f"down until its service next starts.\nKnown: {bot_list_hint()}")
+        return
+    found = await _service_of(update, context.args[0])
+    if found is None:
+        return
+    bot, together = found
+    nonce = _ask_service("shutdown", bot, together)
+    others = [bot_id for bot_id in together if bot_id != bot["id"]]
+    if others:
+        text = (f"⏹ <b>{html.escape(bot['name'])}</b> shares one service with "
+                f"{html.escape(_names(others))}.\n\n"
+                f"<b>Only {html.escape(bot['name'])}</b>: the others carry on; it comes back when the "
+                f"service next starts.\n<b>All {len(together)}</b>: the whole service stops and stays down "
+                "until it is deployed or redeployed.\n\n"
+                "Either way it happens only if nobody is using them.")
+        rows = [[InlineKeyboardButton(f"Stop only {bot['name']}", callback_data=f"svc:{nonce}:one")],
+                [InlineKeyboardButton(f"Stop all {len(together)}", callback_data=f"svc:{nonce}:all")],
+                [InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    else:
+        text = (f"⏹ Stop <b>{html.escape(bot['name'])}</b>? It is alone in its service, which stops and "
+                "stays down until it is deployed or redeployed -- only if nobody is using it.")
+        rows = [[InlineKeyboardButton(f"Stop {bot['name']}", callback_data=f"svc:{nonce}:all"),
+                 InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/restart <bot> [force] -- restart the service that bot runs in, after asking; force skips the check of who is using it."""
+    if not await guard(update, context):
+        return
+    args = [arg.lower() for arg in context.args]
+    force = "force" in args
+    words = [arg for arg in context.args if arg.lower() != "force"]
+    if len(words) != 1:
+        await update.message.reply_text(
+            "Usage: /restart <bot> [force]\nRestarts the service that bot runs in -- every bot in it -- "
+            "once nobody is using it; force restarts at once, whatever is running (for a stuck service).\n"
             f"Known: {bot_list_hint()}")
         return
-    bot = resolve_bot(context.args[0])
-    if bot is None or bot["id"] == BOT_NAME:
-        await update.message.reply_text(
-            "That one is me -- stop me from the host." if bot else
-            f"No such bot: {context.args[0]}. Known: {bot_list_hint()}")
+    found = await _service_of(update, words[0])
+    if found is None:
         return
-    try:
-        beats = {row["bot_id"]: row for row in await asyncio.to_thread(db.all_heartbeats)}
-    except Exception as exc:
-        await update.message.reply_text(f"Could not read the heartbeats, so nothing was asked: {exc}")
+    bot, together = found
+    nonce = _ask_service("restart", bot, together, force)
+    how = ("<b>at once</b>, whatever is running -- anybody mid-something loses it" if force
+           else "once nobody is using it; otherwise you get the reasons and nothing restarts")
+    text = (f"🔄 Restart the service of <b>{html.escape(bot['name'])}</b>? Every bot in it restarts: "
+            f"{html.escape(_names(together))}.\nIt restarts {how}.")
+    label = f"Restart all {len(together)}" + (" now" if force else "")
+    rows = [[InlineKeyboardButton(label, callback_data=f"svc:{nonce}:all"),
+             InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+
+async def service_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap under /shutdown or /restart: queue what was chosen, once."""
+    if not await guard(update, context):
         return
-    beat = beats.get(bot["id"])
-    if beat is None or beat["seconds_ago"] > DOWN_AFTER_SECONDS:
-        await update.message.reply_text(f"{bot['name']} is not running, so there is nothing to stop.")
+    query = update.callback_query
+    _, nonce, choice = (query.data.split(":") + ["", ""])[:3]
+    ask = _SERVICE_ASKS.pop(nonce, None)
+    await query.answer()
+    if ask is None or time_module.monotonic() - ask["at"] > SERVICE_ASK_SECONDS:
+        await edit_in_place(query.message, context.bot, "That question has expired -- nothing was asked. "
+                                                        "Send the command again.")
         return
-    host = beat.get("host")
-    together = sorted(row["bot_id"] for row in beats.values()
-                      if host and row.get("host") == host and row["seconds_ago"] <= DOWN_AFTER_SECONDS)
-    mine = beats.get(BOT_NAME) or {}
-    if BOT_NAME in together or (host and mine.get("host") == host):
-        await update.message.reply_text(
-            f"{bot['name']} runs in the same service as me, so stopping it would stop me too. "
-            "Stop that service from the host.")
+    if choice not in ("one", "all"):
+        await edit_in_place(query.message, context.bot, "Cancelled -- nothing was asked.")
         return
-    names = ", ".join((resolve_bot(bot_id) or {}).get("name", bot_id) for bot_id in together) or bot["name"]
-    await update.message.reply_text(
-        f"⏹ Asking {html.escape(names)} (one service, {html.escape(host or '?')}) to stop once nobody is "
-        "using it. The answer follows.", parse_mode=ParseMode.HTML)
-    await _dispatch(update, context, bot, "softstop", [])
+    bot = resolve_bot(ask["bot"])
+    if ask["kind"] == "restart":
+        command, args, chosen = "restart", (["force"] if ask["force"] else []), f"restart {_names(ask['together'])}"
+    elif choice == "one":
+        command, args, chosen = "softstopbot", [], f"stop only {bot['name']}"
+    else:
+        command, args, chosen = "softstop", [], f"stop {_names(ask['together'])}"
+    await edit_in_place(query.message, context.bot, f"Asked: {chosen}. The answer follows.")
+    await _dispatch(update, context, bot, command, args)
 
 async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/run <bot> <command> [args] -- the general form."""
@@ -8756,11 +8844,11 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 <b>Doing something to a bot</b>
 /run &lt;bot&gt; &lt;command&gt; [args] — the general form; run it bare for the list,
     which now includes the commands each bot registers for itself
-/shutdown &lt;bot&gt; — stop the service it runs in (only that one), once nobody
-    is using it; refused, with the reason, while anybody is. It stays down
-    until a deploy or a Redeploy on the host
-/restart &lt;bot&gt; — the same check, then it starts again; <code>/restart &lt;bot&gt; force</code>
-    restarts at once whatever is running (for a stuck service)
+/shutdown &lt;bot&gt; — asks: that bot alone, or the whole service it runs in;
+    stops only when nobody is using it (refused, with the reasons, while
+    anybody is). A stopped service stays down until a deploy or a Redeploy
+/restart &lt;bot&gt; [force] — asks, then restarts its whole service once nobody is
+    using it; force restarts at once whatever is running (for a stuck service)
 /pause [bot|all] [minutes] — stop them taking work an update would lose;
     whoever asks is told to come back, and written down
 /warn [bot|all] — tell whoever is mid-something that it is about to reset
@@ -9702,7 +9790,7 @@ def main():
     app.add_handler(CommandHandler("problemlog", _log_shortcut("problemlog")))
     app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|problems]")))
     app.add_handler(CommandHandler("dbdump", _shortcut("dbdump", 1, "Usage: /dbdump <bot> — or /backup for everything")))
-    app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot> [force]")))
+    app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(CommandHandler("shutdown", shutdown_command))
     app.add_handler(CommandHandler("whois", _shortcut("whois", 2, "Usage: /whois <bot> <user_id>")))
     app.add_handler(CommandHandler("say", _shortcut("message", 3, "Usage: /say <bot> <user_id> <text>")))
@@ -9723,6 +9811,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
     app.add_handler(CallbackQueryHandler(help_page_button, pattern=r"^helpdet:[a-z]{1,20}$"))
     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
+    app.add_handler(CallbackQueryHandler(service_button, pattern=r"^svc:"))
     app.add_handler(CallbackQueryHandler(gift_button, pattern=r"^gift:"))
     app.add_handler(CallbackQueryHandler(promo_button, pattern=PROMO_BUTTON_PATTERN))
     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))

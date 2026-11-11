@@ -1614,6 +1614,11 @@ async def _cmd_softstop(context, args):
     issued = args[0] if args else None
     return await lifecycle.soft_stop(0, issued), None, None
 
+async def _cmd_softstopbot(context, args):
+    """Stop only this bot, if nobody is using it; the rest of its service carries on."""
+    issued = args[0] if args else None
+    return await lifecycle.soft_stop_bot(issued), None, None
+
 async def _cmd_crashtest(context, args):
     """Deliberately raise inside this bot, so the whole crash path can be checked end to end from ManagerBot without waiting for a real bug."""
     app = getattr(context, "application", None)
@@ -2101,6 +2106,7 @@ COMMANDS = {
     "logs": _cmd_logs,
     "restart": _cmd_restart,
     "softstop": _cmd_softstop,
+    "softstopbot": _cmd_softstopbot,
     "crashtest": _cmd_crashtest,
     "broadcast": _cmd_broadcast,
     "pause": _cmd_pause,
@@ -2121,6 +2127,7 @@ COMMAND_HELP = {
     "logs": "logs [n] [bot|problems] -- tail errors.log, bot.log with 'bot', problems.log with 'problems'",
     "restart": "restart that bot's process (its whole service) once nobody is using it; 'restart force' does it at once",
     "softstop": "stop that bot's process (its whole service) and stay down, only if nobody is using it",
+    "softstopbot": "stop only that bot, if nobody is using it; the rest of its service carries on",
     "crashtest": "raise on purpose, to check the crash alert still works",
     "broadcast": "broadcast [--active] <text> -- one message as that bot; --active aims it at recent users only",
     "pause": "pause [minutes] -- decline new long work and say why",
@@ -3365,10 +3372,11 @@ def usage_here() -> "list[str]":
     return reasons
 
 def _peers() -> list:
-    """The lifecycle of every bot in this process (each bot has its own copy of this module)."""
+    """The lifecycle of every bot still running in this process (each bot has its own copy of this module); a bot stopped on its own is no longer one of them."""
     found = [module for name, module in list(sys.modules.items())
              if (name == "lifecycle" or name.endswith(".lifecycle"))
-             and getattr(module, "_app", None) is not None and hasattr(module, "usage_here")]
+             and getattr(module, "_app", None) is not None and hasattr(module, "usage_here")
+             and getattr(module._app, "running", True) is not False]
     me = sys.modules.get(__name__)
     if me is not None and me not in found:
         found.append(me)
@@ -3388,7 +3396,7 @@ def _set_note(key: str, value: str) -> None:
         conn.commit()
 
 def _running_bus_commands(bot_ids: list) -> "list[tuple[str, str, float]]":
-    """(bot, command, seconds running) for family commands still running on these bots, apart from stops and restarts."""
+    """(bot, command, seconds running) for family commands still running on these bots, apart from stops and restarts (the one asking among them)."""
     import family_link
 
     with db.pooled() as conn:
@@ -3397,7 +3405,7 @@ def _running_bus_commands(bot_ids: list) -> "list[tuple[str, str, float]]":
             SELECT target_bot, command, EXTRACT(EPOCH FROM now() - claimed_at)
             FROM {family_link.FAMILY_SCHEMA}.commands
             WHERE status = 'running' AND target_bot = ANY(%s)
-              AND command NOT IN ('softstop', 'restart')
+              AND command NOT IN ('softstop', 'softstopbot', 'restart')
               AND claimed_at > now() - interval '1 hour'
             """,
             (list(bot_ids),),
@@ -3470,6 +3478,50 @@ async def soft_stop(exit_code: int, issued: "str | None" = None) -> str:
                 f"{STOP_DELAY_SECONDS:.0f}s; the host starts it again.")
     return (f"Nobody is using it. Stopping {', '.join(names)} (one service) in {STOP_DELAY_SECONDS:.0f}s. "
             f"It stays down until the host starts it again (a deploy, or Redeploy on the host).")
+
+async def soft_stop_bot(issued: "str | None" = None) -> str:
+    """Stop only this bot, if nobody is using it; the other bots of its process carry on. It comes back when the process next starts."""
+    global _closing, _stop_requested
+    stale = _issued_too_long_ago(issued)
+    if stale:
+        return stale
+    name = str(_bot_id)
+    if _app is None:
+        return f"Not stopping {name}: it is not running yet."
+    if _stop_requested or _draining:
+        return "Already stopping."
+    _closing = True
+    try:
+        reasons = usage_here()
+        running = await asyncio.to_thread(_running_bus_commands, [name])
+    except Exception as exc:
+        _closing = False
+        return f"Not stopping {name}: could not check whether anybody is using it ({type(exc).__name__}: {exc})."
+    reasons += [f"the bus command '{command}' running for {_minutes(seconds)}" for _, command, seconds in running]
+    if reasons:
+        _closing = False
+        return (f"Not stopping {name} -- in use: " + "; ".join(reasons)
+                + ". It stays open. Ask again once it is quiet.")
+    _stop_requested = True
+    try:
+        await asyncio.to_thread(_set_note, STOPPED_NOTE_PREFIX + name, datetime.now(timezone.utc).isoformat())
+    except Exception:
+        logger.debug("Could not leave the stopped-on-purpose note", exc_info=True)
+    others = sorted(str(p._bot_id) for p in _peers() if p is not sys.modules.get(__name__))
+    logger.warning("Soft stop of %s alone: nobody is using it -- stopping in %.0fs.", name, STOP_DELAY_SECONDS)
+    asyncio.get_running_loop().call_later(STOP_DELAY_SECONDS, _stop_this_bot)
+    carry_on = f"; {', '.join(others)} carry on" if others else ""
+    return (f"Nobody is using {name}. Stopping it alone in {STOP_DELAY_SECONDS:.0f}s{carry_on}. "
+            f"It comes back when its service next starts (a /restart, a deploy, or Redeploy on the host).")
+
+def _stop_this_bot() -> None:
+    app = _app
+    if app is None:
+        return
+    try:
+        app.stop_running()
+    except RuntimeError:
+        logger.warning("Could not stop %s alone: it had not finished starting.", _bot_id)
 
 # ─── module: live_message ────────────────────────────────────────────────────
 """One bot message that keeps evolving -- for as long as it is still the last thing in the chat."""
