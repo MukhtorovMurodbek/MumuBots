@@ -1516,7 +1516,7 @@ def main():
         )
     app = builder.build()
 
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
 
@@ -2344,11 +2344,13 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
         status = await LiveMessage.reply_to(msg, download_card(lang, 0, 0, 0))
     path = _new_upload_path(update.effective_user.id, ext)
     try:
-        if declared_size > big_files.BOT_API_DOWNLOAD_BYTES and not LOCAL_BOT_API_URL:
-            await _download_big(context, msg, path, declared_size, status, lang)
-        else:
+        # A file on its way in is work in progress: a soft stop waits for it (lifecycle.usage_here).
+        async with lifecycle.busy(msg.chat_id, i18n.t(lang, "restarting_send_again")):
+            if declared_size > big_files.BOT_API_DOWNLOAD_BYTES and not LOCAL_BOT_API_URL:
+                await _download_big(context, msg, path, declared_size, status, lang)
+            else:
 
-            await _download_bot_api(context, file_obj, path, declared_size, status, lang)
+                await _download_bot_api(context, file_obj, path, declared_size, status, lang)
     except big_files.Unavailable as exc:
 
         _unlink(path)
@@ -3166,7 +3168,8 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
+    lifecycle.add_work_source("conversion(s)", lambda: len(jobs._jobs))
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
 
@@ -4961,7 +4964,7 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
 
@@ -6398,7 +6401,7 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
 
@@ -6996,6 +6999,7 @@ COMMAND_SINCE = {
     "stars": "1.2.3",
     "crashtest": "1.2.3",
     "gift": "2.1.1",
+    "softstop": "2.1.6",
 }
 
 def _version_key(version: str | None):
@@ -7063,12 +7067,56 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
         return
 
+    if command in ("softstop", "restart"):
+        args = [arg for arg in args if not arg.replace(".", "", 1).isdigit()] + [str(int(time_module.time()))]
     command_id = await asyncio.to_thread(
         db.queue_command, bot["id"], command, " ".join(args),
         update.effective_user.id, update.effective_chat.id,
     )
 
     await update.effective_message.reply_text(f"→ {bot['name']} · {command} — queued as #{command_id}")
+
+async def shutdown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/shutdown <bot> -- stop the one service that bot runs in, and keep it down, only if nobody is using it."""
+    if not await guard(update, context):
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: /shutdown <bot>\n"
+            "Stops the service that bot runs in -- every bot in it, and only that service -- once nobody "
+            "is using any of them; otherwise it refuses and says why. The service then stays down until "
+            "it is deployed or redeployed. /restart <bot> is the same check, then a start again.\n"
+            f"Known: {bot_list_hint()}")
+        return
+    bot = resolve_bot(context.args[0])
+    if bot is None or bot["id"] == BOT_NAME:
+        await update.message.reply_text(
+            "That one is me -- stop me from the host." if bot else
+            f"No such bot: {context.args[0]}. Known: {bot_list_hint()}")
+        return
+    try:
+        beats = {row["bot_id"]: row for row in await asyncio.to_thread(db.all_heartbeats)}
+    except Exception as exc:
+        await update.message.reply_text(f"Could not read the heartbeats, so nothing was asked: {exc}")
+        return
+    beat = beats.get(bot["id"])
+    if beat is None or beat["seconds_ago"] > DOWN_AFTER_SECONDS:
+        await update.message.reply_text(f"{bot['name']} is not running, so there is nothing to stop.")
+        return
+    host = beat.get("host")
+    together = sorted(row["bot_id"] for row in beats.values()
+                      if host and row.get("host") == host and row["seconds_ago"] <= DOWN_AFTER_SECONDS)
+    mine = beats.get(BOT_NAME) or {}
+    if BOT_NAME in together or (host and mine.get("host") == host):
+        await update.message.reply_text(
+            f"{bot['name']} runs in the same service as me, so stopping it would stop me too. "
+            "Stop that service from the host.")
+        return
+    names = ", ".join((resolve_bot(bot_id) or {}).get("name", bot_id) for bot_id in together) or bot["name"]
+    await update.message.reply_text(
+        f"⏹ Asking {html.escape(names)} (one service, {html.escape(host or '?')}) to stop once nobody is "
+        "using it. The answer follows.", parse_mode=ParseMode.HTML)
+    await _dispatch(update, context, bot, "softstop", [])
 
 async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/run <bot> <command> [args] -- the general form."""
@@ -8439,6 +8487,13 @@ async def _is_redeploying(bot_id: str) -> bool:
     age = (datetime.now(timezone.utc) - stamped).total_seconds()
     return 0 <= age <= REDEPLOY_GRACE_SECONDS
 
+async def _stopped_on_purpose(bot_id: str) -> bool:
+    """True when the bot's last words were a soft shutdown (its note is cleared when it starts again)."""
+    try:
+        return bool(await asyncio.to_thread(db.get_setting, lifecycle.STOPPED_NOTE_PREFIX + bot_id))
+    except Exception:
+        return False
+
 async def _clear_redeploy_note(bot_id: str) -> None:
     try:
         await asyncio.to_thread(db.set_setting, lifecycle.RESTART_NOTE_PREFIX + bot_id, "")
@@ -8497,6 +8552,10 @@ async def watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"✅ <b>{bot['name']}</b> is back up (started {uptime} ago, "
                 f"on {html.escape(beat['host'] or '?')})."
             )
+        elif await _stopped_on_purpose(bot["id"]):
+            await asyncio.to_thread(db.set_known_state, bot["id"], False)
+            await notify_owner(context, f"⏹ <b>{bot['name']}</b> stopped as asked (soft shutdown). "
+                                        "It stays down until it is deployed again.")
         elif await _is_redeploying(bot["id"]):
 
             logger.info("%s is stale but was shut down on purpose -- redeploying.", bot["id"])
@@ -8697,7 +8756,11 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 <b>Doing something to a bot</b>
 /run &lt;bot&gt; &lt;command&gt; [args] — the general form; run it bare for the list,
     which now includes the commands each bot registers for itself
-/restart &lt;bot&gt; — restart its process
+/shutdown &lt;bot&gt; — stop the service it runs in (only that one), once nobody
+    is using it; refused, with the reason, while anybody is. It stays down
+    until a deploy or a Redeploy on the host
+/restart &lt;bot&gt; — the same check, then it starts again; <code>/restart &lt;bot&gt; force</code>
+    restarts at once whatever is running (for a stuck service)
 /pause [bot|all] [minutes] — stop them taking work an update would lose;
     whoever asks is told to come back, and written down
 /warn [bot|all] — tell whoever is mid-something that it is about to reset
@@ -9499,7 +9562,8 @@ BOT_COMMANDS = [
     BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
     BotCommand("buttons", "Button taps per bot, counts only"),
     BotCommand("run", "Run a command inside another bot"),
-    BotCommand("restart", "Restart a bot's process"),
+    BotCommand("restart", "Restart a bot's service once nobody is using it"),
+    BotCommand("shutdown", "Stop a bot's service once nobody is using it"),
     BotCommand("pause", "Stop the bots taking work an update would lose"),
     BotCommand("warn", "Tell whoever is mid-something that it will reset"),
     BotCommand("resume", "Reopen, and tell everyone who was waiting"),
@@ -9603,7 +9667,7 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
 
     app.add_handler(TypeHandler(Update, track_activity), group=-3)
@@ -9638,7 +9702,8 @@ def main():
     app.add_handler(CommandHandler("problemlog", _log_shortcut("problemlog")))
     app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|problems]")))
     app.add_handler(CommandHandler("dbdump", _shortcut("dbdump", 1, "Usage: /dbdump <bot> — or /backup for everything")))
-    app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot>")))
+    app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot> [force]")))
+    app.add_handler(CommandHandler("shutdown", shutdown_command))
     app.add_handler(CommandHandler("whois", _shortcut("whois", 2, "Usage: /whois <bot> <user_id>")))
     app.add_handler(CommandHandler("say", _shortcut("message", 3, "Usage: /say <bot> <user_id> <text>")))
 
