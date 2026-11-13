@@ -2087,8 +2087,11 @@ def reset_user_state(context, keep: dict | None = None) -> None:
     release_force_reply() gets a chance to read the prompt id out of it,
     which quietly cost StickerBot the ability to take its own donation
     prompt back down. Keeping the key here rather than making every caller
-    remember the ordering is the version that stays correct."""
-    preserved = {k: context.user_data[k] for k in (FORCE_REPLY_KEY,) if k in context.user_data}
+    remember the ordering is the version that stays correct.
+
+    _last_seen stays too: it says the person is here, and both the soft stop's
+    count (lifecycle.usage_here) and the idle prune (_prune_user_data) read it."""
+    preserved = {k: context.user_data[k] for k in (FORCE_REPLY_KEY, "_last_seen") if k in context.user_data}
     context.user_data.clear()
     context.user_data.update(preserved)
     if keep:
@@ -2184,10 +2187,13 @@ def build_cancel_text(lang: str, stopped: list[str]) -> str:
 
 
 async def finish_cancel(update, context, lang: str, stopped: list[str],
-                        stored_only: bool = False) -> None:
+                        stored_only: bool = False, keyboard=None) -> None:
     """The last two steps of every bot's /cancel: release the reply lock and
     say what was stopped. ReplyKeyboardRemove is what actually unpins the
     reply box on the client when the prompt itself was too old to delete.
+    `keyboard` goes up instead of the removal where a bot keeps a reply
+    keyboard of its own (StickerBot's pack buttons, which a bare removal took
+    away).
 
     `stored_only` turns off release_force_reply's second route -- "delete
     whatever this /cancel is a reply to" -- for bots where that guess is
@@ -2214,11 +2220,11 @@ async def finish_cancel(update, context, lang: str, stopped: list[str],
         return
     await message.reply_text(
         build_cancel_text(lang, stopped),
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=keyboard or ReplyKeyboardRemove(),
     )
 
 
-async def finish_cancel_choice(update, context, lang: str, stopped: list[str]) -> None:
+async def finish_cancel_choice(update, context, lang: str, stopped: list[str], keyboard=None) -> None:
     """finish_cancel's twin for the button path.
 
     The question message becomes the report, which is both tidier than a
@@ -2248,7 +2254,7 @@ async def finish_cancel_choice(update, context, lang: str, stopped: list[str]) -
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=i18n.t(lang, "cancel_reply_box_freed"),
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=keyboard or ReplyKeyboardRemove(),
         )
 
 
@@ -2868,13 +2874,58 @@ def remember_chat_lang(chat_id, lang) -> None:
         _chat_langs.popitem(last=False)
 
 
-def report_markup(lang: str, code: str, incident: str, markup=None):
-    """`markup` with a Report row added, or a keyboard holding only that row.
-    Left as it is for a problem too simple to need one (problems.SIMPLE), with
-    the buttons switched off, and for a keyboard that already has one or is a
-    reply keyboard."""
-    if (not REPORT_BUTTONS or not problems.reportable(code) or _has_report(markup)
-            or (markup is not None and not isinstance(markup, InlineKeyboardMarkup))):
+# When a fault gets the details button. Not every time: a download that timed
+# out once, or an upload Telegram refused once, is written down anyway, and
+# asking the person for more about it is noise (the owner, 2026-11-13). The
+# button comes with the problems that need the person's side of the story
+# (problems.WANTS_DETAILS), and with any other fault once it keeps happening to
+# the same chat.
+DETAILS_AFTER = int(os.environ.get("PROBLEM_DETAILS_AFTER", "3"))
+DETAILS_WINDOW_SECONDS = int(os.environ.get("PROBLEM_DETAILS_WINDOW_SECONDS", "3600"))
+_repeats: "OrderedDict[tuple, deque]" = OrderedDict()
+
+
+def offers_details(chat_id, code, count: bool = False, ahead: bool = False) -> bool:
+    """Whether this problem, in this chat, gets the details button: always for
+    problems.WANTS_DETAILS, never for one that explains itself, and for any
+    other fault from its DETAILS_AFTER-th time in this chat within
+    DETAILS_WINDOW_SECONDS. `count` records this occurrence; `ahead` asks about
+    one not counted yet."""
+    if not problems.reportable(code):
+        return False
+    if problems.wants_details(code):
+        return True
+    if chat_id is None:
+        return False
+    now = time.monotonic()
+    key = (chat_id, code)
+    seen = _repeats.get(key) or deque()
+    if count:
+        seen.append(now)
+    while seen and now - seen[0] > DETAILS_WINDOW_SECONDS:
+        seen.popleft()
+    if seen:
+        _repeats[key] = seen
+        _repeats.move_to_end(key)
+        while len(_repeats) > 4096:
+            _repeats.popitem(last=False)
+    else:
+        _repeats.pop(key, None)
+    return len(seen) + (1 if ahead else 0) >= DETAILS_AFTER
+
+
+def report_markup(lang: str, code: str, incident: str, markup=None, chat_id=None):
+    """`markup` with a details row added, or a keyboard holding only that row --
+    when offers_details says so for this chat. Left as it is with the buttons
+    switched off, and for a keyboard that already has one or is a reply
+    keyboard."""
+    if not REPORT_BUTTONS or not offers_details(chat_id, code, ahead=True):
+        return markup
+    return _with_details_row(lang, code, incident, markup)
+
+
+def _with_details_row(lang: str, code: str, incident: str, markup=None):
+    if _has_report(markup) or (markup is not None and not isinstance(markup, InlineKeyboardMarkup)):
         return markup
     rows = [list(row) for row in markup.inline_keyboard] if markup is not None else []
     rows.append([InlineKeyboardButton(i18n.t(lang, "report_button"),
@@ -2882,9 +2933,12 @@ def report_markup(lang: str, code: str, incident: str, markup=None):
     return InlineKeyboardMarkup(rows)
 
 
-def _with_logged_note(text: str, code: str, lang: str) -> str:
-    """The same message, with one line saying it has already been written down
-    and that nothing in what was written is about them.
+def _with_logged_note(text: str, code: str, lang: str, offered: bool = False) -> str:
+    """The same message, with one line saying an anonymous report was saved --
+    and, when a details button is under it (`offered`), that adding more is up
+    to them. A message that already carries either line (an edit of one sent
+    before) has it replaced, not doubled: the button can come or go between
+    the two.
 
     Above the code line, never below it: problems.find_code only recognises a
     code at the very end, and a note underneath it would make every one of
@@ -2895,10 +2949,12 @@ def _with_logged_note(text: str, code: str, lang: str) -> str:
     asked to decide something. "I don't recognize that command" explains
     itself and does not need a paragraph about logging under it.
     """
-    note = i18n.t(lang, "problem_logged_note")
+    note = i18n.t(lang, "problem_logged_note_optin" if offered else "problem_logged_note")
     body = problems.strip_code(text).rstrip()
-    if note in body:
-        return text
+    for known in (i18n.t(lang, "problem_logged_note_optin"), i18n.t(lang, "problem_logged_note")):
+        if body.endswith(known):
+            body = body[: -len(known)].rstrip()
+            break
     # Three short lines -- what happened, that it is saved, the code -- with no
     # blank lines between them: the owner found the longer version too long.
     return f"{body}\n{note}\n{problems.MARK}{code}"
@@ -2947,8 +3003,8 @@ def _remember_incident(chat_id, message_id, code: str, incident: str) -> None:
 
 async def note_problem(chat_id, message_id, text, kwargs: dict):
     """A message on its way out. If it ends in a problem code: log it, write it
-    down for the owner, and give it a Report button if the problem deserves
-    one. Returns (code, incident, text) -- the text possibly grown by a line
+    down for the owner, and give it a details button if the problem deserves
+    one in this chat (offers_details). Returns (code, incident, text) -- the text possibly grown by a line
     saying the problem is already recorded -- or (None, None, text) for a
     message with no code."""
     code = problems.find_code(text) if isinstance(text, str) else None
@@ -2958,7 +3014,8 @@ async def note_problem(chat_id, message_id, text, kwargs: dict):
     made = _button_incident(markup)
     known = _incidents.get((chat_id, message_id, code)) if message_id is not None else None
     incident = made or known or problems.new_incident()
-    wants_button = (made is None and REPORT_BUTTONS and problems.reportable(code)
+    offered = offers_details(chat_id, code, count=incident != known)
+    wants_button = (made is None and REPORT_BUTTONS and offered
                     and (markup is None or isinstance(markup, InlineKeyboardMarkup)))
     if wants_button or problems.reportable(code):
         lang = _chat_langs.get(chat_id)
@@ -2971,11 +3028,12 @@ async def note_problem(chat_id, message_id, text, kwargs: dict):
         lang = lang or "en"
         if wants_button:
             try:
-                kwargs["reply_markup"] = report_markup(lang, code, incident, markup)
+                kwargs["reply_markup"] = _with_details_row(lang, code, incident, markup)
             except Exception:
                 logging.getLogger(__name__).debug("Could not add a report button", exc_info=True)
         try:
-            text = _with_logged_note(text, code, lang)
+            text = _with_logged_note(text, code, lang,
+                                     offered=_has_report(kwargs.get("reply_markup")))
         except Exception:
             logging.getLogger(__name__).debug("Could not add the logged note", exc_info=True)
     if incident != known:
@@ -3004,8 +3062,8 @@ def _log_problems_to_file() -> None:
 
 
 def attach_problem_reports(application) -> None:
-    """Log every problem this bot shows, and put a Report button under the ones
-    that deserve it. Call once in main(), after the application is built.
+    """Log every problem this bot shows, and put a details button under the ones
+    that deserve it (offers_details). Call once in main(), after the application is built.
 
     Done by giving the bot object a subclass of its own class whose send, edit
     and pop-up methods look at the text and hand over. python-telegram-bot
@@ -3449,11 +3507,19 @@ USER_DATA_TTL_HOURS = int(os.environ.get("USER_DATA_TTL_HOURS", "12"))
 
 
 def _prune_user_data(application) -> int:
-    cutoff = time.time() - USER_DATA_TTL_HOURS * 3600
-    stale = [
-        user_id for user_id, data in application.user_data.items()
-        if data.get("_last_seen", 0) < cutoff
-    ]
+    """Drop what is kept for people idle for USER_DATA_TTL_HOURS. State with no
+    _last_seen at all is not "idle forever": a handler that cleared user_data
+    had just run for them (2.1.5 dropped a pack session opened a minute before
+    the hourly pass that way) -- it is stamped now and kept."""
+    now = time.time()
+    cutoff = now - USER_DATA_TTL_HOURS * 3600
+    stale = []
+    for user_id, data in application.user_data.items():
+        seen = data.get("_last_seen")
+        if seen is None:
+            data["_last_seen"] = now
+        elif seen < cutoff:
+            stale.append(user_id)
     for user_id in stale:
         application.drop_user_data(user_id)
     return len(stale)
@@ -3505,6 +3571,7 @@ async def flush_on_shutdown(application) -> None:
         await asyncio.to_thread(_flush_problems_now)
     except Exception:
         logging.getLogger(__name__).debug("Final problem flush failed", exc_info=True)
+    await asyncio.to_thread(_flush_stats_now)
     close = getattr(db, "close_pool", None)
     if close is not None:
         try:
@@ -3830,6 +3897,42 @@ def note_tap(key: str) -> None:
         pass
 
 
+# Anonymous counts for infographics (family_link.record_stats): what was done,
+# never who, never finer than a day. Written with the usage sample, like taps.
+STAT_MAX_KEYS = 300
+_stats: "dict[tuple, int]" = {}
+
+
+def note_stat(metric: str, key: str, n: int = 1) -> None:
+    """Count one thing done -- note_stat("link_site", "tiktok") -- for today's
+    anonymous totals. No I/O; never raises. Past STAT_MAX_KEYS distinct keys
+    between two flushes, a new key is counted as its metric's "other"."""
+    try:
+        item = (str(metric), str(key or "other"))
+        if item in _stats:
+            _stats[item] += n
+        elif len(_stats) < STAT_MAX_KEYS:
+            _stats[item] = n
+        else:
+            _stats[(item[0], "other")] = _stats.get((item[0], "other"), 0) + n
+    except Exception:
+        pass
+
+
+def take_stats() -> "dict[tuple, int]":
+    global _stats
+    stats, _stats = _stats, {}
+    return stats
+
+
+def _flush_stats_now(stats: "dict | None" = None) -> None:
+    stats = take_stats() if stats is None else stats
+    try:
+        family_link.record_stats(stats)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Stats not written (%s)", type(exc).__name__)
+
+
 def take_taps() -> "dict[str, int]":
     """The counts so far, and a fresh start. Called on the event loop, where
     note_tap runs, so no tap lands in the dict being written."""
@@ -4022,6 +4125,7 @@ def _sample_usage_now(taps: "dict[str, int] | None" = None) -> None:
         family_link.record_taps(taps)
     except Exception as exc:
         logging.getLogger(__name__).debug("Button taps not written (%s)", type(exc).__name__)
+    _flush_stats_now()
     try:
         _check_usage_alarms(numbers, updates, users, jobs_ok, jobs_failed)
     except Exception:

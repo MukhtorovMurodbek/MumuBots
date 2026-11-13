@@ -18,8 +18,14 @@ Two attempts cover almost everything, four is the ceiling, and the encoder
 itself is capped to a couple of threads so one user's sticker cannot take
 the whole container's CPU away from everyone else's messages.
 
+A clip that cannot fit is no longer cut short or squeezed silently (since
+2.1.6): one over MAX_DURATION_S is offered speeds that fit it (speed_choices),
+and one that stays over MAX_BYTES raises TooBig, so the person can pick a lower
+resolution or frame rate (bot.py: _offer_video_fit).
+
 Requires ffmpeg (with libvpx-vp9) on PATH.
 """
+import math
 import os
 import shutil
 import subprocess
@@ -53,13 +59,96 @@ _THREADS = os.environ.get("FFMPEG_THREADS", "2")
 # Picks 512 for whichever side is larger and scales the other proportionally
 # (-2 keeps it even, which libvpx-vp9 requires) -- computed by ffmpeg itself
 # from the input's actual width/height, so no separate probing step is needed.
-_SCALE_FILTER = (
-    f"scale=w='if(gte(iw,ih),{STICKER_SIDE},-2)':h='if(gte(iw,ih),-2,{STICKER_SIDE})'"
-)
+def _scale_to(side: int) -> str:
+    return f"scale=w='if(gte(iw,ih),{side},-2)':h='if(gte(iw,ih),-2,{side})'"
+
+
+_SCALE_FILTER = _scale_to(STICKER_SIDE)
+
+
+def _filters(speed: float, low_detail: bool) -> str:
+    """The -vf chain: faster playback first (setpts), then the detail of a
+    LOW_DETAIL_SIDE picture if asked, then the 512 px a sticker must be."""
+    parts = []
+    if speed and speed != 1:
+        parts.append(f"setpts=PTS/{speed:g}")
+    if low_detail:
+        parts.append(_scale_to(LOW_DETAIL_SIDE))
+    parts.append(_SCALE_FILTER)
+    return ",".join(parts)
 
 
 class ConversionError(Exception):
     """Raised when ffmpeg is missing or the clip can't be made to fit."""
+
+
+class TooBig(ConversionError):
+    """Every attempt came out over MAX_BYTES: the person picks how to make it smaller."""
+
+
+# A clip longer than MAX_DURATION_S is not cut any more: the person is offered
+# speeds that fit it (or trims it themselves). The speed that fits exactly is
+# rounded up to a tenth and never above MAX_SPEED -- a 57-second clip is not
+# offered at 19x.
+MAX_SPEED = float(os.environ.get("STICKER_MAX_SPEED", "4"))
+SPEED_PRESETS = (1.5, 2.0, 3.0, 4.0)
+SPEED_CHOICES = 3
+# One side of a video sticker must be exactly 512 px, so "lower resolution"
+# encodes the detail of a LOW_DETAIL_SIDE picture scaled back up to 512:
+# softer, and far fewer bytes.
+LOW_DETAIL_SIDE = 256
+LOW_FPS = 15
+_TOO_LONG_SLACK_S = 0.05
+
+
+def clip_duration(input_bytes: bytes) -> "float | None":
+    """How long the clip plays, in seconds, or None when ffprobe cannot tell."""
+    if not shutil.which("ffprobe") or not input_bytes:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "in.bin")
+        with open(path, "wb") as f:
+            f.write(input_bytes)
+        for entries in ("format=duration", "stream=duration"):
+            try:
+                proc = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", entries,
+                     "-of", "default=noprint_wrappers=1:nokey=1", path],
+                    capture_output=True, text=True, timeout=30,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                return None
+            for line in proc.stdout.split():
+                try:
+                    value = float(line)
+                except ValueError:
+                    continue
+                if value > 0:
+                    return value
+    return None
+
+
+def is_too_long(duration: "float | None") -> bool:
+    return bool(duration) and duration > MAX_DURATION_S + _TOO_LONG_SLACK_S
+
+
+def fit_speed(duration: float) -> float:
+    """The least speed-up, in tenths, that brings `duration` to MAX_DURATION_S or less."""
+    tenths = math.ceil(round(duration / MAX_DURATION_S * 10, 6))
+    return max(tenths, 11) / 10
+
+
+def speed_choices(duration: "float | None") -> list[float]:
+    """The speeds to offer for a clip this long: the one that fits exactly
+    first, then the presets above it -- every one of them brings the clip to
+    3 s or less, and none is over MAX_SPEED. Empty when nothing fits."""
+    if not is_too_long(duration):
+        return []
+    exact = fit_speed(duration)
+    if exact > MAX_SPEED:
+        return []
+    choices = [exact] + [p for p in SPEED_PRESETS if exact + 0.15 < p <= MAX_SPEED]
+    return choices[:SPEED_CHOICES]
 
 
 def _ffmpeg_available() -> bool:
@@ -88,7 +177,8 @@ def _next_crf(crf: int, size: int, fps: int) -> tuple[int, int]:
     return _MAX_CRF, 15 if fps <= 24 else 24
 
 
-def _encode(in_path: str, out_path: str, crf: int, fps: int) -> subprocess.CompletedProcess:
+def _encode(in_path: str, out_path: str, crf: int, fps: int,
+            vf: str = _SCALE_FILTER) -> subprocess.CompletedProcess:
     cmd = [
         "ffmpeg", "-nostdin", "-y",
         # Before -i, where it caps the decoder and the filters; the -threads
@@ -103,7 +193,7 @@ def _encode(in_path: str, out_path: str, crf: int, fps: int) -> subprocess.Compl
         "-t", str(MAX_DURATION_S),
         "-an",  # video stickers must have no audio track
         "-r", str(fps),
-        "-vf", _SCALE_FILTER,
+        "-vf", vf,
         "-c:v", "libvpx-vp9",
         "-pix_fmt", "yuv420p",
         "-crf", str(crf),
@@ -117,9 +207,15 @@ def _encode(in_path: str, out_path: str, crf: int, fps: int) -> subprocess.Compl
     return subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_S)
 
 
-def to_video_sticker_webm(input_bytes: bytes, lang: str = "en") -> bytes:
+def to_video_sticker_webm(input_bytes: bytes, lang: str = "en", speed: float = 1.0,
+                          low_detail: bool = False, low_fps: bool = False) -> bytes:
     """Takes raw bytes of a GIF, video, or video sticker and returns bytes
-    of a compliant WEBM/VP9 video sticker. Raises ConversionError on failure.
+    of a compliant WEBM/VP9 video sticker. Raises ConversionError on failure,
+    TooBig when every attempt stayed over MAX_BYTES.
+
+    `speed` plays it faster (anything still over MAX_DURATION_S is cut);
+    `low_detail` and `low_fps` are the person's choices for a clip that would
+    not fit MAX_BYTES.
 
     Runs synchronously (shells out to ffmpeg) -- call via asyncio.to_thread
     from async code so it doesn't block the event loop. `lang` only affects
@@ -136,14 +232,15 @@ def to_video_sticker_webm(input_bytes: bytes, lang: str = "en") -> bytes:
         with open(in_path, "wb") as f:
             f.write(input_bytes)
 
-        crf, fps = _FIRST_CRF, MAX_FPS
+        crf, fps = _FIRST_CRF, (LOW_FPS if low_fps else MAX_FPS)
+        vf = _filters(speed, low_detail)
         last_note = "unknown error"
         seen: set[tuple[int, int]] = set()
 
         for attempt in range(_MAX_ATTEMPTS):
             out_path = os.path.join(tmp, f"out_{attempt}.webm")
             try:
-                proc = _encode(in_path, out_path, crf, fps)
+                proc = _encode(in_path, out_path, crf, fps, vf)
             except subprocess.TimeoutExpired:
                 raise ConversionError(
                     i18n.t(lang, "video_convert_too_big", note=f"encoding timed out after {_TIMEOUT_S}s")
@@ -166,7 +263,9 @@ def to_video_sticker_webm(input_bytes: bytes, lang: str = "en") -> bytes:
             last_note = f"still {size // 1024} KB at crf={crf}, {fps}fps"
             seen.add((crf, fps))
             crf, fps = _next_crf(crf, size, fps)
+            if low_fps:
+                fps = min(fps, LOW_FPS)
             if (crf, fps) in seen:
                 break  # nowhere left to go; another identical encode is waste
 
-        raise ConversionError(i18n.t(lang, "video_convert_too_big", note=last_note))
+        raise TooBig(i18n.t(lang, "video_convert_too_big", note=last_note))

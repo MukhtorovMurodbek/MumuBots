@@ -52,7 +52,16 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 
-DRAIN_SECONDS = float(os.environ.get("UNIFIED_DRAIN_SECONDS") or 30)
+# How long a stop signal waits for the bots before the process ends anyway. Each bot waits up to
+# DEPLOY_SIGTERM_WAIT_SECONDS (60) for its work in progress first, and the host kills the process
+# after its draining window (railway.json: 120), so this sits between the two.
+DRAIN_SECONDS = float(os.environ.get("UNIFIED_DRAIN_SECONDS") or 90)
+
+# The exit code a soft stop asks for (lifecycle.soft_stop): 0 stays down under an on-failure restart
+# policy, 1 is started again. A module of its own so every bot's lifecycle -- each a copy -- sees one.
+FAMILY_PROCESS = sys.modules.setdefault("family_process", types.ModuleType("family_process"))
+if not hasattr(FAMILY_PROCESS, "exit_code"):
+    FAMILY_PROCESS.exit_code = 0
 
 STATUS_MINUTES = float(os.environ.get("UNIFIED_STATUS_MINUTES") or 30)
 
@@ -1261,7 +1270,11 @@ class Family:
             log.info("Stopped.")
         if self.exit_code:
             log.error("Ending with exit code %s.", self.exit_code)
-        return self.exit_code
+            return self.exit_code
+        if FAMILY_PROCESS.exit_code:
+            log.info("Exiting with %s, as the soft restart asked, so the host starts it again.",
+                     FAMILY_PROCESS.exit_code)
+        return FAMILY_PROCESS.exit_code
 
     async def _stop_in_context(self, bot: Bot) -> None:
         task = self.loop.create_task(self.stop_one(bot), context=bot.context)

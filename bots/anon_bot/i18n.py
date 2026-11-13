@@ -67,10 +67,11 @@ STRINGS = {
         "topup_refunded": "⚠️ Your {stars} ⭐ payment went through, but the ⚡ didn't reach your balance, so the {stars} ⭐ were refunded. Please try again in a few minutes.",
         "topup_failed": "⚠️ Your {stars} ⭐ payment went through, but the ⚡ didn't reach your balance. Nothing is lost — the owner will add it by hand. Follow up: /paysupport",
         "paysupport_text": "💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ can NOT be withdrawn or turned back into Stars. Only a payment that couldn't become credit is refunded, automatically and in full.\n\nCharged with no credit, or charged twice? Write to {contact} with the date, the amount and your Telegram ID, {user_id}. It's put right with credit.\n\n/balance lists your payments.",
-        "report_button": '🐞 Add my details',
-        "problem_logged_note": "Anonymous report is saved",
-        "report_disclaimer": "📨 Add your details to this report?\n\nAlready saved, without you: the bot, error code {code}, incident {incident}, the time and the version.\n\nSend adds your Telegram ID, @username, language, and whether this is a private chat or a group. Never your messages or files.\n\nIt helps find your case in the logs. Your choice.",
-        "report_send": '📨 Send my details',
+        "report_button": "🐞 Send more details",
+        "problem_logged_note": "Anonymous technical report saved.",
+        "problem_logged_note_optin": "Anonymous technical report saved. You can opt in to send more details.",
+        "report_disclaimer": "📨 Send more details with incident {incident}?\n\nSaved already, nothing about you: the bot, code {code}, the time, the version.\n\nSend adds:\n• your Telegram ID\n• your @username, if you have one\n• your language\n• private chat or group\n\nNever your messages or files. Cleared after 30 days, or now with /deletemydata.",
+        "report_send": "📨 Send",
         "report_cancel": '✖️ Cancel',
         "report_sent": "✅ Thank you — added to incident {incident}.",
         "report_already": "Your details are already on incident {incident}.",
@@ -96,11 +97,11 @@ STRINGS = {
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
         "privacy_stored": (
-            "• your Telegram ID and language\n• your inbox link, if you made one\n• who talks to whom: each conversation as the pair of IDs behind it plus a number, so replies reach the right thread\n• which message belongs to which conversation, by message ID, and when it was relayed\n• who you blocked\n• that you were shown a one-time announcement, so it shows only once\n• a timestamp each time you use the bot, to count users\n• daily button-tap counts for the whole bot, not per person\n• donations: the amount and Telegram's payment ID\n\nMessages and reactions are never stored: they pass straight through and live only in the two Telegram chats, where each side can delete their copy. The one exception is /feedback, below.\n\nAnonymous means anonymous to the person you write to: they never see your name, username or ID. The bot itself knows who is paired — that is how replies work."
+            "• your Telegram ID and language\n• your inbox link, if you made one\n• who talks to whom: each conversation as the pair of IDs behind it plus a number, so replies reach the right thread\n• which message belongs to which conversation, by message ID, and when it was relayed\n• who you blocked\n• that you were shown a one-time announcement, so it shows only once\n• a timestamp each time you use the bot, to count users\n• daily button-tap counts for the whole bot, not per person\n• daily counts of messages relayed, for the whole bot, not per person\n• donations: the amount and Telegram's payment ID\n\nMessages and reactions are never stored: they pass straight through and live only in the two Telegram chats, where each side can delete their copy. The one exception is /feedback, below.\n\nAnonymous means anonymous to the person you write to: they never see your name, username or ID. The bot itself knows who is paired — that is how replies work."
         ),
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
-            "Every error is logged without you: its code, an incident number, the time and the bot's version.\n\n\"Add my details\" under an error attaches your Telegram ID, @username, language and chat type (private or group) to that one incident — only if you tap Send. Never your messages or files. They are cleared after 30 days, or at once with /deletemydata. Error records are deleted after 180 days."
+            "Every error is logged without you: its code, an incident number, the time and the bot's version.\n\nUnder a crash, a failed /deletemydata or /feedback, or an error that keeps happening to you, \"Send more details\" attaches your Telegram ID, @username, language and chat type (private or group) to that one incident — only if you tap Send. Never your messages or files. They are cleared after 30 days, or at once with /deletemydata. Error records are deleted after 180 days."
         ),
         "privacy_seen_by_heading": "Who else sees it:",
         "privacy_seen_by": (
@@ -110,7 +111,7 @@ STRINGS = {
             "• nobody else — messages go through Telegram only, and no outside service is used"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": "Settings stay until you erase them or stop using the bot. Usage times go after about three months. Payment records and your ⚡ balance stay longer, for payment disputes. Reserve copies of the database are kept for emergencies only, and never used once older than 30 days. After /deletemydata, an encrypted note of your ID is kept for 30 days, so that restoring a copy erases you again.\n\nNothing is sold, used for ads, or given to anyone not named above.",
+        "privacy_kept_for": "Settings stay until you erase them or stop using the bot. Usage times go after about three months; daily counts of what was done, which say nothing about who, after 400 days. Payment records and your ⚡ balance stay longer, for payment disputes. Reserve copies of the database are kept for emergencies only, and never used once older than 30 days. After /deletemydata, an encrypted note of your ID is kept for 30 days, so that restoring a copy erases you again.\n\nNothing is sold, used for ads, or given to anyone not named above.",
         "privacy_your_choices": (
             "What you can do:\n/deletemydata — erase what this bot holds on you\n/terms — the rules\n\nBlocking the bot erases nothing, so send /deletemydata first."
         ),
@@ -358,10 +359,11 @@ STRINGS = {
         "topup_refunded": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin ⚡ balansingizga tushmadi, shuning uchun {stars} ⭐ qaytarildi. Bir necha daqiqadan keyin qayta urinib ko'ring.",
         "topup_failed": "⚠️ {stars} ⭐ to'lovingiz o'tdi, lekin ⚡ balansingizga tushmadi. Hech narsa yo'qolmaydi — egasi uni qo'lda qo'shib qo'yadi. Kuzatish: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarilMAYDI, ⚡ ni yechib olib yoki Stars'ga aylantirib BO'LMAYDI. Faqat kreditga aylanmagan to'lov avtomatik ravishda to'liq qaytariladi.\n\nPul yechildi-yu kredit kelmadimi yoki ikki marta yechildimi? {contact} ga sana, miqdor va Telegram ID raqamingizni ({user_id}) yozing. Kredit bilan to'g'rilab beriladi.\n\n/balance to'lovlaringizni ko'rsatadi.",
-        "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Anonim hisobot saqlandi",
-        "report_disclaimer": "📨 Bu xabarga ma'lumotlaringizni qo'shasizmi?\n\nSizsiz saqlangan: bot, xato kodi {code}, hodisa {incident}, vaqt va versiya.\n\n«Yuborish» Telegram ID, @username, til va chat shaxsiy yoki guruh ekanini qo'shadi. Xabarlaringiz va fayllaringiz hech qachon qo'shilmaydi.\n\nBu sizning holatingizni loglardan topishga yordam beradi. Tanlov sizda.",
-        "report_send": "📨 Ma'lumotlarimni yuborish",
+        "report_button": "🐞 Qo'shimcha ma'lumot yuborish",
+        "problem_logged_note": "Anonim texnik hisobot saqlandi.",
+        "problem_logged_note_optin": "Anonim texnik hisobot saqlandi. Xohlasangiz, qo'shimcha ma'lumot yuborishingiz mumkin.",
+        "report_disclaimer": "📨 {incident} hodisasiga qo'shimcha ma'lumot yuborasizmi?\n\nAllaqachon saqlangan, siz haqingizda hech narsa yo'q: bot, {code} kodi, vaqt, versiya.\n\n«Yuborish» qo'shadi:\n• Telegram ID raqamingiz\n• bo'lsa, @username'ingiz\n• tilingiz\n• shaxsiy suhbatmi yoki guruh\n\nXabarlaringiz va fayllaringiz hech qachon kirmaydi. 30 kundan keyin o'chiriladi, /deletemydata bilan esa darhol.",
+        "report_send": "📨 Yuborish",
         "report_cancel": '✖️ Bekor qilish',
         "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
         "report_already": "Ma'lumotlaringiz {incident} hodisasida allaqachon bor.",
@@ -384,14 +386,14 @@ STRINGS = {
         # ---- shared policy keys (/privacy, /terms, /deletemydata) ----
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tilingiz\n• quti havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan gaplashayotgani: har bir suhbat ortidagi ikki ID va raqam sifatida — javoblar to'g'ri suhbatga borishi uchun\n• qaysi xabar qaysi suhbatga tegishli (xabar ID si bo'yicha) va qachon yetkazilgani\n• kimlarni bloklaganingiz\n• bir martalik e'lonni ko'rganingiz — u faqat bir marta ko'rsatilishi uchun\n• har safar botdan foydalanganingiz vaqti — foydalanuvchilarni sanash uchun\n• butun bot bo'yicha kunlik tugma bosishlar soni, odamlar bo'yicha emas\n• xayriyalar: miqdor va Telegram to'lov ID si\n\nXabarlar va reaksiyalar hech qachon saqlanmaydi: ular to'g'ridan-to'g'ri o'tadi va faqat ikki Telegram chatida qoladi, har kim o'z nusxasini o'chira oladi. Yagona istisno — /feedback, quyida.\n\nAnonim — siz yozayotgan odam uchun anonim degani: u ismingiz, username yoki ID raqamingizni hech qachon ko'rmaydi. Botning o'zi esa kim kim bilan bog'langanini biladi — javoblar shunday ishlaydi.",
+        "privacy_stored": "• Telegram ID raqamingiz va tilingiz\n• quti havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan gaplashayotgani: har bir suhbat ortidagi ikki ID va raqam sifatida — javoblar to'g'ri suhbatga borishi uchun\n• qaysi xabar qaysi suhbatga tegishli (xabar ID si bo'yicha) va qachon yetkazilgani\n• kimlarni bloklaganingiz\n• bir martalik e'lonni ko'rganingiz — u faqat bir marta ko'rsatilishi uchun\n• har safar botdan foydalanganingiz vaqti — foydalanuvchilarni sanash uchun\n• butun bot bo'yicha kunlik tugma bosishlar soni, odamlar bo'yicha emas\n• butun bot bo'yicha kunlik yetkazilgan xabarlar soni, odamlar bo'yicha emas\n• xayriyalar: miqdor va Telegram to'lov ID si\n\nXabarlar va reaksiyalar hech qachon saqlanmaydi: ular to'g'ridan-to'g'ri o'tadi va faqat ikki Telegram chatida qoladi, har kim o'z nusxasini o'chira oladi. Yagona istisno — /feedback, quyida.\n\nAnonim — siz yozayotgan odam uchun anonim degani: u ismingiz, username yoki ID raqamingizni hech qachon ko'rmaydi. Botning o'zi esa kim kim bilan bog'langanini biladi — javoblar shunday ishlaydi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Har bir xato sizsiz yoziladi: kodi, hodisa raqami, vaqti va bot versiyasi.\n\nXato ostidagi «Ma'lumotlarimni qo'shish» o'sha hodisaga Telegram ID, @username, til va chat turini (shaxsiy yoki guruh) qo'shadi — faqat «Yuborish»ni bossangiz. Xabarlar va fayllar hech qachon qo'shilmaydi. Ular 30 kundan keyin yoki /deletemydata bilan darhol o'chiriladi. Xato yozuvlari 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Har bir xato sizsiz yoziladi: kodi, hodisa raqami, vaqti va bot versiyasi.\n\nIshdan chiqish, bajarilmagan /deletemydata yoki /feedback, yoki sizda takror-takror yuz berayotgan xato ostidagi «Qo'shimcha ma'lumot yuborish» o'sha hodisaga Telegram ID, @username, til va chat turini (shaxsiy yoki guruh) qo'shadi — faqat «Yuborish»ni bossangiz. Xabarlar va fayllar hech qachon qo'shilmaydi. Ular 30 kundan keyin yoki /deletemydata bilan darhol o'chiriladi. Xato yozuvlari 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
         "privacy_seen_by": "• Telegram — barcha xabarlarni u yetkazadi\n• hosting provayderi va bot ishlatadigan ma'lumotlar bazasi",
         "privacy_others": "• boshqa hech kim — xabarlar faqat Telegram orqali o'tadi, tashqi xizmatlar ishlatilmaydi",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalar siz o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha saqlanadi. Foydalanish vaqtlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz to'lov nizolari uchun uzoqroq saqlanadi. Ma'lumotlar bazasining zaxira nusxalari faqat favqulodda holatlar uchun saqlanadi va 30 kundan eskisi hech qachon ishlatilmaydi. /deletemydata dan keyin ID'ingizning shifrlangan qaydi 30 kun saqlanadi, shunda nusxa tiklansa ham siz yana o'chirilasiz.\n\nHech narsa sotilmaydi, reklamaga ishlatilmaydi va yuqorida aytilmaganlarga berilmaydi.",
+        "privacy_kept_for": "Sozlamalar siz o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha saqlanadi. Foydalanish vaqtlari taxminan uch oydan keyin, qilingan ishlarning kunlik hisobi esa (unda kimligi yo'q) 400 kundan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz to'lov nizolari uchun uzoqroq saqlanadi. Ma'lumotlar bazasining zaxira nusxalari faqat favqulodda holatlar uchun saqlanadi va 30 kundan eskisi hech qachon ishlatilmaydi. /deletemydata dan keyin ID'ingizning shifrlangan qaydi 30 kun saqlanadi, shunda nusxa tiklansa ham siz yana o'chirilasiz.\n\nHech narsa sotilmaydi, reklamaga ishlatilmaydi va yuqorida aytilmaganlarga berilmaydi.",
         "privacy_your_choices": "Nima qila olasiz:\n/deletemydata — bot siz haqingizda saqlagan narsalarni o'chirish\n/terms — qoidalar\n\nBotni bloklash hech narsani o'chirmaydi, shuning uchun avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan qonun va Telegram shartlari doirasida foydalaning. Kimnidir bezovta qilgan yoki bot chegaralarini buzgan akkaunt bloklanadi.",
@@ -602,10 +604,11 @@ STRINGS = {
         "topup_refunded": "⚠️ Платёж на {stars} ⭐ прошёл, но ⚡ не дошёл до баланса, поэтому {stars} ⭐ вернули. Попробуйте снова через несколько минут.",
         "topup_failed": "⚠️ Платёж на {stars} ⭐ прошёл, но ⚡ не дошёл до баланса. Ничего не потеряно — владелец добавит его вручную. Уточнить: /paysupport",
         "paysupport_text": "💳 Помощь с оплатой\n\nПлатежи окончательны: Stars НЕ возвращаются, ⚡ НЕЛЬЗЯ вывести или обменять обратно на Stars. Возвращается только платёж, который не удалось превратить в кредит, — автоматически и полностью.\n\nДеньги списаны, а кредита нет, или списали дважды? Напишите на {contact}: дата, сумма и ваш Telegram ID, {user_id}. Всё исправят кредитом.\n\n/balance показывает ваши платежи.",
-        "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Анонимный отчёт сохранён',
-        "report_disclaimer": "📨 Добавить ваши данные к этому отчёту?\n\nУже сохранено без вас: бот, код ошибки {code}, инцидент {incident}, время и версия.\n\n«Отправить» добавит ваш Telegram ID, @username, язык и то, личный это чат или группа. Никогда — ваши сообщения или файлы.\n\nЭто помогает найти ваш случай в логах. Решать вам.",
-        "report_send": '📨 Отправить мои данные',
+        "report_button": "🐞 Отправить подробности",
+        "problem_logged_note": "Анонимный технический отчёт сохранён.",
+        "problem_logged_note_optin": "Анонимный технический отчёт сохранён. По желанию можно отправить подробности.",
+        "report_disclaimer": "📨 Отправить подробности к инциденту {incident}?\n\nУже сохранено, без данных о вас: бот, код {code}, время, версия.\n\n«Отправить» добавит:\n• ваш Telegram ID\n• ваш @username, если есть\n• ваш язык\n• личный чат или группа\n\nВаши сообщения и файлы — никогда. Стирается через 30 дней или сразу через /deletemydata.",
+        "report_send": "📨 Отправить",
         "report_cancel": '✖️ Отмена',
         "report_sent": "✅ Спасибо — добавлено к инциденту {incident}.",
         "report_already": "Ваши данные уже есть в инциденте {incident}.",
@@ -631,10 +634,10 @@ STRINGS = {
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
         "privacy_stored": (
-            "• ваш Telegram ID и язык\n• ссылка на ваш ящик, если вы её создали\n• кто с кем общается: каждая беседа — пара ID и номер, чтобы ответы попадали в нужную беседу\n• какое сообщение к какой беседе относится (по ID сообщения) и когда оно передано\n• кого вы заблокировали\n• что вам показали разовое объявление — чтобы оно показывалось один раз\n• время каждого использования бота — чтобы считать пользователей\n• дневное число нажатий кнопок по всему боту, не по людям\n• пожертвования: сумма и ID платежа в Telegram\n\nСообщения и реакции никогда не хранятся: они проходят насквозь и остаются только в двух чатах Telegram, где каждый может удалить свою копию. Единственное исключение — /feedback, ниже.\n\nАнонимно — значит анонимно для того, кому вы пишете: он никогда не видит ваше имя, username или ID. Сам бот знает, кто с кем связан, — так работают ответы."
+            "• ваш Telegram ID и язык\n• ссылка на ваш ящик, если вы её создали\n• кто с кем общается: каждая беседа — пара ID и номер, чтобы ответы попадали в нужную беседу\n• какое сообщение к какой беседе относится (по ID сообщения) и когда оно передано\n• кого вы заблокировали\n• что вам показали разовое объявление — чтобы оно показывалось один раз\n• время каждого использования бота — чтобы считать пользователей\n• дневное число нажатий кнопок по всему боту, не по людям\n• дневное число пересланных сообщений по всему боту, не по людям\n• пожертвования: сумма и ID платежа в Telegram\n\nСообщения и реакции никогда не хранятся: они проходят насквозь и остаются только в двух чатах Telegram, где каждый может удалить свою копию. Единственное исключение — /feedback, ниже.\n\nАнонимно — значит анонимно для того, кому вы пишете: он никогда не видит ваше имя, username или ID. Сам бот знает, кто с кем связан, — так работают ответы."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждая ошибка записывается без вас: код, номер инцидента, время и версия бота.\n\n«Добавить мои данные» под ошибкой прикрепляет к этому инциденту ваш Telegram ID, @username, язык и тип чата (личный или группа) — только если нажать «Отправить». Сообщения и файлы — никогда. Это стирается через 30 дней или сразу через /deletemydata. Записи об ошибках удаляются через 180 дней.",
+        "privacy_problems": "Каждая ошибка записывается без вас: код, номер инцидента, время и версия бота.\n\nПод сбоем, неудавшимся /deletemydata или /feedback, или ошибкой, которая повторяется у вас снова и снова, «Отправить подробности» прикрепляет к этому инциденту ваш Telegram ID, @username, язык и тип чата (личный или группа) — только если нажать «Отправить». Сообщения и файлы — никогда. Это стирается через 30 дней или сразу через /deletemydata. Записи об ошибках удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
             "• Telegram, через который идут все сообщения\n• хостинг-провайдер и база данных бота"
@@ -643,7 +646,7 @@ STRINGS = {
             "• больше никто — сообщения идут только через Telegram, внешние сервисы не используются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": "Настройки хранятся, пока вы их не удалите или не перестанете пользоваться ботом. Время использования удаляется примерно через три месяца. Платёжные записи и ваш ⚡ баланс хранятся дольше — на случай споров об оплате. Резервные копии базы хранятся только на случай аварии, и копия старше 30 дней никогда не используется. После /deletemydata зашифрованная отметка с вашим ID хранится 30 дней, чтобы при восстановлении из копии вы снова были удалены.\n\nНичего не продаётся, не используется для рекламы и не передаётся никому, кроме названных выше.",
+        "privacy_kept_for": "Настройки хранятся, пока вы их не удалите или не перестанете пользоваться ботом. Время использования удаляется примерно через три месяца, дневные счётчики сделанного (в них нет ничего о том, кто) — через 400 дней. Платёжные записи и ваш ⚡ баланс хранятся дольше — на случай споров об оплате. Резервные копии базы хранятся только на случай аварии, и копия старше 30 дней никогда не используется. После /deletemydata зашифрованная отметка с вашим ID хранится 30 дней, чтобы при восстановлении из копии вы снова были удалены.\n\nНичего не продаётся, не используется для рекламы и не передаётся никому, кроме названных выше.",
         "privacy_your_choices": (
             "Что вы можете сделать:\n/deletemydata — удалить всё, что бот о вас хранит\n/terms — правила\n\nБлокировка бота ничего не удаляет, поэтому сначала отправьте /deletemydata."
         ),

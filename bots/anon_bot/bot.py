@@ -142,6 +142,7 @@ from db import (
     count_active_users_since,
 )
 from shared_features import (
+    note_stat,
     publish_profile,
     publish_commands,
     refresh_chat_menu,
@@ -1525,6 +1526,7 @@ async def _deliver_follower_message(update: Update, context: ContextTypes.DEFAUL
     # guest's own message is written down on their side for the same reason
     # the owner's is on theirs -- so an edit to it can be answered, and so a
     # guest quoting themselves resolves rather than being refused.
+    note_stat("anon_relay", "to_inbox")
     await asyncio.to_thread(
         record_relay_and_touch, active["id"],
         owner_id, [m.message_id for m in sent],
@@ -1603,6 +1605,7 @@ async def _deliver_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     # And the delivered copies on the guest's side, without which a guest
     # who swipe-replies to the answer they just received is told their reply
     # matches no conversation. Both sides, one statement.
+    note_stat("anon_relay", "reply")
     await asyncio.to_thread(
         record_relay_and_touch, conversation_id,
         owner.id, [message.message_id],
@@ -2128,7 +2131,7 @@ def _maintenance_main(problem: str) -> None:
                     "personal data until the data key checks out.", problem)
     app = (ApplicationBuilder().token(BOT_TOKEN)
            .post_init(_maintenance_post_init).post_stop(_post_stop).build())
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_flood_gate(app, ADMIN_IDS)
     app.add_handler(TypeHandler(Update, _maintenance_reply))
@@ -2154,7 +2157,7 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
     # ---- the handlers that run before everything else ----

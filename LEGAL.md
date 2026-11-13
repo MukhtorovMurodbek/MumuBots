@@ -7,7 +7,7 @@ sections apply to all four; a bot's own section adds what is particular to it.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 23 October 2026._
+_Last reviewed: 14 November 2026._
 
 **Privacy:** [every bot](#privacy-every-bot) ·
 [StickerBot](#stickerbot-privacy) · [ConvertBot](#convertbot-privacy) ·
@@ -32,6 +32,8 @@ _Last reviewed: 23 October 2026._
   anything else that says who.
 - **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
   tapped it.
+- **What was done, counted.** Per day for the whole bot: how many links came from each site, which conversions
+  were made, how many stickers and packs, how many messages were relayed. For statistics. Nothing about who.
 - **Payments and donations**, if any: the amount, the currency, what it was
   for, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger**, once you have paid or been given
@@ -49,10 +51,11 @@ _Last reviewed: 23 October 2026._
   number, when it happened and the bot's version. This is written down
   automatically, because a fault nobody reports is still a fault, and nothing in
   it is about you: not your id, not your name, not what you sent. The message
-  that carries the code says so, above the button.
-- **Your own details, only if you add them** — tapping "Add my details" under
-  an error offers to attach four things to that incident: your Telegram user
-  id, your @username if you have one, the language you picked, and whether the
+  that carries the code says so.
+- **Your own details, only if you add them** — under a crash, a failed
+  `/deletemydata` or `/feedback`, a reply that went astray, or an error that
+  keeps happening to you, tapping "Send more details" offers to attach four
+  things to that incident: your Telegram user id, your @username if you have one, the language you picked, and whether the
   chat is private or a group. All four are named on screen before anything is
   sent, and nothing is sent unless you tap Send. Never what you wrote and never
   a file you sent. Those four are **cleared after 30 days**, automatically; the
@@ -122,6 +125,7 @@ collected speculatively, and nothing is collected to be sold later.
 | timestamp per use | about 90 days |
 | how many people used a bot per day and per month (numbers only) | kept |
 | button tap counts | 45 days |
+| daily counts of what was done | 400 days |
 | work in progress | 12 hours |
 | details added to a problem report | 30 days |
 | problem records | 180 days |

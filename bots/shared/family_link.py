@@ -333,6 +333,21 @@ def init_family_schema() -> None:
             )
             """
         )
+        # Anonymous counts for infographics: what was done, per UTC day -- which
+        # sites links came from, which conversions, which kind of sticker. No user
+        # id, no time finer than a day (shared_features.note_stat decides the keys).
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.daily_stats (
+                bot_id TEXT NOT NULL,
+                day DATE NOT NULL,
+                metric TEXT NOT NULL,
+                key TEXT NOT NULL,
+                n INTEGER NOT NULL,
+                PRIMARY KEY (bot_id, day, metric, key)
+            )
+            """
+        )
         # ManagerBot's memory of who was up last time it looked, so it can
         # alert on the *transition* (down -> up, up -> down) instead of
         # repeating "still down" every minute.
@@ -2114,6 +2129,46 @@ def button_taps_history(days: int = 7) -> list[dict]:
         return [dict(zip(names, row)) for row in cur.fetchall()]
 
 
+STATS_RETENTION_DAYS = int(os.environ.get("FAMILY_STATS_RETENTION_DAYS") or 400)
+
+
+def record_stats(stats: dict) -> None:
+    """Add a window's anonymous counts, {(metric, key): n}, to today's (UTC) rows."""
+    if not _enabled or not stats:
+        return
+    rows = [(_bot_id, metric[:40], key[:60], n) for (metric, key), n in stats.items()
+            if isinstance(metric, str) and isinstance(key, str) and isinstance(n, int)
+            and not isinstance(n, bool) and n > 0]
+    if not rows:
+        return
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO {FAMILY_SCHEMA}.daily_stats AS t (bot_id, day, metric, key, n) "
+                f"VALUES (%s, (now() AT TIME ZONE 'UTC')::date, %s, %s, %s) "
+                f"ON CONFLICT (bot_id, day, metric, key) DO UPDATE SET n = t.n + EXCLUDED.n",
+                rows,
+            )
+        conn.commit()
+
+
+def stats_history(days: int = 30) -> list[dict]:
+    """Counts per bot, metric and key over the last `days` UTC days, largest
+    first within a metric. Every bot's rows: this is what ManagerBot's /stats
+    asks for."""
+    if not _enabled:
+        return []
+    with _connect() as conn:
+        cur = conn.execute(
+            f"SELECT bot_id, metric, key, SUM(n)::bigint AS n FROM {FAMILY_SCHEMA}.daily_stats "
+            f"WHERE day > (now() AT TIME ZONE 'UTC')::date - %s "
+            f"GROUP BY bot_id, metric, key ORDER BY bot_id, metric, SUM(n) DESC, key",
+            (days,),
+        )
+        names = [column.name for column in cur.description]
+        return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
 def usage_history(bot_id: str | None = None, hours: int = 24) -> list[dict]:
     """Recent samples, newest first. `bot_id=None` means every bot, which is
     what ManagerBot asks for."""
@@ -2487,9 +2542,19 @@ async def _cmd_logs(context, args):
 
 
 async def _cmd_restart(context, args):
-    """Exits with a non-zero code so a supervisor restarts the process --
-    Railway's restart policy, Docker's restart: unless-stopped, and so on.
-    Run against a bot started by hand on a laptop it just stops it."""
+    """Restart the process this bot is in, through the soft stop
+    (lifecycle.soft_stop): refused while anybody is using it, and otherwise an
+    exit with code 1, which the host's restart policy starts again.
+
+    `restart force` is the old way, for a bot that is stuck: os._exit(1) at
+    once, whatever is running -- which the launcher turns into a restart of
+    this bot alone (main._BotOs._exit), and which ends a process of its own for
+    the host to start again. Run against a bot started by hand on a laptop, it
+    just stops it."""
+    if "force" not in [arg.lower() for arg in args]:
+        issued = next((arg for arg in args if arg.replace(".", "", 1).isdigit()), None)
+        return await lifecycle.soft_stop(1, issued), None, None
+
     async def _bye():
         await asyncio.sleep(2)
         logger.warning("Restarting: asked to by ManagerBot.")
@@ -2497,6 +2562,21 @@ async def _cmd_restart(context, args):
 
     asyncio.create_task(_bye())
     return "Restarting now (a supervisor brings it back; a hand-started process just stops).", None, None
+
+
+async def _cmd_softstop(context, args):
+    """Stop the process this bot is in -- every bot in it, one service -- and
+    stay down, if nobody is using it. The argument is when ManagerBot issued the
+    request, so one that waited out a downtime on the bus is not acted on late."""
+    issued = args[0] if args else None
+    return await lifecycle.soft_stop(0, issued), None, None
+
+
+async def _cmd_softstopbot(context, args):
+    """Stop only this bot, if nobody is using it; the rest of its service
+    carries on, and it comes back when the service next starts."""
+    issued = args[0] if args else None
+    return await lifecycle.soft_stop_bot(issued), None, None
 
 
 async def _cmd_crashtest(context, args):
@@ -3173,6 +3253,8 @@ COMMANDS = {
     "message": _cmd_message,
     "logs": _cmd_logs,
     "restart": _cmd_restart,
+    "softstop": _cmd_softstop,
+    "softstopbot": _cmd_softstopbot,
     "crashtest": _cmd_crashtest,
     "broadcast": _cmd_broadcast,
     "pause": _cmd_pause,
@@ -3191,7 +3273,9 @@ COMMAND_HELP = {
     "whois": "whois <user_id> -- look a user up through that bot",
     "message": "message <user_id> <text> -- DM someone as that bot",
     "logs": "logs [n] [bot|problems] -- tail errors.log, bot.log with 'bot', problems.log with 'problems'",
-    "restart": "restart that bot's process",
+    "restart": "restart that bot's process (its whole service) once nobody is using it; 'restart force' restarts that bot alone, at once",
+    "softstop": "stop that bot's process (its whole service) and stay down, only if nobody is using it",
+    "softstopbot": "stop only that bot, if nobody is using it; the rest of its service carries on",
     "crashtest": "raise on purpose, to check the crash alert still works",
     "broadcast": "broadcast [--active] <text> -- one message as that bot; --active aims it at recent users only",
     "pause": "pause [minutes] -- decline new long work and say why",
@@ -3261,10 +3345,25 @@ def _finish_command(command_id: int, ok: bool, output: str, file_name, file_byte
     # about once a second.
 
 
+# Family commands this process is running now -- a lifecycle work source (see
+# attach), so the soft stop and the SIGTERM wait count them in-process. The
+# table's 'running' rows were all they had before, and ManagerBot's watchdog
+# marks a command 'timeout' 90 s after it was issued even while it still runs:
+# a long broadcast was invisible and could be cut off (review of 2026-11-14).
+# The stop requests themselves are not counted, or a stop would wait for itself.
+_STOP_COMMANDS = frozenset({"softstop", "softstopbot", "restart"})
+_running_here: dict = {}
+
+
+def running_here() -> int:
+    return sum(1 for command in _running_here.values() if command not in _STOP_COMMANDS)
+
+
 async def _run_one_command(context, row) -> None:
     command_id, command, raw_args = row
     handler = COMMANDS.get(command)
     logger.info("ManagerBot asked for: %s %s", command, raw_args)
+    _running_here[command_id] = command
     try:
         if handler is None:
             ok, output, name, data = False, f"Unknown command '{command}'.", None, None
@@ -3274,6 +3373,8 @@ async def _run_one_command(context, row) -> None:
     except Exception as exc:
         logger.exception("Family command %r failed", command)
         ok, output, name, data = False, f"{type(exc).__name__}: {exc}", None, None
+    finally:
+        _running_here.pop(command_id, None)
 
     try:
         await asyncio.to_thread(_finish_command, command_id, ok, output, name, data)
@@ -3384,6 +3485,11 @@ def _prune_family_rows() -> tuple[int, int, int, int]:
             (_bot_id, USAGE_RETENTION_DAYS),
         )
         taps = cur.rowcount
+        conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.daily_stats "
+            f"WHERE bot_id = %s AND day < (now() AT TIME ZONE 'UTC')::date - %s",
+            (_bot_id, STATS_RETENTION_DAYS),
+        )
         conn.commit()
     return commands, events, samples, taps
 
@@ -3537,6 +3643,7 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime, needs=()) 
         )
 
     _enabled = True
+    lifecycle.add_work_source("family command(s)", running_here)
     if problem:
         report_event_soon("critical", "data_key", f"{display_name}: {problem}. It runs, with what "
                           f"needs the key switched off.", keep=True)

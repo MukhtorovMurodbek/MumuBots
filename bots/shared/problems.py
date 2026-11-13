@@ -14,8 +14,10 @@ A code is shown at the end of a message as "🆔 CODE". i18n.t() appends that
 line for every key in KEYS; a message assembled from several strings gets it
 at its end, where it is assembled (ConvertBot's job endings, StickerBot's
 sticker errors and imports, DownloaderBot's allowance message).
-shared_features logs every message that ends in one, with its time and incident,
-and puts a report button under the ones that are not SIMPLE. Every code also
+shared_features logs every message that ends in one, with its time and incident;
+the ones that are not SIMPLE say so, and get a details button when WANTS_DETAILS
+asks for one or the same chat keeps meeting them (shared_features.offers_details,
+since 2.1.6). Every code also
 has a LEVEL -- see the block above `reportable()` -- which decides whether the
 owner hears about it now or in the nightly report.
 
@@ -809,15 +811,138 @@ ALERT_KEYS = {
 }
 
 
+# One line per code for the owner's reports, in plain words: what the person ran into. PROBLEMS'
+# `meaning` is the longer account, for /explain.
+BRIEF = {
+    "FM-CRASH": "a handler failed with an error nothing caught; the person was told",
+    "FM-FLOOD": "someone sent more updates in a minute than the flood gate allows; the rest were ignored",
+    "FM-DONATE-CURRENCY": "/donate or /recharge named a currency the bot doesn't offer",
+    "FM-DONATE-UNAVAILABLE": "a currency is offered but its payment token isn't set",
+    "FM-DONATE-AMOUNT": "a payment amount wasn't a positive whole number, or came from an old button",
+    "FM-DONATE-TOO-MANY": "a Stars payment above the per-payment maximum",
+    "FM-DONATE-RANGE": "a card payment below or above that currency's range",
+    "FM-INVOICE": "Telegram refused to create an invoice; nothing was charged",
+    "FM-ERASE": "/deletemydata failed, nothing was erased; they were asked to retry",
+    "FM-UPDATING": "turned away because the bots are paused for an update",
+    "FM-UNKNOWN-COMMAND": "a slash command this bot doesn't have",
+    "FM-FEEDBACK-LIMIT": "more /feedback in a day than allowed; this one wasn't taken",
+    "FM-FEEDBACK-FAILED": "/feedback couldn't be saved; they were asked to send it again",
+    "CV-NO-EXTENSION": "a file whose format couldn't be told from its name",
+    "CV-TG-LIMIT": "a file over Telegram's 20 MB bot download limit",
+    "CV-GROUP-LIMIT": "a file over 20 MB sent in a group, where big files aren't taken",
+    "CV-BIG-UNAVAILABLE": "a file over 20 MB, and the route for big files was down",
+    "CV-DOWNLOAD": "fetching the file from Telegram failed; nothing converted or charged",
+    "CV-UNSUPPORTED": "a source or target format this server doesn't convert",
+    "CV-TOO-BIG": "a file (or album) over ConvertBot's size limit",
+    "CV-NO-TARGETS": "a readable format with nothing available to convert it to",
+    "CV-NOTHING-SENDABLE": "a picture so big that every result would be over the send limit",
+    "CV-MEGAPIXELS": "a picture over the megapixel limit (it would run out of memory)",
+    "CV-FORMAT-TOO-BIG": "a target tapped whose result would be over the send limit (old menu)",
+    "CV-STORAGE-USER": "their waiting files already fill their storage share",
+    "CV-STORAGE-FULL": "the server is short of temporary space",
+    "CV-QUEUE-FULL": "they already have the most conversions waiting",
+    "CV-EXPIRED": "a format chosen for a file no longer waiting",
+    "CV-JOB-GONE": "Stop tapped on a conversion that had already ended",
+    "CV-NO-CREDIT": "the balance didn't cover the conversion when its turn came; not charged",
+    "CV-UNKNOWN-ORDER": "a payment for an order the bot doesn't know; declined, not charged",
+    "CV-MIXED-BATCH": "an album of different formats, which one conversion can't take",
+    "CV-UNRECOGNIZED": "a message that's neither a file nor a format name",
+    "CV-REFUSED": "the converter couldn't read or convert the file as asked",
+    "CV-TIMEOUT": "a conversion ran past its time limit and was stopped",
+    "CV-TOO-SLOW": "a conversion was on course to miss its time limit and was stopped early",
+    "CV-CRASH": "the conversion worker died without a result (usually memory)",
+    "CV-NO-MEMORY": "the conversion ran out of memory",
+    "CV-OUTPUT-TOO-BIG": "the result came out over what this conversion may send back",
+    "CV-SEND-FAILED": "the file converted but uploading it failed; ⚡ refunded",
+    "CV-RESTARTED": "the bot restarted mid-conversion; ⚡ refunded",
+    "DL-QUOTA-HOUR": "they used up their downloads for the hour",
+    "DL-QUOTA-DAY": "they used up their downloads for the day",
+    "DL-QUEUE-FULL": "they already have the most links in progress",
+    "DL-NO-SPACE": "the server is short of disk space; the download didn't start",
+    "DL-DELIVERY": "the media was fetched but uploading it to Telegram failed",
+    "DL-BLOCKED": "the site refused every route (blocked, rate-limited or asked to log in)",
+    "DL-NOT-FOUND": "the site says the post doesn't exist or isn't public",
+    "DL-TOO-BIG": "the media is bigger than a bot may send",
+    "DL-LARGE-OFF": "over the free size, and they haven't switched on large files",
+    "DL-LARGE-PRIVATE": "a large file asked for in a group (large files are private-only)",
+    "DL-LARGE-NO-CREDIT": "large files on, but the balance is below the cheapest one",
+    "DL-LARGE-TOO-BIG": "over even the large-file ceiling (Telegram's 2000 MB at most)",
+    "DL-LARGE-SHORT": "the large file cost more than the balance once its size was known",
+    "DL-LARGE-SEND": "a large file was charged for and couldn't be sent; credit returned",
+    "DL-ALL-ROUTES": "every download route failed, for some other reason",
+    "DL-REDDIT": "a Reddit post's data couldn't be read",
+    "DL-TWITTER-CARD": "an X/Twitter post's content couldn't be fetched; only the link went back",
+    "DL-UNRECOGNIZED": "not a link from a supported site",
+    "DL-BUTTON-EXPIRED": "a compressed/uncompressed button for a download no longer remembered",
+    "DL-MERGE-TOO-BIG": "PDF/ZIP tapped on an album with too many or too big files",
+    "DL-MERGE-NO-PHOTOS": "PDF tapped, but fewer than two photos came back",
+    "DL-MERGE-FAILED": "an album's PDF or ZIP couldn't be built or sent",
+    "ST-WHOMADE-UNKNOWN": "/whomade on a pack not made through this bot",
+    "ST-COEDIT-LINK": "a co-editing link that matches no pack (reset or mistyped)",
+    "ST-COEDIT-GONE": "a co-editing link to a pack that no longer exists",
+    "ST-NOT-YOURS": "a pack button tapped by someone who doesn't own the pack",
+    "ST-OWNER-ONLY": "a co-editor tried rename, co-edit settings or delete (owner only)",
+    "ST-RENAME-STATE": "a new pack name arrived after rename lost track of the pack",
+    "ST-RENAME-FAILED": "Telegram refused to rename a pack",
+    "ST-DELETE-FAILED": "Telegram refused to delete a pack",
+    "ST-TITLE-EMPTY": "an empty pack name",
+    "ST-REMOVE-FAILED": "removing a sticker from a pack failed",
+    "ST-IMAGE": "a picture couldn't be made into a sticker",
+    "ST-VIDEO-CONVERT": "a video couldn't be encoded into a sticker Telegram accepts",
+    "ST-VIDEO-FAILED": "an unexpected error while converting a video",
+    "ST-ANIMATED": "an animated (.tgs) sticker sent, which the bot can't copy",
+    "ST-IMPORT-SOURCE": "/import given something that isn't a pack name or link",
+    "ST-IMPORT": "an import found no pack, or a WhatsApp archive with no usable images",
+    "ST-TG-TIMEOUT": "Telegram didn't confirm adding a sticker in time",
+    "ST-TG-BAD-NAME": "Telegram rejected the pack's generated internal name",
+    "ST-TG-NAME-TAKEN": "the pack's generated internal name was already taken",
+    "ST-TG-PACK-FULL": "the pack hit Telegram's 120-sticker limit",
+    "ST-TG-BAD-FORMAT": "Telegram didn't accept the prepared sticker file",
+    "ST-TG-REJECTED": "Telegram rejected a sticker for a reason the bot doesn't know",
+    "ST-UNRECOGNIZED": "something sent outside a pack session that the bot has no use for",
+    "ST-NOTHING-ADDED": "/done before any sticker was added",
+    "ST-NO-STICKER": "an emoji sent before any sticker was added",
+    "ST-RETAG": "changing a sticker's emoji failed",
+    "AN-LINK-INVALID": "an inbox link that matches no inbox",
+    "AN-LINK-BLOCKED": "someone the inbox owner blocked opened their link",
+    "AN-LINK-PAUSED": "an inbox link opened while that inbox is paused",
+    "AN-INBOX-GONE": "a link to an inbox that was deleted",
+    "AN-SENDER-BLOCKED": "a guest the owner blocked wrote; not relayed",
+    "AN-NOT-STARTED": "the other person has stopped or never started the bot",
+    "AN-DELIVERY": "Telegram rejected relaying a message",
+    "AN-REPLY-NO-MATCH": "a reply matched someone else's conversation; not sent",
+    "AN-NEEDS-REPLY": "a message that wasn't a reply while conversations are open",
+    "AN-OPENING-NEEDS-REPLY": "something else arrived before the first message of a new conversation",
+    "AN-AMBIGUOUS": "a message without a reply while several conversations are open",
+    "AN-REPLY-BLOCKED": "the guest stopped the bot, so the owner's reply couldn't go",
+    "AN-REPLY-FAILED": "Telegram rejected relaying the owner's reply",
+    "AN-REPLY-STALE": "a reply to a message no conversation knows",
+    "AN-TOO-FAST": "more messages in a minute than AnonBot allows",
+    "AN-EDIT-NOT-RELAYED": "a relayed message was edited (edits don't travel)",
+    "AN-CONV-GONE": "a button for a conversation that's gone or isn't theirs",
+    "AN-NOT-YOURS": "a button for a conversation they're not part of",
+    "AN-NO-ANCHOR": "jump-to-start on a conversation whose first messages were pruned",
+    "AN-WHICH-UNKNOWN": "/which or /archive on a message in no conversation",
+    "AN-ARCHIVE-OWNER-ONLY": "a guest tried to archive (inbox owner only)",
+    "AN-UNADDRESSED": "a message from someone with no inbox and no open conversation",
+    "AN-REACTION-NOT-PASSED": "a reaction the bot can't show the other side (premium emoji, or a second one)",
+}
+
+
+def brief(code) -> str:
+    return BRIEF.get(code, "")
+
 # Problems that get no Report button. The owner, about one under "I don't
 # recognize that command": "not every command needs a report button ... this
 # one is simple." These are the refusals that explain themselves and that the
 # person can act on -- their own typo, a limit they have reached, a button that
 # has expired or is somebody else's, the other side's choice -- where nothing
 # on the bot's side is wrong. They keep their code, and every one is still
-# logged with its time and incident. Everything else gets the button: a crash,
-# a failed download, conversion or send, Telegram refusing something the bot
-# prepared, or the bot's own configuration. A new code is one or the other on
+# logged with its time and incident. Everything else is a fault, and its
+# message says an anonymous report was saved: a crash, a failed download,
+# conversion or send, Telegram refusing something the bot prepared, or the
+# bot's own configuration. Which of those also get the details button is
+# WANTS_DETAILS below (and shared_features.offers_details). A new code is one or the other on
 # purpose; tests/test_problems.py lists both halves so neither grows by default.
 SIMPLE = frozenset({
     "FM-FLOOD", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE",
@@ -1017,8 +1142,25 @@ def urgent(code) -> bool:
 
 
 def reportable(code) -> bool:
-    """Whether a message ending in this code offers a Report button."""
+    """Whether a message ending in this code is a fault: it says an anonymous report was saved, and may offer the details button (wants_details, or shared_features' repeat count)."""
     return is_code(code) and code not in SIMPLE
+
+
+# A person's details (id, @username, language, chat type) are asked for only where knowing who it
+# was changes what the owner can do: a crash to follow up, an erase or a piece of feedback that did
+# not happen and is theirs, a reply that went to the wrong conversation. Anything else -- a timeout,
+# a download or upload that failed, Telegram refusing -- is fixed from the anonymous record; there
+# the button is offered only when it keeps happening to the same person
+# (shared_features.DETAILS_AFTER).
+WANTS_DETAILS = frozenset({
+    "FM-CRASH", "CV-CRASH", "ST-VIDEO-FAILED",
+    "FM-ERASE", "FM-FEEDBACK-FAILED",
+    "AN-REPLY-NO-MATCH",
+})
+
+
+def wants_details(code) -> bool:
+    return code in WANTS_DETAILS
 
 
 def code_for(bot: str, key: str) -> "str | None":
@@ -1063,4 +1205,4 @@ def decode(code: str) -> str:
             f"What happened: {problem.meaning}\n"
             f"Likely causes: {problem.causes}\n"
             f"What to check: {problem.check}\n"
-            f"Report button: {'offered' if reportable(code) else 'not offered, the message explains itself'}")
+            f"Details button: {'offered' if wants_details(code) else 'offered when it keeps happening to one person' if reportable(code) else 'not offered, the message explains itself'}")

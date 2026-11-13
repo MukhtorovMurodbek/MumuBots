@@ -41,11 +41,17 @@ nothing is imported across folders.
 from __future__ import annotations
 
 import logging
+import re
 from collections import OrderedDict
 
 from telegram.error import BadRequest
 
 logger = logging.getLogger(__name__)
+
+# Refusals that mean the message itself is wrong -- never a passing state of the chat.
+_CONTENT_REFUSED = re.compile(
+    r"button_data_invalid|button_url_invalid|can't parse entities|message is too long|"
+    r"text must be non-empty|reply_markup_too_long|entities_too_long", re.IGNORECASE)
 
 # Watermarks are per chat and tiny (two ints), but a bot that has met a lot
 # of people would still grow one entry per chat forever. The oldest are
@@ -202,9 +208,12 @@ class LiveMessage:
         whichever message now carries the text, so callers can chain or just
         ignore the result.
 
-        Never raises: a live message is a progress report, and failing the
-        operation it is reporting on because its own edit did not land would
-        be the wrong trade every time.
+        Raises only when Telegram refuses the message itself (_CONTENT_REFUSED:
+        a button's data over 64 bytes, broken formatting, text too long) --
+        the bot's own bug, which error_handler then tells the person about.
+        Anything else is swallowed: a live message is a progress report, and
+        failing the operation it is reporting on because its own edit did not
+        land would be the wrong trade every time.
         """
         if self._still_last():
             try:
@@ -227,8 +236,16 @@ class LiveMessage:
 
         try:
             sent = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
+        except BadRequest as exc:
+            # Telegram refused the message itself -- a button's data over 64 bytes, broken
+            # formatting, text too long: the bot's own bug. Swallowed, the person saw nothing at all
+            # (TestBot, 2026-11-14), so it goes up to error_handler, which tells them.
+            if _CONTENT_REFUSED.search(str(exc)):
+                raise
+            logger.warning("Could not send a live message: %s", exc)
+            return self
         except Exception:
-            logger.debug("Could not send a live message", exc_info=True)
+            logger.warning("Could not send a live message", exc_info=True)
             return self
         self.message_id = sent.message_id
         self.watermark = _last_incoming.get(self.chat_id, 0)
@@ -261,8 +278,9 @@ async def edit_in_place(message, bot, text: str, **kwargs) -> "LiveMessage":
 
     Returns the handle, which anything that keeps evolving the same message
     should hold on to; anything that is finished with it can ignore the
-    result. Never raises: a menu that could not be redrawn is not a reason to
-    fail whatever the tap was actually asking for.
+    result. Raises only on a message Telegram refuses outright (see
+    LiveMessage.set): a menu that could not be redrawn for any other reason is
+    not a reason to fail whatever the tap was actually asking for.
     """
     return await LiveMessage.adopt(message).set(bot, text, **kwargs)
 

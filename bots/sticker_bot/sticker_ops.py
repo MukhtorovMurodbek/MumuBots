@@ -200,9 +200,11 @@ async def static_sticker(raw: bytes) -> InputSticker:
     return InputSticker(sticker=png, emoji_list=[DEFAULT_EMOJI], format="static")
 
 
-async def video_sticker(raw: bytes, lang: str) -> InputSticker:
-    """Raises video_sticker.ConversionError when the clip cannot fit Telegram's limits."""
-    webm = await asyncio.to_thread(to_video_sticker_webm, raw, lang)
+async def video_sticker(raw: bytes, lang: str, speed: float = 1.0, low_detail: bool = False,
+                        low_fps: bool = False) -> InputSticker:
+    """Raises video_sticker.ConversionError when the clip cannot fit Telegram's limits
+    (video_sticker.TooBig when only its size is in the way)."""
+    webm = await asyncio.to_thread(to_video_sticker_webm, raw, lang, speed, low_detail, low_fps)
     return InputSticker(sticker=webm, emoji_list=[DEFAULT_EMOJI], format="video")
 
 

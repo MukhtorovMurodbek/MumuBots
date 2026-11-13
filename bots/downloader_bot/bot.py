@@ -132,6 +132,7 @@ from db import (
 from shared_features import (
     note_active,
     note_job,
+    note_stat,
     note_tap,
     publish_profile,
     publish_commands,
@@ -1547,6 +1548,7 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 )
             await status.delete(context.bot)
             note_job(True)
+            note_stat("link_extra", f"album_{kind}")
         except _MergeStop as stop:
             await status.set(context.bot, _merge_text(lang, stop.key), **NO_PREVIEW)
             return False
@@ -1915,6 +1917,7 @@ async def _resend_by_file_id(update, context, lang, status, platform: str, url: 
                               lossless=lossless, redeliver_token=token)
             await status.delete(context.bot)
             note_job(True)
+            note_stat("link_site", platform)
         except Exception as exc:
             if isinstance(exc, BadRequest):
                 # Any refusal of the request itself drops the row, not only the wordings
@@ -2023,6 +2026,7 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                          lossless=delivered_lossless, redeliver_token=token)
                 await status.delete(context.bot)
                 note_job(True)
+                note_stat("link_site", platform)
                 await _store_sent_files(update.effective_user.id, platform, url, delivered_lossless, sent)
             except Exception as exc:
                 note_job(False)
@@ -2084,6 +2088,9 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      lossless=delivered_lossless, redeliver_token=token)
             await status.delete(context.bot)
             note_job(True)
+            note_stat("link_site", platform)
+            for item in items:
+                note_stat("link_media", f"{platform}:{getattr(item, 'kind', None) or 'other'}")
             kept = delivery_cache.keep(update.effective_user.id, platform, url,
                                        list(zip(items, paths)), _cache_floor_mb())
             if delivery_cache.usable(update.effective_user.id):
@@ -2191,6 +2198,8 @@ async def _large_download(update, context, status, lang, platform: str, url: str
             await status.set(context.bot, i18n.t(lang, "large_files_send_failed", price=price, balance=back))
             return False
         note_job(True)
+        note_stat("link_site", platform)
+        note_stat("link_extra", "large_file")
         await status.set(context.bot, i18n.t(lang, "large_files_charged", mb=mb, price=price, balance=after))
         return True
     finally:
@@ -2776,7 +2785,8 @@ async def channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await asyncio.to_thread(set_group_settings, post.chat_id, settings)
             if settings["on"] and detected[0] in settings["platforms"]:
                 context.application.create_task(
-                    _channel_job(context.bot, post, detected[0], detected[1], settings), update=update)
+                    _counted_channel_job(_channel_job(context.bot, post, detected[0], detected[1], settings)),
+                    update=update)
     except Exception as exc:
         error = exc
 
@@ -2785,6 +2795,21 @@ async def channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         context.application.create_task(report(), update=update)
     raise ApplicationHandlerStop
+
+
+# Channel posts being fetched now: work in progress for the soft stop (lifecycle.usage_here, a work
+# source registered in main()), which would not see them otherwise -- nobody is behind a channel post
+# to count as active -- and which a stop signal waits for (SIGTERM_WAIT_SECONDS).
+_channel_jobs = 0
+
+
+async def _counted_channel_job(job) -> None:
+    global _channel_jobs
+    _channel_jobs += 1
+    try:
+        await job
+    finally:
+        _channel_jobs -= 1
 
 
 async def _channel_job(bot, post, platform: str, url: str, settings: dict) -> None:
@@ -2816,6 +2841,8 @@ async def _channel_job(bot, post, platform: str, url: str, settings: dict) -> No
                 items, paths[:] = await asyncio.to_thread(_without_duplicates, items, list(paths))
             if await _put_into_channel(bot, post, list(zip(items, paths)), settings):
                 note_job(True)
+                note_stat("link_site", platform)
+                note_stat("link_extra", "channel_post")
         except (net.TooLarge, net.FetchError) as exc:
             logger.info("A channel post was left as it is: %s", type(exc).__name__)
         except Exception:
@@ -3153,7 +3180,8 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
+    lifecycle.add_work_source("channel post(s)", lambda: _channel_jobs)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
     # ---- the handlers that run before everything else ----

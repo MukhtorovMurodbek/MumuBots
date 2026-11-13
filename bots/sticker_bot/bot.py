@@ -2423,7 +2423,7 @@ def main():
     app = builder.build()
     # Before the handlers, because ConversationHandler(persistent=...) below
     # asks lifecycle whether persistence actually came up.
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
     # ---- the handlers that run before everything else ----

@@ -22,12 +22,17 @@ def test_problem_note_is_three_short_lines_and_keeps_its_code():
     features = load(STICKER, "shared_features")
     problems = load(STICKER, "problems")
     text = features._with_logged_note("Couldn't download that file: Timed out", "FM-CRASH", "en")
-    assert text == "Couldn't download that file: Timed out\nAnonymous report is saved\n🆔 FM-CRASH"
+    # The wording since 2.1.6 (the owner, 2026-11-13); still three short lines.
+    assert text == "Couldn't download that file: Timed out\nAnonymous technical report saved.\n🆔 FM-CRASH"
     # The Report button and the problem log find a code on its own line too.
     assert problems.find_code(text) == "FM-CRASH"
-    assert problems.strip_code(text) == "Couldn't download that file: Timed out\nAnonymous report is saved"
+    assert problems.strip_code(text) == "Couldn't download that file: Timed out\nAnonymous technical report saved."
     # Applied twice, it does not grow.
     assert features._with_logged_note(text, "FM-CRASH", "en") == text
+    # Under a details button the line says so -- in place of the plain one, not as well.
+    offered = features._with_logged_note(text, "FM-CRASH", "en", offered=True)
+    assert offered.endswith("\nAnonymous technical report saved. You can opt in to send more details.\n🆔 FM-CRASH")
+    assert offered.count("Anonymous technical report saved.") == 1
 
 
 # ── DownloaderBot: the quality picker ────────────────────────────────────────

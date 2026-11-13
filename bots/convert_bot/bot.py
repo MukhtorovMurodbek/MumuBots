@@ -630,6 +630,19 @@ def _ext_of(filename: str | None, fallback: str) -> str:
     return fallback
 
 
+def _ext_of_file(file_obj, fallback: str) -> str:
+    """`_ext_of` on the file's name; a file sent with no name (a GIF from Telegram's own picker, say) falls back to its MIME type, then to `fallback`."""
+    ext = _ext_of(getattr(file_obj, "file_name", None), "")
+    if ext:
+        return ext
+    import mimetypes
+    guessed = mimetypes.guess_extension(getattr(file_obj, "mime_type", None) or "")
+    guessed = formats.normalise(guessed) if guessed else ""
+    if guessed and formats.is_supported_source(guessed):
+        return guessed
+    return fallback
+
+
 async def convert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.message.reply_text(
@@ -937,9 +950,14 @@ async def _download_big(context, msg, path, declared_size: int, status, lang: st
 async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     msg = update.message
-    if msg.document:
+    # An animation comes with `document` set too (Bot API backward compatibility), so it is
+    # looked at first: a Telegram GIF is an MP4 with no sound and often has no file name.
+    if msg.animation:
+        file_obj = msg.animation
+        ext = _ext_of_file(file_obj, "mp4")
+    elif msg.document:
         file_obj = msg.document
-        ext = _ext_of(file_obj.file_name, "")
+        ext = _ext_of_file(file_obj, "")
     elif msg.photo:
         file_obj = msg.photo[-1]
         ext = "jpg"
@@ -952,9 +970,6 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
     elif msg.voice:
         file_obj = msg.voice
         ext = "ogg"
-    elif msg.animation:
-        file_obj = msg.animation
-        ext = _ext_of(getattr(file_obj, "file_name", None), "gif")
     else:
         return
 
@@ -1034,12 +1049,15 @@ async def _receive_with_room(update: Update, context: ContextTypes.DEFAULT_TYPE,
         status = await LiveMessage.reply_to(msg, download_card(lang, 0, 0, 0))
     path = _new_upload_path(update.effective_user.id, ext)
     try:
-        if declared_size > big_files.BOT_API_DOWNLOAD_BYTES and not LOCAL_BOT_API_URL:
-            await _download_big(context, msg, path, declared_size, status, lang)
-        else:
-            # Streamed to the file either way; download_as_bytearray built the
-            # whole thing in memory first.
-            await _download_bot_api(context, file_obj, path, declared_size, status, lang)
+        # A file on its way in is work in progress: a soft stop waits for it
+        # (lifecycle.usage_here), and a redeploy in the middle of it says so.
+        async with lifecycle.busy(msg.chat_id, i18n.t(lang, "restarting_send_again")):
+            if declared_size > big_files.BOT_API_DOWNLOAD_BYTES and not LOCAL_BOT_API_URL:
+                await _download_big(context, msg, path, declared_size, status, lang)
+            else:
+                # Streamed to the file either way; download_as_bytearray built the
+                # whole thing in memory first.
+                await _download_bot_api(context, file_obj, path, declared_size, status, lang)
     except big_files.Unavailable as exc:
         # The route for big files is down, not the file. Said as such, with
         # what still works, rather than as a download error.
@@ -2118,7 +2136,9 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
+    # Conversions, queued or running, are work in progress for the soft stop.
+    lifecycle.add_work_source("conversion(s)", lambda: len(jobs._jobs))
     app.add_error_handler(error_handler)
     attach_problem_reports(app)
     # ---- the handlers that run before everything else ----

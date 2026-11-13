@@ -761,6 +761,8 @@ class PostgresPersistence(BasePersistence):
 # bots and four of them are trilingual: the caller has the user's language in
 # hand and this file has no business importing i18n to go and find it.
 _in_flight: dict[int, tuple[int, str]] = {}
+# When each stretch began, so a soft stop that finds one can say how long it has run.
+_in_flight_since: dict[int, float] = {}
 _next_ticket = 0
 
 
@@ -785,10 +787,12 @@ async def busy(chat_id: int, if_interrupted: str):
     _next_ticket += 1
     ticket = _next_ticket
     _in_flight[ticket] = (chat_id, if_interrupted)
+    _in_flight_since[ticket] = time.monotonic()
     try:
         yield
     finally:
         _in_flight.pop(ticket, None)
+        _in_flight_since.pop(ticket, None)
 
 
 async def _tell_the_interrupted(bot) -> None:
@@ -999,14 +1003,15 @@ def maintenance_minutes_left() -> "int | None":
 
 
 def is_paused() -> bool:
-    """True when nothing slow should be *started*: either a stop signal has
-    already arrived, or the owner has announced an update.
+    """True when nothing slow should be *started*: a stop signal has already
+    arrived, the owner has announced an update, or a soft stop is checking
+    whether anybody is using the bot (see "Soft stop" at the end of this file).
 
     The check every long handler makes. is_draining() is still the narrower
     question -- "is this process going away right now" -- and is what the
     shutdown path itself uses.
     """
-    return _draining or _maintenance_on
+    return _draining or _maintenance_on or _closing
 
 
 WAITLIST_KEEP_DAYS = int(os.environ.get("DEPLOY_WAITLIST_KEEP_DAYS") or 7)
@@ -1150,6 +1155,10 @@ async def _drain_and_stop(app) -> None:
         except Exception:
             logger.debug("Could not leave a redeploy note", exc_info=True)
     try:
+        await _wait_for_work(SIGTERM_WAIT_SECONDS)
+    except Exception:
+        logger.debug("Could not wait for work in progress", exc_info=True)
+    try:
         await _tell_the_interrupted(app.bot)
     except Exception:
         logger.debug("Drain announcement failed", exc_info=True)
@@ -1213,14 +1222,17 @@ async def _persist_job(context) -> None:
         logger.debug("Periodic state save failed; the next pass retries", exc_info=True)
 
 
-def install(app, bot_id: str) -> None:
+def install(app, bot_id: str, admin_ids=()) -> None:
     """One line in each bot's main(), next to family_link.attach().
 
     Everything it wires is best-effort: a bot whose database is unreachable
-    keeps running exactly as it did before any of this existed.
+    keeps running exactly as it did before any of this existed. `admin_ids`
+    are the owners, whose own messages do not count as somebody using the bot
+    when a soft stop asks.
     """
-    global _app, _bot_id, _persistence_on
+    global _app, _bot_id, _persistence_on, _admins
     _app, _bot_id = app, bot_id
+    _admins = frozenset(int(x) for x in admin_ids or ())
     _persistence_on = app.persistence is not None
     if not ENABLED:
         logger.info("Deploy safety off (DEPLOY_SAFETY=off).")
@@ -1246,6 +1258,12 @@ async def on_start(bot_id: str) -> None:
     if not ENABLED:
         return
     await hold_the_lease(bot_id)
+
+    # Running again, so whatever stop the last /shutdown recorded is over.
+    try:
+        await asyncio.to_thread(_set_note, STOPPED_NOTE_PREFIX + bot_id, "")
+    except Exception:
+        logger.debug("Could not clear the stopped-on-purpose note", exc_info=True)
 
     # An update is usually several deploys, so a container that has just come
     # up has to find out whether it is still inside one before it starts
@@ -1300,3 +1318,282 @@ async def on_stop(application) -> None:
         except Exception:
             logger.warning("Could not save in-progress state on the way out.", exc_info=True)
     release_lease()
+
+
+# --- Soft stop -------------------------------------------------------------------------------------
+# The only way a service is meant to go down: ManagerBot's /shutdown (exit 0, it stays down) or
+# /restart (exit 1, the host starts it again). It first closes the door -- every bot in the process
+# declines new slow work, with no await in between -- then looks for anybody using any of them, and
+# reopens and refuses if it finds one. "In use", for one bot (usage_here):
+#   - slow work in progress: a busy() stretch (StickerBot, DownloaderBot) or a registered work source
+#     (ConvertBot's conversions, queued or running);
+#   - updates received and not yet handled;
+#   - somebody other than the owners sent it anything -- a message, a button, a payment -- in the
+#     last QUIET_MINUTES;
+#   - somebody other than the owners is part-way through a conversation (a pack being built, a reply
+#     being written) and took a step in the last CONVERSATION_MINUTES;
+# and, for the process, a bus command still running on any of its bots (a broadcast, a gift, a dump).
+# A stop signal from the host (a deploy, Railway's Restart/Remove) cannot be refused; it waits up to
+# SIGTERM_WAIT_SECONDS for work in progress instead, inside the host's draining window.
+
+QUIET_MINUTES = float(os.environ.get("SOFTSTOP_QUIET_MINUTES", "5"))
+CONVERSATION_MINUTES = float(os.environ.get("SOFTSTOP_CONVERSATION_MINUTES", "20"))
+STOP_REQUEST_MAX_AGE_SECONDS = 300
+STOP_DELAY_SECONDS = 3.0
+SIGTERM_WAIT_SECONDS = float(os.environ.get("DEPLOY_SIGTERM_WAIT_SECONDS", "60"))
+STOPPED_NOTE_PREFIX = "stopped:"
+
+_closing = False
+_admins: frozenset = frozenset()
+_work_sources: dict = {}
+_stop_requested = False
+
+
+def add_work_source(name: str, count) -> None:
+    """`count()` -> how many pieces of slow work of this kind are queued or running now."""
+    _work_sources[name] = count
+
+
+def _work_counts() -> "dict[str, int]":
+    counts = {}
+    if _in_flight:
+        counts["slow work"] = len(_in_flight)
+    for name, count in _work_sources.items():
+        try:
+            n = int(count() or 0)
+        except Exception:
+            logger.debug("Work source %s could not be counted", name, exc_info=True)
+            n = 0
+        if n:
+            counts[name] = n
+    return counts
+
+
+async def _wait_for_work(limit: float) -> None:
+    """Until nothing slow is in progress here, or `limit` seconds."""
+    deadline = time.monotonic() + max(0.0, limit)
+    announced = False
+    while _work_counts() and time.monotonic() < deadline:
+        if not announced:
+            announced = True
+            logger.info("Waiting up to %.0fs for work in progress: %s", limit, _work_counts())
+        await asyncio.sleep(1.0)
+
+
+def _minutes(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    return f"{seconds:.0f}s" if seconds < 90 else f"{seconds / 60:.0f}m"
+
+
+def _conversation_users(app) -> "list[tuple]":
+    """The keys of every open conversation of every ConversationHandler in the app."""
+    from telegram.ext import ConversationHandler
+    keys = []
+    for handlers in getattr(app, "handlers", {}).values():
+        for handler in handlers:
+            if isinstance(handler, ConversationHandler):
+                keys.extend(tuple(key) if isinstance(key, (tuple, list)) else (key,)
+                            for key in getattr(handler, "_conversations", {}) or {})
+    return keys
+
+
+def usage_here() -> "list[str]":
+    """Why this bot counts as in use right now, as short phrases about how many and how long ago, never who; empty when it does not."""
+    reasons = []
+    now = time.monotonic()
+    for name, n in _work_counts().items():
+        reasons.append(f"{n} {name} in progress")
+    if _in_flight_since:
+        reasons.append(f"the oldest started {_minutes(now - min(_in_flight_since.values()))} ago")
+    app = _app
+    if app is None:
+        return reasons
+    queue = getattr(app, "update_queue", None)
+    if queue is not None and queue.qsize():
+        reasons.append(f"{queue.qsize()} update(s) waiting to be handled")
+    wall = time.time()
+    seen = {}
+    for user_id, data in list(getattr(app, "user_data", {}).items()):
+        if user_id in _admins or not isinstance(data, dict):
+            continue
+        last = data.get("_last_seen")
+        if isinstance(last, (int, float)):
+            seen[user_id] = last
+    recent = [wall - last for last in seen.values() if wall - last < QUIET_MINUTES * 60]
+    if recent:
+        reasons.append(f"{len(recent)} person(s) active in the last {QUIET_MINUTES:g}m "
+                       f"(latest {_minutes(min(recent))} ago)")
+    try:
+        open_steps = []
+        for key in _conversation_users(app):
+            ids = [part for part in key if isinstance(part, int) and part not in _admins]
+            if not ids or any(part in _admins for part in key if isinstance(part, int)):
+                continue
+            last = max((seen.get(part, 0) for part in ids), default=0)
+            if last and wall - last < CONVERSATION_MINUTES * 60:
+                open_steps.append(wall - last)
+        if open_steps:
+            reasons.append(f"{len(open_steps)} conversation(s) part-way through "
+                           f"(last step {_minutes(min(open_steps))} ago)")
+    except Exception:
+        logger.debug("Could not read the open conversations", exc_info=True)
+    return reasons
+
+
+def _peers() -> list:
+    """The lifecycle of every bot still running in this process (each bot has its own copy of this module); a bot stopped on its own is no longer one of them."""
+    found = [module for name, module in list(sys.modules.items())
+             if (name == "lifecycle" or name.endswith(".lifecycle"))
+             and getattr(module, "_app", None) is not None and hasattr(module, "usage_here")
+             and getattr(module._app, "running", True) is not False]
+    me = sys.modules.get(__name__)
+    if me is not None and me not in found:
+        found.append(me)
+    return found
+
+
+def _set_note(key: str, value: str) -> None:
+    import family_link
+
+    with db.pooled() as conn:
+        conn.execute(
+            f"""
+            INSERT INTO {family_link.FAMILY_SCHEMA}.settings (key, value) VALUES (%s, %s)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        conn.commit()
+
+
+def _running_bus_commands(bot_ids: list) -> "list[tuple[str, str, float]]":
+    """(bot, command, seconds running) for family commands still running on these bots, apart from stops and restarts (the one asking among them)."""
+    import family_link
+
+    with db.pooled() as conn:
+        cur = conn.execute(
+            f"""
+            SELECT target_bot, command, EXTRACT(EPOCH FROM now() - claimed_at)
+            FROM {family_link.FAMILY_SCHEMA}.commands
+            WHERE status = 'running' AND target_bot = ANY(%s)
+              AND command NOT IN ('softstop', 'softstopbot', 'restart')
+              AND claimed_at > now() - interval '1 hour'
+            """,
+            (list(bot_ids),),
+        )
+        return [(row[0], row[1], float(row[2] or 0)) for row in cur.fetchall()]
+
+
+def _issued_too_long_ago(issued: "str | None") -> "str | None":
+    if issued is None:
+        return None
+    try:
+        age = time.time() - float(issued)
+    except ValueError:
+        return None
+    if age > STOP_REQUEST_MAX_AGE_SECONDS:
+        return (f"Not stopping: that request is {_minutes(age)} old (it waited while this service was "
+                f"down, or the bus was slow). Send it again if it still stands.")
+    return None
+
+
+async def soft_stop(exit_code: int, issued: "str | None" = None) -> str:
+    """Stop this whole process -- every bot in it -- if nobody is using any of them; otherwise say why not. exit_code 0: stay down; 1: the host restarts it."""
+    stale = _issued_too_long_ago(issued)
+    if stale:
+        return stale
+    peers = _peers()
+    names = sorted(str(getattr(p, "_bot_id", "?")) for p in peers)
+    if any(str(getattr(p, "_bot_id", "")).startswith("manager") for p in peers):
+        return ("Not stopping: ManagerBot runs in this same process, and nothing would be left to "
+                "report or to bring it back. Stop this service from the host instead.")
+    if any(getattr(p, "_stop_requested", False) or getattr(p, "_draining", False) for p in peers):
+        return "Already stopping."
+
+    for p in peers:
+        p._closing = True
+    try:
+        found = {str(p._bot_id): p.usage_here() for p in peers}
+        running = await asyncio.to_thread(_running_bus_commands, names)
+    except Exception as exc:
+        for p in peers:
+            p._closing = False
+        return f"Not stopping: could not check whether anybody is using it ({type(exc).__name__}: {exc})."
+    for bot_id, command, seconds in running:
+        found.setdefault(bot_id, []).append(f"the bus command '{command}' running for {_minutes(seconds)}")
+    busy = {bot_id: reasons for bot_id, reasons in found.items() if reasons}
+    if busy:
+        for p in peers:
+            p._closing = False
+        lines = [f"Not stopping -- in use. Everything stays open. ({', '.join(names)})"]
+        lines += [f"- {bot_id}: " + "; ".join(reasons) for bot_id, reasons in sorted(busy.items())]
+        lines.append("Ask again once it is quiet; /idle shows the quiet hours.")
+        return "\n".join(lines)
+
+    for p in peers:
+        p._stop_requested = True
+    process = sys.modules.get("family_process")
+    if process is not None:
+        process.exit_code = exit_code
+    if exit_code == 0:
+        stamp = datetime.now(timezone.utc).isoformat()
+        for p in peers:
+            try:
+                await asyncio.to_thread(_set_note, STOPPED_NOTE_PREFIX + str(p._bot_id), stamp)
+            except Exception:
+                logger.debug("Could not leave the stopped-on-purpose note", exc_info=True)
+    logger.warning("Soft %s: nobody is using %s -- stopping in %.0fs.",
+                   "restart" if exit_code else "stop", ", ".join(names), STOP_DELAY_SECONDS)
+    asyncio.get_running_loop().call_later(STOP_DELAY_SECONDS, os.kill, os.getpid(), signal.SIGTERM)
+    if exit_code:
+        return (f"Nobody is using it. Restarting {', '.join(names)} (one service) in "
+                f"{STOP_DELAY_SECONDS:.0f}s; the host starts it again.")
+    return (f"Nobody is using it. Stopping {', '.join(names)} (one service) in {STOP_DELAY_SECONDS:.0f}s. "
+            f"It stays down until the host starts it again (a deploy, or Redeploy on the host).")
+
+
+async def soft_stop_bot(issued: "str | None" = None) -> str:
+    """Stop only this bot, if nobody is using it; the other bots of its process carry on. It comes back when the process next starts."""
+    global _closing, _stop_requested
+    stale = _issued_too_long_ago(issued)
+    if stale:
+        return stale
+    name = str(_bot_id)
+    if _app is None:
+        return f"Not stopping {name}: it is not running yet."
+    if _stop_requested or _draining:
+        return "Already stopping."
+    _closing = True
+    try:
+        reasons = usage_here()
+        running = await asyncio.to_thread(_running_bus_commands, [name])
+    except Exception as exc:
+        _closing = False
+        return f"Not stopping {name}: could not check whether anybody is using it ({type(exc).__name__}: {exc})."
+    reasons += [f"the bus command '{command}' running for {_minutes(seconds)}" for _, command, seconds in running]
+    if reasons:
+        _closing = False
+        return (f"Not stopping {name} -- in use: " + "; ".join(reasons)
+                + ". It stays open. Ask again once it is quiet.")
+    _stop_requested = True
+    try:
+        await asyncio.to_thread(_set_note, STOPPED_NOTE_PREFIX + name, datetime.now(timezone.utc).isoformat())
+    except Exception:
+        logger.debug("Could not leave the stopped-on-purpose note", exc_info=True)
+    others = sorted(str(p._bot_id) for p in _peers() if p is not sys.modules.get(__name__))
+    logger.warning("Soft stop of %s alone: nobody is using it -- stopping in %.0fs.", name, STOP_DELAY_SECONDS)
+    asyncio.get_running_loop().call_later(STOP_DELAY_SECONDS, _stop_this_bot)
+    carry_on = f"; {', '.join(others)} carry on" if others else ""
+    return (f"Nobody is using {name}. Stopping it alone in {STOP_DELAY_SECONDS:.0f}s{carry_on}. "
+            f"It comes back when its service next starts (a /restart, a deploy, or Redeploy on the host).")
+
+
+def _stop_this_bot() -> None:
+    app = _app
+    if app is None:
+        return
+    try:
+        app.stop_running()
+    except RuntimeError:
+        logger.warning("Could not stop %s alone: it had not finished starting.", _bot_id)
+

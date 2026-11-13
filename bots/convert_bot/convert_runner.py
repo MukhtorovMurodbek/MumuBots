@@ -27,13 +27,14 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import big_files
 import db
 import family_link
+import formats
 import i18n
 import jobs
 import lifecycle
 import live_message
 import problems
 from live_message import LiveMessage
-from shared_features import emit_event, note_job, report_markup
+from shared_features import emit_event, note_job, note_stat, report_markup
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,11 @@ class ConvertRunner(jobs.Runner):
         note_job(True)
         await self._status(job, i18n.t(job.lang, "job_done", src=_upper(job.src_ext),
                                        target=_target(job)))
+        # After the person's line, and never in its way: a statistic must not cost them their result.
+        try:
+            note_stat("conversion", f"{formats.normalise(job.src_ext)}>{formats.normalise(job.target_ext)}")
+        except Exception:
+            logger.debug("Conversion not counted", exc_info=True)
 
     async def refund(self, job: jobs.Job, kind: str) -> int:
         return await asyncio.to_thread(
@@ -377,7 +383,8 @@ class ConvertRunner(jobs.Runner):
         code = problems.JOB_ENDINGS.get(kind, "CV-CRASH")
         incident = job.extra.setdefault("incident", problems.new_incident())
         logger.info("Conversion %s ended %s (%s, incident %s): %s", job.id, kind, code, incident, detail)
-        await self._status(job, text + problems.code_line(code), report_markup(lang, code, incident))
+        await self._status(job, text + problems.code_line(code),
+                           report_markup(lang, code, incident, chat_id=job.chat_id))
 
     async def alert(self, job: jobs.Job, kind: str, detail: str, elapsed: float, refunded_to) -> None:
         """Straight to the owner, from this bot, in English.

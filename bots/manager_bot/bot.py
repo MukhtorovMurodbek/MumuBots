@@ -676,6 +676,68 @@ async def buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_long(context, update.effective_chat.id, report, "buttons.txt")
 
 
+# /stats: the anonymous daily counts the bots write (shared_features.note_stat,
+# family_link.record_stats) -- what was done, never who, never finer than a day.
+STATS_DEFAULT_DAYS = 30
+STATS_MAX_DAYS = 400
+STATS_MAX_LINES = 12
+STATS_USAGE = f"Usage: /stats [days] -- from 1 to {STATS_MAX_DAYS} days, {STATS_DEFAULT_DAYS} if not said."
+STATS_LABELS = {
+    "link_site": "Links delivered, by site",
+    "link_media": "Media delivered, site:kind",
+    "link_extra": "Extras",
+    "conversion": "Conversions, from>to",
+    "sticker": "Stickers added",
+    "sticker_pack": "Packs",
+    "video_fit_offered": "Clips that didn't fit",
+    "video_fit": "What was done about them",
+    "anon_relay": "Messages relayed",
+}
+
+
+def _stats_report(days: int) -> str:
+    rows = family_link.stats_history(days)
+    if not rows:
+        return "No statistics recorded yet."
+    per_bot: dict[str, dict[str, list]] = {}
+    for row in rows:
+        per_bot.setdefault(row["bot_id"], {}).setdefault(row["metric"], []).append((row["key"], int(row["n"])))
+    names = {child["id"]: child["name"] for child in CHILDREN}
+    order = [child["id"] for child in CHILDREN if child["id"] in per_bot]
+    order += sorted(bot_id for bot_id in per_bot if bot_id not in names)
+    lines = [f"Statistics, last {days} days (anonymous daily counts, nothing about who)"]
+    for bot_id in order:
+        lines += ["", names.get(bot_id, bot_id)]
+        for metric, items in per_bot[bot_id].items():
+            total = sum(n for _, n in items)
+            lines.append(f"  {STATS_LABELS.get(metric, metric)} — {total}")
+            for key, n in items[:STATS_MAX_LINES]:
+                lines.append(f"    {key}: {n} ({n * 100 // total}%)")
+            if len(items) > STATS_MAX_LINES:
+                lines.append(f"    +{len(items) - STATS_MAX_LINES} more")
+    return "\n".join(lines)
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await guard(update, context):
+        return
+    days = STATS_DEFAULT_DAYS
+    if context.args:
+        try:
+            days = int(context.args[0])
+        except ValueError:
+            days = 0
+        if len(context.args) > 1 or not 1 <= days <= STATS_MAX_DAYS:
+            await update.message.reply_text(STATS_USAGE)
+            return
+    try:
+        report = await asyncio.to_thread(_stats_report, days)
+    except Exception as exc:
+        await update.message.reply_text(f"\u26a0\ufe0f Couldn't read the statistics: {exc}")
+        return
+    await send_long(context, update.effective_chat.id, report, "stats.txt")
+
+
 async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The three buttons under the /status board."""
     if not await guard(update, context):
@@ -762,6 +824,9 @@ COMMAND_SINCE = {
     # Since 2.1.1, where /gift arrived (2.1.2 said so): ManagerBot has its own service now and may
     # run a newer version than the public bots.
     "gift": "2.1.1",
+    # The soft stop (2.1.6): an older bot does not know these, and its "restart" exits at once.
+    "softstop": "2.1.6",
+    "softstopbot": "2.1.6",
 }
 
 
@@ -859,6 +924,8 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
         return
 
+    if command in ("softstop", "softstopbot", "restart"):
+        args = [arg for arg in args if not arg.replace(".", "", 1).isdigit()] + [str(int(time_module.time()))]
     command_id = await asyncio.to_thread(
         db.queue_command, bot["id"], command, " ".join(args),
         update.effective_user.id, update.effective_chat.id,
@@ -870,6 +937,156 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
     # only ever useful for matching this line to the timeout notice that
     # quotes the same id.
     await update.effective_message.reply_text(f"→ {bot['name']} · {command} — queued as #{command_id}")
+
+
+# /shutdown and /restart ask first, with buttons: which bot, and whether the
+# whole service it runs in. The question is held here, by a nonce in the
+# buttons' data, for SERVICE_ASK_SECONDS; a tap after that, or a second tap,
+# does nothing.
+SERVICE_ASK_SECONDS = 120
+_SERVICE_ASKS: "OrderedDict[str, dict]" = OrderedDict()
+
+
+async def _service_of(update: Update, bot_word: str):
+    """(bot, the ids of every bot in its service) -- or None, having said why
+    not. A service is every bot whose heartbeat comes from the same host."""
+    bot = resolve_bot(bot_word)
+    if bot is None or bot["id"] == BOT_NAME:
+        await update.message.reply_text(
+            "That one is me -- stop or restart me from the host." if bot else
+            f"No such bot: {bot_word}. Known: {bot_list_hint()}")
+        return None
+    try:
+        beats = {row["bot_id"]: row for row in await asyncio.to_thread(db.all_heartbeats)}
+    except Exception as exc:
+        await update.message.reply_text(f"Could not read the heartbeats, so nothing was asked: {exc}")
+        return None
+    beat = beats.get(bot["id"])
+    if beat is None or beat["seconds_ago"] > DOWN_AFTER_SECONDS:
+        await update.message.reply_text(f"{bot['name']} is not running, so there is nothing to do.")
+        return None
+    host = beat.get("host")
+    together = sorted(row["bot_id"] for row in beats.values()
+                      if host and row.get("host") == host and row["seconds_ago"] <= DOWN_AFTER_SECONDS)
+    together = together or [bot["id"]]
+    mine = beats.get(BOT_NAME) or {}
+    if BOT_NAME in together or (host and mine.get("host") == host):
+        await update.message.reply_text(
+            f"{bot['name']} runs in the same service as me, so this would take me down too. "
+            "Do it from the host.")
+        return None
+    return bot, together
+
+
+def _names(bot_ids) -> str:
+    return ", ".join((resolve_bot(bot_id) or {}).get("name", bot_id) for bot_id in bot_ids)
+
+
+def _ask_service(kind: str, bot: dict, together: list, force: bool = False) -> str:
+    nonce = secrets.token_hex(4)
+    _SERVICE_ASKS[nonce] = {"kind": kind, "bot": bot["id"], "together": together, "force": force,
+                            "at": time_module.monotonic()}
+    while len(_SERVICE_ASKS) > 32:
+        _SERVICE_ASKS.popitem(last=False)
+    return nonce
+
+
+async def shutdown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/shutdown <bot> -- stop that bot, or the whole service it runs in, after
+    asking which; only if nobody is using it (lifecycle.soft_stop)."""
+    if not await guard(update, context):
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: /shutdown <bot>\n"
+            "Asks first: that bot alone, or the whole service it runs in. Either way it stops only if "
+            "nobody is using it; otherwise you get the reasons and nothing stops. A stopped bot stays "
+            f"down until its service next starts.\nKnown: {bot_list_hint()}")
+        return
+    found = await _service_of(update, context.args[0])
+    if found is None:
+        return
+    bot, together = found
+    nonce = _ask_service("shutdown", bot, together)
+    others = [bot_id for bot_id in together if bot_id != bot["id"]]
+    if others:
+        text = (f"⏹ <b>{html.escape(bot['name'])}</b> shares one service with "
+                f"{html.escape(_names(others))}.\n\n"
+                f"<b>Only {html.escape(bot['name'])}</b>: the others carry on; it comes back when the "
+                f"service next starts.\n<b>All {len(together)}</b>: the whole service stops and stays down "
+                "until it is deployed or redeployed.\n\n"
+                "Either way it happens only if nobody is using them.")
+        rows = [[InlineKeyboardButton(f"Stop only {bot['name']}", callback_data=f"svc:{nonce}:one")],
+                [InlineKeyboardButton(f"Stop all {len(together)}", callback_data=f"svc:{nonce}:all")],
+                [InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    else:
+        text = (f"⏹ Stop <b>{html.escape(bot['name'])}</b>? It is alone in its service, which stops and "
+                "stays down until it is deployed or redeployed -- only if nobody is using it.")
+        rows = [[InlineKeyboardButton(f"Stop {bot['name']}", callback_data=f"svc:{nonce}:all"),
+                 InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/restart <bot> [force] -- restart the service that bot runs in, after
+    asking, once nobody is using it. `force` restarts that bot alone, at once:
+    in 2.2.0 a bot's os._exit(1) is caught by the launcher (main._BotOs._exit),
+    which loads it again while the others carry on."""
+    if not await guard(update, context):
+        return
+    args = [arg.lower() for arg in context.args]
+    force = "force" in args
+    words = [arg for arg in context.args if arg.lower() != "force"]
+    if len(words) != 1:
+        await update.message.reply_text(
+            "Usage: /restart <bot> [force]\nRestarts the service that bot runs in -- every bot in it -- "
+            "once nobody is using it; force restarts that bot alone, at once, whatever it is doing "
+            f"(for a stuck bot).\nKnown: {bot_list_hint()}")
+        return
+    found = await _service_of(update, words[0])
+    if found is None:
+        return
+    bot, together = found
+    nonce = _ask_service("restart", bot, together, force)
+    if force:
+        text = (f"🔄 Restart <b>{html.escape(bot['name'])}</b> <b>at once</b>, whatever it is doing? Anybody "
+                "mid-something with it loses that. It restarts alone; the other bots of its service carry on.")
+        label = f"Restart {bot['name']} now"
+    else:
+        text = (f"🔄 Restart the service of <b>{html.escape(bot['name'])}</b>? Every bot in it restarts: "
+                f"{html.escape(_names(together))}.\nIt restarts once nobody is using it; otherwise you get "
+                "the reasons and nothing restarts.")
+        label = f"Restart all {len(together)}"
+    rows = [[InlineKeyboardButton(label, callback_data=f"svc:{nonce}:all"),
+             InlineKeyboardButton("Cancel", callback_data=f"svc:{nonce}:no")]]
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def service_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap under /shutdown or /restart: queue what was chosen, once."""
+    if not await guard(update, context):
+        return
+    query = update.callback_query
+    _, nonce, choice = (query.data.split(":") + ["", ""])[:3]
+    ask = _SERVICE_ASKS.pop(nonce, None)
+    await query.answer()
+    if ask is None or time_module.monotonic() - ask["at"] > SERVICE_ASK_SECONDS:
+        await edit_in_place(query.message, context.bot, "That question has expired -- nothing was asked. "
+                                                        "Send the command again.")
+        return
+    if choice not in ("one", "all"):
+        await edit_in_place(query.message, context.bot, "Cancelled -- nothing was asked.")
+        return
+    bot = resolve_bot(ask["bot"])
+    if ask["kind"] == "restart":
+        command, args = "restart", (["force"] if ask["force"] else [])
+        chosen = f"restart {bot['name']} now" if ask["force"] else f"restart {_names(ask['together'])}"
+    elif choice == "one":
+        command, args, chosen = "softstopbot", [], f"stop only {bot['name']}"
+    else:
+        command, args, chosen = "softstop", [], f"stop {_names(ask['together'])}"
+    await edit_in_place(query.message, context.bot, f"Asked: {chosen}. The answer follows.")
+    await _dispatch(update, context, bot, command, args)
 
 
 async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2323,6 +2540,12 @@ def routes_section(settings: dict, now: float) -> "list[str]":
     return [head, "  " + " · ".join(shown)] if shown else [head]
 
 
+def _brief_line(code: str) -> str:
+    """The code's own plain-words line, under it: what the person ran into."""
+    text = problems.brief(code)
+    return f"\n      <i>{html.escape(text)}</i>" if text else ""
+
+
 def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
                          feedback_note: "str | None" = None, routes: "dict | None" = None,
                          now: "float | None" = None, people: "list | None" = None) -> str:
@@ -2367,7 +2590,7 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
             lines.append(
                 f"  {html.escape(_bot_name(bot_id))} · <code>{html.escape(code)}</code> "
                 f"×{len(group)} — {html.escape(problem.title if problem else 'unknown code')}"
-                f"{mark}\n      {incidents}")
+                f"{mark}{_brief_line(code)}\n      {incidents}")
 
     by_kind: dict = {}
     for (bot_id, code), group in grouped.get(problems.REFUSED, {}).items():
@@ -2376,7 +2599,7 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
         entries = sorted(by_kind.get(kind, ()), key=lambda e: (-len(e[2]), e[0], e[1]))
         if not entries:
             continue
-        icon, heading, meaning = problems.KIND_LABELS[kind]
+        icon, heading, _ = problems.KIND_LABELS[kind]
         total = sum(len(group) for _, _, group in entries)
         lines.append(f"\n{icon} <b>{html.escape(heading)} — {total}</b>")
         for bot_id, code, group in entries[:MAX_CODES_PER_KIND]:
@@ -2384,12 +2607,11 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
             count = f" ×{len(group)}" if len(group) > 1 else ""
             lines.append(
                 f"  {html.escape(_bot_name(bot_id))} · <code>{html.escape(code)}</code>{count} — "
-                f"{html.escape(problem.title if problem else 'unknown code')}")
+                f"{html.escape(problem.title if problem else 'unknown code')}{_brief_line(code)}")
         rest = entries[MAX_CODES_PER_KIND:]
         if rest:
             lines.append(f"  +{sum(len(group) for _, _, group in rest)} more, under "
                          f"{len(rest)} other code(s) — <code>/reports</code>")
-        lines.append(f"  <i>{html.escape(meaning)}</i>")
 
     if not rows:
         lines.append("\nNothing at all — no bot showed anybody a problem today.")
@@ -2864,6 +3086,15 @@ async def _is_redeploying(bot_id: str) -> bool:
     return 0 <= age <= REDEPLOY_GRACE_SECONDS
 
 
+async def _stopped_on_purpose(bot_id: str) -> bool:
+    """True when the bot's last words were a soft shutdown (its note is
+    cleared when it starts again: lifecycle.on_start)."""
+    try:
+        return bool(await asyncio.to_thread(db.get_setting, lifecycle.STOPPED_NOTE_PREFIX + bot_id))
+    except Exception:
+        return False
+
+
 async def _clear_redeploy_note(bot_id: str) -> None:
     try:
         await asyncio.to_thread(db.set_setting, lifecycle.RESTART_NOTE_PREFIX + bot_id, "")
@@ -2924,6 +3155,11 @@ async def watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"✅ <b>{bot['name']}</b> is back up (started {uptime} ago, "
                 f"on {html.escape(beat['host'] or '?')})."
             )
+        elif await _stopped_on_purpose(bot["id"]):
+            # Down because the owner asked for it: said once, as what it is, not as an outage.
+            await asyncio.to_thread(db.set_known_state, bot["id"], False)
+            await notify_owner(context, f"⏹ <b>{bot['name']}</b> stopped as asked (soft shutdown). "
+                                        "It stays down until it is deployed again.")
         elif await _is_redeploying(bot["id"]):
             # Deliberate, and recent. Leave known_state alone so that the
             # "it is back" message is not announced either -- a redeploy the
@@ -3175,6 +3411,8 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 /usage [bot] — memory, peaks, and what they cost
 /idle [bot] — how quiet each bot is, and whether sleeping would pay
 /buttons [days] — how often each button is tapped, per bot (counts only)
+/stats [days] — what the bots did, per day: sites, conversions, stickers
+    (anonymous counts, nothing about who)
 /providers — which of DownloaderBot's download routes work, which rest
 /probe — test every download route, from DownloaderBot's container
 /alerts on|off — mute or unmute unprompted alerts
@@ -3182,7 +3420,11 @@ HELP = f"""👪 <b>ManagerBot</b> — the family's manager.
 <b>Doing something to a bot</b>
 /run &lt;bot&gt; &lt;command&gt; [args] — the general form; run it bare for the list,
     which now includes the commands each bot registers for itself
-/restart &lt;bot&gt; — restart its process
+/shutdown &lt;bot&gt; — asks: that bot alone, or the whole service it runs in;
+    stops only when nobody is using it (refused, with the reasons, while
+    anybody is). A stopped service stays down until a deploy or a Redeploy
+/restart &lt;bot&gt; [force] — asks, then restarts its whole service once nobody is
+    using it; force restarts that bot alone, at once (for a stuck bot)
 /pause [bot|all] [minutes] — stop them taking work an update would lose;
     whoever asks is told to come back, and written down
 /warn [bot|all] — tell whoever is mid-something that it is about to reset
@@ -4174,8 +4416,10 @@ BOT_COMMANDS = [
     BotCommand("usage", "Memory, peaks, and what they cost"),
     BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
     BotCommand("buttons", "Button taps per bot, counts only"),
+    BotCommand("stats", "Anonymous daily statistics, for infographics"),
     BotCommand("run", "Run a command inside another bot"),
-    BotCommand("restart", "Restart a bot's process"),
+    BotCommand("restart", "Restart a bot's service once nobody is using it"),
+    BotCommand("shutdown", "Stop a bot's service once nobody is using it"),
     BotCommand("pause", "Stop the bots taking work an update would lose"),
     BotCommand("warn", "Tell whoever is mid-something that it will reset"),
     BotCommand("resume", "Reopen, and tell everyone who was waiting"),
@@ -4313,7 +4557,7 @@ def main():
     if state is not None:
         builder = builder.persistence(state)
     app = builder.build()
-    lifecycle.install(app, BOT_NAME)
+    lifecycle.install(app, BOT_NAME, ADMIN_IDS)
     app.add_error_handler(error_handler)
     # Its own group -- see the note in the child bots' main(): a TypeHandler
     # on Update matches everything, so anything sharing a group with it never
@@ -4326,6 +4570,7 @@ def main():
     app.add_handler(CommandHandler("usage", usage_command))
     app.add_handler(CommandHandler("idle", idle_command))
     app.add_handler(CommandHandler("buttons", buttons_command))
+    app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("me", me_command))
     app.add_handler(CommandHandler("run", run_command))
     app.add_handler(CommandHandler("ping", broadcast_ping))
@@ -4354,7 +4599,8 @@ def main():
     app.add_handler(CommandHandler("problemlog", _log_shortcut("problemlog")))
     app.add_handler(CommandHandler("logs", _shortcut("logs", 1, "Usage: /logs <bot> [lines] [bot|problems]")))
     app.add_handler(CommandHandler("dbdump", _shortcut("dbdump", 1, "Usage: /dbdump <bot> — or /backup for everything")))
-    app.add_handler(CommandHandler("restart", _shortcut("restart", 1, "Usage: /restart <bot>")))
+    app.add_handler(CommandHandler("restart", restart_command))
+    app.add_handler(CommandHandler("shutdown", shutdown_command))
     app.add_handler(CommandHandler("whois", _shortcut("whois", 2, "Usage: /whois <bot> <user_id>")))
     app.add_handler(CommandHandler("say", _shortcut("message", 3, "Usage: /say <bot> <user_id> <text>")))
     # The bot-specific ones. Each defaults to the only bot that has it, so
@@ -4379,6 +4625,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ping_detail_button, pattern=r"^pingdet:"))
     app.add_handler(CallbackQueryHandler(help_page_button, pattern=r"^helpdet:[a-z]{1,20}$"))
     app.add_handler(CallbackQueryHandler(broadcast_button, pattern=r"^upd:"))
+    app.add_handler(CallbackQueryHandler(service_button, pattern=r"^svc:"))
     app.add_handler(CallbackQueryHandler(gift_button, pattern=r"^gift:"))
     app.add_handler(CallbackQueryHandler(promo_button, pattern=PROMO_BUTTON_PATTERN))
     app.add_handler(CallbackQueryHandler(log_pick_button, pattern=r"^logpick:"))
