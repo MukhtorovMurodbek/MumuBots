@@ -58,14 +58,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Of that, {bonus} ⚡ is bonus credit and expires on {date}.',
         "credit_cannot_be_withdrawn": '⚡ is credit for conversions in ConvertBot, and can NOT be withdrawn or turned back into Stars. A problem with a payment? /paysupport',
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
-        "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
-        "report_send": '📨 Send my details',
+        "report_button": '🐞 Send more details',
+        "problem_logged_note": "Anonymous technical report saved.",
+        "problem_logged_note_optin": "Anonymous technical report saved. You can opt in to send more details.",
+        "report_disclaimer": "📨 Send more details with incident {incident}?\n\nSaved already, nothing about you: the bot, code {code}, the time, the version.\n\nSend adds:\n• your Telegram ID\n• your @username, if you have one\n• your language\n• private chat or group\n\nNever your messages or files. Cleared after 30 days, or now with /deletemydata.",
+        "report_send": '📨 Send',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
+        "report_sent": '✅ Thank you — added to incident {incident}.',
         "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_cancelled": 'Cancelled — nothing about you was sent.',
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
         "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
@@ -99,7 +100,7 @@ STRINGS = {
             "• who you gave add-access to a pack, and the share links you created\n"
             "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
             "using it\n"
-            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
+            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• how much was done — links per site, conversions, stickers, relayed messages — counted per day for the whole bot, with nothing about who\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "• whatever the bot is in the middle of doing with you, until it is finished"
         ),
@@ -110,7 +111,8 @@ STRINGS = {
             "you — not your id, not your name, not what you sent. A fault nobody reports is "
             "still a fault, which is why it does not wait to be asked.\n"
             "\n"
-            "\"Add my details\" under an error offers to attach four things to that one "
+            "Under a crash, a failed /deletemydata or /feedback, or an error that keeps "
+            "happening to you, \"Send more details\" offers to attach four things to that one "
             "incident: your Telegram user id, your @username if you have one, the language you "
             "picked, and whether the chat is private or a group. All four are named on screen "
             "first, and nothing is sent unless you tap Send. What you wrote and the files you "
@@ -130,7 +132,7 @@ STRINGS = {
             "service is called"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
+        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months; the daily counts of what was done, which say nothing about who, after 400 days. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
         "privacy_your_choices": (
             "What you can do:\n"
             "/deletemydata — erase what this bot holds on you\n"
@@ -197,50 +199,13 @@ STRINGS = {
         "feedback_failed": "Your feedback wasn't sent — something went wrong on my side. Please try again in a few minutes.",
         "cancel_button_feedback": "💬 Feedback",
         "cancel_item_feedback": "the feedback I asked you for",
-        "help_brief": (
-            "How it works:\n"
-            "\n"
-            "• /newpack makes a sticker pack: send pictures, GIFs, videos or stickers, an emoji after each if you like, then /done.\n"
-            "• /addsticker adds to a pack you have; /mypacks lists them, with buttons to rename, share or delete one.\n"
-            "• /import copies stickers in from another Telegram pack or a WhatsApp export.\n"
-            "• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n"
-            "\n"
-            "Main commands: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Every command: the full guide, below or /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": "How it works:\n\n• /newpack makes a sticker pack: name it, then send pictures, GIFs, videos or stickers — each goes in as it arrives.\n• The buttons under the message box: ✏️ to add to a pack, 👁 to open it. To change a sticker's emoji, reply to its ✅ message with emoji.\n• /mypacks lists your packs, with buttons to rename, share or delete one. /import copies stickers in from another Telegram pack or a WhatsApp export.\n• Ideas or problems: /feedback — only the person who runs these bots reads it, and they can't reply.\n\nMain commands: /newpack · /addsticker · /mypacks · /cancel\nEvery command: the full guide, below or /fullhelp.\n\n",
         "help_full_button": "📖 Full guide",
         "help_brief_button": "↩️ Short version",
         "help_page_everything": "The full guide: /fullhelp",
         "help_page_gone": "That help page no longer exists. Send /help to see the current ones.",
-        "helppage_newpack": (
-            "🆕 /newpack — a new sticker pack\n"
-            "\n"
-            "1. Send /newpack, then the pack's title as a message (up to {title_max} characters; longer is cut). If Telegram refuses the title, start it with a letter.\n"
-            "2. Send what should become stickers, one per message: photos or image files, GIFs, videos, or stickers. The pack is made with the first one — no sticker, no pack.\n"
-            "3. Each sticker gets {emoji}. To change it, send emoji right after it (up to {emoji_max}): they replace the last sticker's emoji.\n"
-            "4. /done when you're finished, and I send the pack's link. /cancel stops.\n"
-            "\n"
-            "How each kind turns out:\n"
-            "• A photo, an image file or a static sticker becomes a static sticker, {side} px on its longer side.\n"
-            "• A GIF, a video or a video sticker becomes a video sticker: {side} px, the first {seconds} seconds, {fps} frames a second, no sound, under {kb} KB. If it can't be made that small, I say so and suggest our converter bot.\n"
-            "• Animated (.tgs) stickers can't be added.\n"
-            "• Many at once: a WhatsApp sticker pack (.zip or .wastickers), or /import from a Telegram pack.\n"
-            "\n"
-            "Example: /newpack, then \"Cat faces\", then three photos of your cat, then 😺, then /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — more stickers in a pack you have\n"
-            "\n"
-            "1. /addsticker lists your packs. Tap one, then \"➕ Add stickers\".\n"
-            "2. Send photos, GIFs, videos or stickers, just as for a new pack. Each gets {emoji}; emoji sent right after replace it.\n"
-            "3. /done when you're finished.\n"
-            "• Sending a sticker that is already in the pack takes it out. If it's the last one, I ask first, because that deletes the whole pack.\n"
-            "• Only packs made with this bot that are yours are listed. None yet? /newpack.\n"
-            "• /mypacks shows the same list. Each pack's menu can also rename it, let someone else edit it with you, or delete it.\n"
-            "\n"
-            "Example: /addsticker, tap \"Cat faces\", tap \"➕ Add stickers\", send a new photo, then /done."
-        ),
+        "helppage_newpack": "🆕 /newpack — a new sticker pack\n\n1. Send /newpack (or tap ➕ New pack), then the pack's title as a message (up to {title_max} characters; longer is cut). If Telegram refuses the title, start it with a letter.\n2. Send what should become stickers, one per message: photos or image files, GIFs, videos, or stickers. The pack is made with the first one — no sticker, no pack. Each one gets a ✅ reply once it's in.\n3. Each sticker gets {emoji}. To change it, reply to its ✅ message (or to what you sent) with emoji — up to {emoji_max}.\n4. That's all: there is nothing to finish. The pack's buttons stay under the message box; /cancel stops.\n\nHow each kind turns out:\n• A photo, an image file or a static sticker becomes a static sticker, {side} px on its longer side.\n• A GIF, a video or a video sticker becomes a video sticker: {side} px, up to {seconds} seconds, {fps} frames a second, no sound, under {kb} KB. A longer clip gets speed choices (or trim it yourself); one too heavy gets lower resolution or frame rate to choose from.\n• Animated (.tgs) stickers can't be added.\n• Many at once: a WhatsApp sticker pack (.zip or .wastickers), or /import from a Telegram pack.\n\nExample: /newpack, then \"Cat faces\", then three photos of your cat, then reply 😺 to one of the ✅ messages.",
+        "helppage_addsticker": "➕ /addsticker — more stickers in a pack you have\n\n1. Tap ✏️ on the pack under the message box (or /addsticker, tap the pack, then \"➕ Add stickers\").\n2. Send photos, GIFs, videos or stickers, just as for a new pack. Each gets {emoji}; reply to its ✅ message with emoji to change it.\n• Sending a sticker that is already in the pack takes it out. If it's the last one, I ask first, because that deletes the whole pack.\n• Sent something with no pack open? I keep it for 10 minutes and ask which pack it goes to.\n• Only packs made with this bot that are yours are listed. None yet? /newpack.\n• /mypacks shows the same list. Each pack's menu can also rename it, let someone else edit it with you, or delete it.\n\nExample: tap ✏️ Edit Cat faces, then send a new photo.",
         "helppage_import": (
             "📥 /import — many stickers at once, from another pack\n"
             "\n"
@@ -248,7 +213,7 @@ STRINGS = {
             "• /import followed by a public Telegram pack's link (t.me/addstickers/…) or its name copies its stickers into your pack, with their emoji. Up to {max} each time.\n"
             "• Animated (.tgs) stickers are skipped, and I say how many.\n"
             "• From WhatsApp: send the sticker pack's .zip or .wastickers file instead.\n"
-            "• Then keep sending more, or /done to finish.\n"
+            "• Then keep sending more.\n"
             "\n"
             "Example: /newpack, then \"Favourites\", then /import t.me/addstickers/SomePack"
         ),
@@ -270,7 +235,7 @@ STRINGS = {
             "Hey! I turn your images, GIFs, videos and stickers into Telegram sticker "
             "packs.\n\n"
         ),
-        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/done - finish editing a pack\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
+        "help_text": "Commands:\n/newpack - start a new sticker pack\n/addsticker - add stickers to an existing pack\n/mypacks - list your packs\n/import <pack link/name> - (while editing) bulk-copy stickers from another Telegram pack, or send a WhatsApp sticker pack .zip/.wastickers file\n/cancel - stop something I'm waiting on you for (I'll ask which)\n/feedback - suggest something or report a problem; only whoever runs these bots reads it, and they cannot reply\n/whomade <pack link/name> - see who created a pack (if made through this bot)\n/donate - chip in for hosting costs (totally optional)\n/en, /uz, /rus - switch language (or /language, which asks)\n/balance - your ⚡ credit\n/paysupport - trouble with a payment\n/privacy - what I keep about you\n/terms - what I may be used for\n/deletemydata - delete everything I hold on you\n/start - what I do, and how to start\n/fullhelp - this full guide (/help - the short one)\n/convert - converting files lives in ConvertBot now; this points you there\n\nWhile editing a pack: send images, GIFs, videos, or static/video stickers to add them.\nSend emoji after one to tag it with that emoji.\n\nTap a pack from /mypacks to rename it, set up co-editing so someone else can add stickers to it too, or delete it for good (owner-only, asks twice before it actually happens).\n\nWant to grab a video from Instagram/TikTok, or convert a file to another format? Those live in the sibling bots below now.\n\n⚠️ NOTE: Payments are final — Stars paid through /donate are NOT refunded, and the ⚡ credit they add can NOT be withdrawn.\n\n",
         "whomade_usage": "Usage: /whomade <pack name or t.me/addstickers link>",
         "whomade_not_found": (
             "I don't have a record of that pack — either it wasn't created "
@@ -280,11 +245,7 @@ STRINGS = {
         "coedit_link_invalid": "That co-editing link isn't valid — it may have been reset by the pack owner.",
         "coedit_pack_gone": "That pack doesn't seem to exist anymore.",
         "coedit_own_pack": "That's your own pack — use /mypacks to manage it.",
-        "coedit_joined_intro": (
-            "You've been added as a co-editor on \"{title}\"! Send images, GIFs, "
-            "videos, or static/video stickers to add them — default emoji is 😭, "
-            "send emoji right after to retag the last one. /done when finished."
-        ),
+        "coedit_joined_intro": "You're a co-editor of “{title}” now. Send pictures, GIFs, videos or stickers to add.",
         "btn_new_pack": "➕ New pack",
         "btn_my_packs": "📁 My packs",
         "btn_help": "❓ Help",
@@ -314,6 +275,36 @@ STRINGS = {
         "only_owner_rename": "Only the pack owner can rename it.",
         "rename_prompt": "Send the new title for \"{title}\".",
         "rename_broken_state": "Something went wrong — try Rename again from /mypacks.",
+        "session_lost": "That pack session closed after a long pause. Start again: /newpack or /addsticker.",
+        "held_full": "I'm already holding {n} for a pack — pick one for them first, then send this again.",
+        "held_already_in_pack": "That sticker is already in “{title}” — left as it is.",
+        "btn_kb_edit": "✏️ Edit {title}",
+        "btn_kb_view": "👁 View {title}",
+        "pack_view": "👁 “{title}”",
+        "item_added": "✅ Added to “{title}” with {emoji}. Reply to this message with emoji to change it.",
+        "item_added_video": "✅ Added to “{title}” as a video sticker with {emoji}. Reply to this message with emoji to change it.",
+        "item_added_fit": "✅ Added to “{title}” ({how}) with {emoji}. Reply to this message with emoji to change it.",
+        "retag_unknown": "I don't know which sticker that message was for any more.",
+        "packs_keyboard_note": "📦 Your packs are on the buttons below — tap one to add stickers to it.",
+        "pack_button_gone": "I can't find that pack — it may have been deleted. Here are your packs as they are now.",
+        "held_offer": "Which pack should {n} item(s) go to? They wait {minutes} minutes.",
+        "btn_held_discard": "✖️ Don't add",
+        "held_expired": "This waited too long — send it again.",
+        "held_discarded": "Not added.",
+        "video_too_long": "This clip is {seconds} s; a video sticker can be {limit} s at most. Pick a speed, or trim it to {limit} s yourself and send it again.",
+        "video_too_long_no_speed": "This clip is {seconds} s; a video sticker can be {limit} s at most, and it would take more than {speed}× to fit. Trim it to {limit} s (or to {longest} s, then speed it up) and send it again.",
+        "video_too_heavy": "This clip doesn't fit Telegram's {kb} KB for a video sticker. Make it lighter:",
+        "video_too_heavy_last": "Even so it doesn't fit Telegram's {kb} KB. Trim it shorter and send it again.",
+        "btn_speed_fit": "⏩ {speed}× — fits exactly",
+        "btn_speed": "⏩ {speed}×",
+        "btn_lower_res": "🔽 Lower resolution (recommended)",
+        "btn_lower_fps": "🎞 Lower frame rate ({fps} fps)",
+        "btn_skip_clip": "✖️ Skip this clip",
+        "video_fit_expired": "That choice has expired — send the clip again.",
+        "video_fit_skipped": "Skipped — that clip was not added.",
+        "video_fit_added": "✅ Added ({how}).",
+        "fit_lower_res": "lower resolution",
+        "fit_lower_fps": "{fps} fps",
         "btn_back_to_pack": "⬅️ Back to pack",
         "renamed_success": "Renamed to \"{title}\".",
         "renamed_failed": "Couldn't rename it: {error}",
@@ -332,22 +323,13 @@ STRINGS = {
         "newpack_title_prompt": "What should the pack title be?",
         "title_empty": "That's empty — send an actual title for the pack.",
         "title_truncated": "Telegram caps pack titles at 64 characters — using \"{title}\".",
-        "editing_intro_new": (
-            "Send images, GIFs, videos, or static/video stickers — each one "
-            "is added with the default 😭 emoji. Send emoji right after to retag "
-            "the last one. /done when finished."
-        ),
+        "editing_intro_new": "Send pictures, GIFs, videos or stickers to add.",
         "no_packs_for_add": "You don't have any packs yet. Use /newpack first.",
         "pick_pack_prompt": "Which pack? Tap it, then \"➕ Add stickers\".",
-        "editing_intro_add": (
-            "Send images, GIFs, videos, or static/video stickers to add — default "
-            "emoji is 😭, send emoji right after to retag the last one. /done when finished.\n\n"
-            "Tip: sending a sticker that's already in this pack removes it instead of "
-            "adding a duplicate."
-        ),
+        "editing_intro_add": "Send pictures, GIFs, videos or stickers to add.",
         "status_verb_creating": "Creating",
         "status_verb_editing": "Editing",
-        "status_line": "📝 {verb} \"{title}\" — {count} sticker(s) added this session",
+        "status_line": "✏️ {verb} “{title}”",
         "status_default_title": "this pack",
         "btn_delete_pack_yes": "🗑️ Yes, delete the pack",
         "btn_cancel": "Cancel",
@@ -363,7 +345,7 @@ STRINGS = {
         "image_process_failed": "Couldn't process that image: {error}",
         "added_default_emoji": "Added {emoji} — send an emoji to retag it.",
         "batch_not_added": "⚠️ {done}/{total} — {failed} not added",
-        "last_attempt_failed": "⚠️ Last attempt failed — send another item to retry, or /cancel.",
+        "last_attempt_failed": "⚠️ Not added — send it again to retry.",
         "converting_video": "Converting to a video sticker...",
         "video_convert_failed_redirect": (
             "{error}\n\nCan't turn this into a sticker, but if you just want the "
@@ -389,19 +371,16 @@ STRINGS = {
         "import_summary_head": "Imported {added} sticker(s) from \"{source}\"",
         "import_summary_skipped": ", skipped {skipped} unsupported (animated/Lottie)",
         "import_summary_failed": ", {failed} failed",
-        "import_summary_tail": ". Keep sending more, or /done to finish.",
-        "done_standalone_hint": (
-            "Nothing to finish — you aren't editing a pack right now. Start one "
-            "with /newpack, or tap Add stickers on a pack from /mypacks."
-        ),
+        "import_summary_tail": ".",
+        "done_standalone_hint": "Nothing to finish — stickers go in as you send them. Tap ✏️ on a pack below to add to it.",
         "import_standalone_hint": (
             "Start or open a pack first (/newpack, or tap Add stickers on a pack from "
             "/mypacks), then use /import <link> inside that session."
         ),
         "whatsapp_reading": "Reading the WhatsApp sticker pack...",
         "whatsapp_summary_head": "Imported {added} sticker(s) from the WhatsApp pack",
-        "not_emoji_message": "Send an image/GIF/video/sticker to add, emoji to retag the last one, or /done.",
-        "no_sticker_to_tag": "Add a sticker first, then send emoji to tag it.",
+        "not_emoji_message": "Send pictures, GIFs, videos or stickers to add. To change a sticker's emoji, reply to its ✅ message with emoji.",
+        "no_sticker_to_tag": "To change a sticker's emoji, reply to its ✅ message with emoji.",
         "retagged_success": "Retagged as {emojis}.",
         "retag_failed": "Couldn't update the emoji: {error}",
         "nothing_added_yet": "You haven't added anything yet. Send an image first.",
@@ -482,14 +461,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Shundan {bonus} ⚡ — bonus kredit, uning muddati {date} kuni tugaydi.',
         "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit: uni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. To'lovda muammo bo'lsa: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
-        "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
-        "report_send": "📨 Ma'lumotlarimni yuborish",
+        "report_button": "🐞 Qo'shimcha ma'lumot yuborish",
+        "problem_logged_note": "Anonim texnik hisobot saqlandi.",
+        "problem_logged_note_optin": "Anonim texnik hisobot saqlandi. Xohlasangiz, qo'shimcha ma'lumot yuborishingiz mumkin.",
+        "report_disclaimer": "📨 {incident} hodisasiga qo'shimcha ma'lumot yuborasizmi?\n\nAllaqachon saqlangan, siz haqingizda hech narsa yo'q: bot, {code} kodi, vaqt, versiya.\n\n\"Yuborish\" qo'shadi:\n• Telegram ID raqamingiz\n• bo'lsa, @username'ingiz\n• tilingiz\n• shaxsiy suhbatmi yoki guruh\n\nXabarlaringiz va fayllaringiz hech qachon kirmaydi. 30 kundan keyin o'chiriladi, /deletemydata bilan esa darhol.",
+        "report_send": '📨 Yuborish',
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
         "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
         "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
@@ -516,14 +496,14 @@ STRINGS = {
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• shu bot orqali yaratgan to'plamlaringiz: har birining nomi va sarlavhasi, o'sha paytdagi ismingiz va foydalanuvchi nomingiz\n• to'plamlaringizga kimga qo'shish huquqi berganingiz va yaratgan havolalaringiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• shu bot orqali yaratgan to'plamlaringiz: har birining nomi va sarlavhasi, o'sha paytdagi ismingiz va foydalanuvchi nomingiz\n• to'plamlaringizga kimga qo'shish huquqi berganingiz va yaratgan havolalaringiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• qancha ish qilingani — sayt bo'yicha havolalar, konvertatsiyalar, stikerlar, yuborilgan xabarlar — butun bot bo'yicha kunlik hisob, kim ekani haqida ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nIshdan chiqish, bajarilmagan /deletemydata yoki /feedback, yoki sizda takror-takror yuz berayotgan xato ostidagi \"Qo'shimcha ma'lumot yuborish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
         "privacy_seen_by": "• Telegram — barcha xabarlar u orqali o'tadi va u o'z qoidalari asosida ishlaydi\n• bot joylashgan hosting va bot foydalanadigan ma'lumotlar bazasi",
         "privacy_others": "• boshqa hech kim — stikerlar botning o'z serverida tayyorlanadi, tashqi xizmatlarga murojaat qilinmaydi",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
+        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi; qancha ish qilinganining kunlik hisobi esa — unda kimligi yo'q — 400 kundan keyin. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
         "privacy_your_choices": "Nima qilishingiz mumkin:\n/deletemydata — bot siz haqingizda saqlagan ma'lumotlarni o'chirish\n/terms — botdan foydalanish shartlari\n\nBotni Telegramda bloklasangiz, u sizga yozmay qo'yadi, lekin hech narsa o'chmaydi. Ikkalasini ham xohlasangiz, avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan maqsadiga ko'ra, qonun va Telegram qoidalari doirasida foydalaning. Uni boshqalarni bezovta qilish uchun ishlatmang va belgilangan cheklovlardan oshirib yuklamang — aks holda akkaunt bloklanadi.",
@@ -564,50 +544,13 @@ STRINGS = {
         "feedback_failed": "Fikringiz yuborilmadi — bot tomonida nimadir buzildi. Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
         "cancel_button_feedback": "💬 Fikr-mulohaza",
         "cancel_item_feedback": "men so'ragan fikr-mulohaza",
-        "help_brief": (
-            "Bot qanday ishlaydi:\n"
-            "\n"
-            "• /newpack stiker to'plami yaratadi: rasm, GIF, video yoki stiker yuboring, xohlasangiz har biridan keyin emoji ham, so'ng /done.\n"
-            "• /addsticker mavjud to'plamga qo'shadi; /mypacks to'plamlaringiz ro'yxati — nomini o'zgartirish, ulashish yoki o'chirish tugmalari bilan.\n"
-            "• /import boshqa Telegram to'plamidan yoki WhatsApp eksportidan stikerlarni ko'chiradi.\n"
-            "• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n"
-            "\n"
-            "Asosiy buyruqlar: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Barcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": "Bot qanday ishlaydi:\n\n• /newpack stiker to'plami yaratadi: nom bering, so'ng rasm, GIF, video yoki stiker yuboring — har biri kelishi bilan qo'shiladi.\n• Xabar maydoni ostidagi tugmalar: ✏️ — to'plamga qo'shish, 👁 — uni ochish. Stiker emojisini o'zgartirish uchun uning ✅ xabariga emoji bilan javob bering.\n• /mypacks to'plamlaringiz ro'yxati — nomini o'zgartirish, ulashish yoki o'chirish tugmalari bilan. /import boshqa Telegram to'plamidan yoki WhatsApp eksportidan stikerlarni ko'chiradi.\n• Taklif yoki muammo: /feedback — uni faqat bu botlarni yuritayotgan odam o'qiydi, javob qaytmaydi.\n\nAsosiy buyruqlar: /newpack · /addsticker · /mypacks · /cancel\nBarcha buyruqlar: to'liq qo'llanmada — pastdagi tugma yoki /fullhelp.\n\n",
         "help_full_button": "📖 To'liq qo'llanma",
         "help_brief_button": "↩️ Qisqa variant",
         "help_page_everything": "To'liq qo'llanma: /fullhelp",
         "help_page_gone": "Bu yordam sahifasi endi yo'q. Hozirgilarini ko'rish uchun /help yuboring.",
-        "helppage_newpack": (
-            "🆕 /newpack — yangi stiker to'plami\n"
-            "\n"
-            "1. /newpack yuboring, keyin to'plamning nomini xabar qilib ({title_max} belgigacha; uzunrog'i qisqartiriladi). Telegram nomni qabul qilmasa, uni harf bilan boshlang.\n"
-            "2. Stikerga aylanadigan narsalarni har birini alohida xabarda yuboring: rasm yoki rasm-fayl, GIF, video yoki stiker. To'plam birinchisi bilan yaratiladi — stiker bo'lmasa, to'plam ham bo'lmaydi.\n"
-            "3. Har bir stikerga {emoji} beriladi. O'zgartirish uchun darhol keyin emoji yuboring ({emoji_max} tagacha): ular oxirgi stikerning emojisini almashtiradi.\n"
-            "4. Tugatgach /done — to'plam havolasini yuboraman. /cancel to'xtatadi.\n"
-            "\n"
-            "Har biri nimaga aylanadi:\n"
-            "• Rasm, rasm-fayl yoki oddiy stiker oddiy stikerga aylanadi, uzun tomoni {side} px.\n"
-            "• GIF, video yoki video-stiker video-stikerga aylanadi: {side} px, dastlabki {seconds} soniya, soniyasiga {fps} kadr, ovozsiz, {kb} KB dan kichik. Shunchalik kichraytirib bo'lmasa, aytaman va konvertor botimizni taklif qilaman.\n"
-            "• Animatsiyali (.tgs) stikerlarni qo'shib bo'lmaydi.\n"
-            "• Ko'pini birdan: WhatsApp stiker to'plami (.zip yoki .wastickers) yoki Telegram to'plamidan /import.\n"
-            "\n"
-            "Misol: /newpack, keyin \"Mushuk yuzlari\", keyin mushugingizning uchta rasmi, keyin 😺, keyin /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — mavjud to'plamingizga yangi stikerlar\n"
-            "\n"
-            "1. /addsticker to'plamlaringiz ro'yxatini chiqaradi. Birini bosing, keyin \"➕ Stiker qo'shish\".\n"
-            "2. Rasm, GIF, video yoki stikerlarni yangi to'plamdagidek yuboring. Har biriga {emoji} beriladi; darhol keyin yuborilgan emoji uni almashtiradi.\n"
-            "3. Tugatgach /done.\n"
-            "• To'plamda allaqachon bor stikerni yuborsangiz, u to'plamdan olib tashlanadi. Agar u oxirgisi bo'lsa, avval so'rayman, chunki bu butun to'plamni o'chiradi.\n"
-            "• Faqat shu bot orqali yaratilgan va sizniki bo'lgan to'plamlar ko'rsatiladi. Hali yo'qmi? /newpack.\n"
-            "• /mypacks ham shu ro'yxatni ko'rsatadi. Har bir to'plam menyusida uni qayta nomlash, boshqa birov bilan birga tahrirlash yoki o'chirish ham mumkin.\n"
-            "\n"
-            "Misol: /addsticker, \"Mushuk yuzlari\" ni bosing, \"➕ Stiker qo'shish\" ni bosing, yangi rasm yuboring, keyin /done."
-        ),
+        "helppage_newpack": "🆕 /newpack — yangi stiker to'plami\n\n1. /newpack yuboring (yoki ➕ Yangi to'plam tugmasini bosing), keyin to'plamning nomini xabar qilib ({title_max} belgigacha; uzunrog'i qisqartiriladi). Telegram nomni qabul qilmasa, uni harf bilan boshlang.\n2. Stikerga aylanadigan narsalarni har birini alohida xabarda yuboring: rasm yoki rasm-fayl, GIF, video yoki stiker. To'plam birinchisi bilan yaratiladi — stiker bo'lmasa, to'plam ham bo'lmaydi. Qo'shilgan har biriga ✅ bilan javob beraman.\n3. Har bir stikerga {emoji} beriladi. O'zgartirish uchun uning ✅ xabariga (yoki o'zingiz yuborganiga) emoji bilan javob bering — {emoji_max} tagacha.\n4. Tamom: yakunlash shart emas. To'plam tugmalari xabar maydoni ostida qoladi; /cancel to'xtatadi.\n\nHar biri nimaga aylanadi:\n• Rasm, rasm-fayl yoki oddiy stiker oddiy stikerga aylanadi, uzun tomoni {side} px.\n• GIF, video yoki video-stiker video-stikerga aylanadi: {side} px, {seconds} soniyagacha, soniyasiga {fps} kadr, ovozsiz, {kb} KB dan kichik. Uzunroq klip uchun tezlik tanlovlarini beraman (yoki o'zingiz qisqartiring); juda og'ir bo'lsa — pastroq sifat yoki kamroq kadr.\n• Animatsiyali (.tgs) stikerlarni qo'shib bo'lmaydi.\n• Ko'pini birdan: WhatsApp stiker to'plami (.zip yoki .wastickers) yoki Telegram to'plamidan /import.\n\nMisol: /newpack, keyin \"Mushuk yuzlari\", keyin mushugingizning uchta rasmi, keyin ✅ xabarlardan biriga 😺 bilan javob.",
+        "helppage_addsticker": "➕ /addsticker — mavjud to'plamingizga yangi stikerlar\n\n1. Xabar maydoni ostidagi to'plamning ✏️ tugmasini bosing (yoki /addsticker, to'plamni bosing, keyin \"➕ Stiker qo'shish\").\n2. Rasm, GIF, video yoki stikerlarni yangi to'plamdagidek yuboring. Har biriga {emoji} beriladi; o'zgartirish uchun uning ✅ xabariga emoji bilan javob bering.\n• To'plamda allaqachon bor stikerni yuborsangiz, u to'plamdan olib tashlanadi. Agar u oxirgisi bo'lsa, avval so'rayman, chunki bu butun to'plamni o'chiradi.\n• To'plam ochilmaganda nimadir yubordingizmi? Uni 10 daqiqa saqlab, qaysi to'plamga qo'shishni so'rayman.\n• Faqat shu bot orqali yaratilgan va sizniki bo'lgan to'plamlar ko'rsatiladi. Hali yo'qmi? /newpack.\n• /mypacks ham shu ro'yxatni ko'rsatadi. Har bir to'plam menyusida uni qayta nomlash, boshqa birov bilan birga tahrirlash yoki o'chirish ham mumkin.\n\nMisol: \"✏️ Tahrirlash: Mushuk yuzlari\" ni bosing, keyin yangi rasm yuboring.",
         "helppage_import": (
             "📥 /import — boshqa to'plamdan ko'p stikerni birdan\n"
             "\n"
@@ -615,7 +558,7 @@ STRINGS = {
             "• /import va ochiq Telegram to'plamining havolasi (t.me/addstickers/…) yoki nomi uning stikerlarini emojilari bilan birga to'plamingizga ko'chiradi. Har safar {max} tagacha.\n"
             "• Animatsiyali (.tgs) stikerlar o'tkazib yuboriladi va nechtasi ekanini aytaman.\n"
             "• WhatsApp'dan: buning o'rniga stiker to'plamining .zip yoki .wastickers faylini yuboring.\n"
-            "• Keyin yana yuborishda davom eting yoki tugatish uchun /done.\n"
+            "• Keyin yana yuborishda davom eting.\n"
             "\n"
             "Misol: /newpack, keyin \"Sevimlilar\", keyin /import t.me/addstickers/SomePack"
         ),
@@ -633,7 +576,7 @@ STRINGS = {
         "cancel_item_editing": "\"{title}\" ni tahrirlash",
         "cancel_button_editing": "📦 To'plamni tahrirlash",
         "start_intro": "Salom! Rasm, GIF, video va stikerlaringizdan Telegram stiker to'plamlari yasayman.\n\n",
-        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/done - to'plamni tahrirlashni yakunlash\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
+        "help_text": "Buyruqlar:\n/newpack - yangi stiker to'plami yaratish\n/addsticker - mavjud to'plamga stiker qo'shish\n/mypacks - to'plamlaringizni ko'rish\n/import <to'plam havolasi yoki nomi> - (tahrirlash vaqtida) boshqa Telegram to'plamidagi stikerlarni ko'chirish yoki WhatsApp to'plamining .zip/.wastickers faylini yuklash\n/cancel - joriy amalni bekor qilish (bir nechta bo'lsa, qaysi birini so'rayman)\n/feedback - taklif yozish yoki muammo haqida xabar berish; uni faqat botlarni yuritayotgan odam o'qiydi, javob qaytmaydi\n/whomade <to'plam havolasi yoki nomi> - to'plamni kim yaratganini bilish (shu bot orqali yaratilgan bo'lsa)\n/donate - server xarajatlariga hissa qo'shish (mutlaqo ixtiyoriy)\n/en, /uz, /rus - tilni almashtirish (yoki /language)\n/balance - ⚡ kreditingiz\n/paysupport - to'lov bilan muammo\n/privacy - siz haqingizda nimalarni saqlayman\n/terms - botdan foydalanish shartlari\n/deletemydata - siz haqingizdagi hamma narsani o'chirish\n/start - bu bot nima qiladi va qanday boshlash kerak\n/fullhelp - shu to'liq qo'llanma (/help - qisqasi)\n/convert - fayllarni o'girish endi ConvertBot'da; bu buyruq sizni o'sha yerga yo'naltiradi\n\nTo'plamni tahrirlash vaqtida rasm, GIF, video yoki statik/video stiker yuborsangiz, u to'plamga qo'shiladi.\nUndan keyin emoji yuborsangiz, o'sha stikerga shu emoji biriktiriladi.\n\n/mypacks'da to'plamni tanlab, nomini o'zgartirishingiz, boshqalar ham stiker qo'sha olishi uchun birgalikda tahrirlashni yoqishingiz yoki uni butunlay o'chirishingiz mumkin (faqat egasi; o'chirishdan oldin ikki marta so'raladi).\n\nInstagram/TikTok'dan video yuklab olish yoki faylni boshqa formatga o'girish kerakmi? Bu endi pastdagi boshqa botlarimizda.\n\n⚠️ DIQQAT: To'lovlar QAYTARILMAYDI — /donate orqali to'langan Stars qaytarib berilmaydi, ular bergan ⚡ kreditni esa yechib olib BO'LMAYDI.\n\n",
         "whomade_usage": "Qanday ishlatiladi: /whomade <to'plam nomi yoki t.me/addstickers havolasi>",
         "whomade_not_found": (
             "Bu to'plam haqida ma'lumotim yo'q — u shu bot orqali yaratilmagan "
@@ -643,7 +586,7 @@ STRINGS = {
         "coedit_link_invalid": "Bu havola yaroqsiz — ehtimol, to'plam egasi uni yangilagan.",
         "coedit_pack_gone": "Bu to'plam o'chirilganga o'xshaydi.",
         "coedit_own_pack": "Bu o'zingizning to'plamingiz — uni /mypacks orqali boshqaring.",
-        "coedit_joined_intro": 'Siz "{title}" to\'plamiga hammuallif bo\'ldingiz! Rasm, GIF, video yoki statik/video stiker yuboring — ular to\'plamga qo\'shiladi (standart emoji: 😭). Oxirgi stikerning emojisini o\'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.',
+        "coedit_joined_intro": "Endi siz “{title}” to'plamining hammuallifisiz. Qo'shish uchun rasm, GIF, video yoki stiker yuboring.",
         "btn_new_pack": "➕ Yangi to'plam",
         "btn_my_packs": "📁 Mening to'plamlarim",
         "btn_help": "❓ Yordam",
@@ -666,6 +609,36 @@ STRINGS = {
         "only_owner_rename": "To'plamni faqat egasi qayta nomlay oladi.",
         "rename_prompt": "\"{title}\" uchun yangi nom yuboring.",
         "rename_broken_state": "Xatolik yuz berdi — /mypacks orqali «Nomini o'zgartirish»ni qaytadan bosing.",
+        "session_lost": "Uzoq tanaffusdan keyin to'plam bilan ishlash yopildi. Qaytadan boshlang: /newpack yoki /addsticker.",
+        "held_full": "To'plam uchun {n} tasini allaqachon saqlab turibman — avval ular uchun to'plam tanlang, keyin buni qayta yuboring.",
+        "held_already_in_pack": "Bu stiker “{title}” to'plamida allaqachon bor — o'zgarishsiz qoldirildi.",
+        "btn_kb_edit": "✏️ Tahrirlash: {title}",
+        "btn_kb_view": "👁 Ko'rish: {title}",
+        "pack_view": "👁 “{title}”",
+        "item_added": "✅ “{title}” to'plamiga {emoji} bilan qo'shildi. Emojini o'zgartirish uchun bu xabarga emoji bilan javob bering.",
+        "item_added_video": "✅ “{title}” to'plamiga video stiker sifatida {emoji} bilan qo'shildi. Emojini o'zgartirish uchun bu xabarga emoji bilan javob bering.",
+        "item_added_fit": "✅ “{title}” to'plamiga ({how}) {emoji} bilan qo'shildi. Emojini o'zgartirish uchun bu xabarga emoji bilan javob bering.",
+        "retag_unknown": "Bu xabar qaysi stiker uchun ekanini endi bilmayman.",
+        "packs_keyboard_note": "📦 To'plamlaringiz pastdagi tugmalarda — stiker qo'shish uchun birini bosing.",
+        "pack_button_gone": "Bu to'plamni topa olmadim — o'chirilgan bo'lishi mumkin. Mana to'plamlaringiz hozirgi holida.",
+        "held_offer": "{n} ta narsa qaysi to'plamga qo'shilsin? Ular {minutes} daqiqa kutadi.",
+        "btn_held_discard": "✖️ Qo'shmaslik",
+        "held_expired": "Bu juda uzoq kutdi — qayta yuboring.",
+        "held_discarded": "Qo'shilmadi.",
+        "video_too_long": "Bu klip {seconds} soniya; video stiker ko'pi bilan {limit} soniya bo'ladi. Tezlikni tanlang yoki uni o'zingiz {limit} soniyaga qisqartirib, qayta yuboring.",
+        "video_too_long_no_speed": "Bu klip {seconds} soniya; video stiker ko'pi bilan {limit} soniya bo'ladi, sig'ishi uchun {speed}× dan ortiq tezlashtirish kerak. Uni {limit} soniyaga (yoki {longest} soniyaga, keyin tezlashtirib) qisqartiring va qayta yuboring.",
+        "video_too_heavy": "Bu klip video stiker uchun Telegramning {kb} KB chegarasiga sig'madi. Yengilroq qiling:",
+        "video_too_heavy_last": "Shunda ham Telegramning {kb} KB chegarasiga sig'madi. Qisqaroq qilib qayta yuboring.",
+        "btn_speed_fit": "⏩ {speed}× — aynan sig'adi",
+        "btn_speed": "⏩ {speed}×",
+        "btn_lower_res": "🔽 Pastroq sifat (tavsiya etiladi)",
+        "btn_lower_fps": "🎞 Kamroq kadr ({fps} fps)",
+        "btn_skip_clip": "✖️ Bu klipni o'tkazib yuborish",
+        "video_fit_expired": "Bu tanlov eskirgan — klipni qayta yuboring.",
+        "video_fit_skipped": "O'tkazib yuborildi — bu klip qo'shilmadi.",
+        "video_fit_added": "✅ Qo'shildi ({how}).",
+        "fit_lower_res": "pastroq sifat",
+        "fit_lower_fps": "{fps} fps",
         "btn_back_to_pack": "⬅️ To'plamga qaytish",
         "renamed_success": "\"{title}\" deb qayta nomlandi.",
         "renamed_failed": "Nomini o'zgartirib bo'lmadi: {error}",
@@ -681,13 +654,13 @@ STRINGS = {
         "newpack_title_prompt": "To'plamning nomi qanday bo'lsin?",
         "title_empty": "Nom bo'sh bo'lmasin — to'plam uchun nom yuboring.",
         "title_truncated": "Telegram to'plam nomini 64 belgigacha cheklaydi — \"{title}\" ishlatiladi.",
-        "editing_intro_new": "Rasm, GIF, video yoki statik/video stiker yuboring — har biri 😭 emojisi bilan qo'shiladi. Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.",
+        "editing_intro_new": "Qo'shish uchun rasm, GIF, video yoki stiker yuboring.",
         "no_packs_for_add": "Hali to'plamingiz yo'q. Avval /newpack yuboring.",
         "pick_pack_prompt": "Qaysi to'plam? Uni bosing, keyin \"➕ Stiker qo'shish\"ni tanlang.",
-        "editing_intro_add": "Qo'shish uchun rasm, GIF, video yoki statik/video stiker yuboring (standart emoji: 😭). Oxirgi stikerning emojisini o'zgartirish uchun darhol emoji yuboring. Tugatgach, /done ni bosing.\n\nMaslahat: to'plamda allaqachon bor stikerni yuborsangiz, u ikkinchi marta qo'shilmaydi — aksincha, to'plamdan olib tashlanadi.",
+        "editing_intro_add": "Qo'shish uchun rasm, GIF, video yoki stiker yuboring.",
         "status_verb_creating": "Yaratilmoqda",
         "status_verb_editing": "Tahrirlanmoqda",
-        "status_line": "📝 \"{title}\" {verb} — shu seansda {count} ta stiker qo'shildi",
+        "status_line": "✏️ “{title}” — {verb}",
         "status_default_title": "bu to'plam",
         "btn_delete_pack_yes": "🗑️ Ha, to'plam o'chirilsin",
         "btn_cancel": "Bekor qilish",
@@ -700,7 +673,7 @@ STRINGS = {
         "image_process_failed": "Rasmni qayta ishlab bo'lmadi: {error}",
         "added_default_emoji": "{emoji} bilan qo'shildi — boshqa emoji kerak bo'lsa, uni yuboring.",
         "batch_not_added": "⚠️ {done}/{total} — {failed} tasi qo'shilmadi",
-        "last_attempt_failed": "⚠️ Oxirgi urinish muvaffaqiyatsiz tugadi — qayta urinish uchun boshqa narsa yuboring yoki /cancel qiling.",
+        "last_attempt_failed": "⚠️ Qo'shilmadi — qayta urinish uchun yana yuboring.",
         "converting_video": "Video stikerga aylantirilmoqda...",
         "video_convert_failed_redirect": "{error}\n\nBundan stiker yasab bo'lmaydi, lekin faylni boshqa formatga o'girish kerak bo'lsa, @ConvertBot yordam beradi — faylni o'sha yerga yuboring 👇",
         "video_convert_generic_failed": "Buni aylantirib bo'lmadi: {error}",
@@ -715,12 +688,8 @@ STRINGS = {
         "import_summary_head": "\"{source}\" dan {added} ta stiker import qilindi",
         "import_summary_skipped": ", {skipped} ta qo'llab-quvvatlanmaydigani (animatsion/Lottie) o'tkazib yuborildi",
         "import_summary_failed": ", {failed} tasi muvaffaqiyatsiz tugadi",
-        "import_summary_tail": '. Yana yuborishingiz mumkin, tugatish uchun esa /done ni bosing.',
-        "done_standalone_hint": (
-            "Tugatadigan narsa yo'q — hozir hech qanday to'plamni tahrirlamayapsiz. "
-            "/newpack bilan yangisini boshlang yoki /mypacks dagi to'plamda "
-            "\"Stiker qo'shish\"ni bosing."
-        ),
+        "import_summary_tail": ".",
+        "done_standalone_hint": "Yakunlaydigan narsa yo'q — stikerlar yuborishingiz bilan qo'shiladi. Qo'shish uchun pastdagi to'plamning ✏️ tugmasini bosing.",
         "import_standalone_hint": (
             "Avval to'plamni boshlang yoki oching (/newpack, yoki /mypacks dan biror "
             "to'plamda \"Stiker qo'shish\"ni bosing), so'ng o'sha seans ichida "
@@ -728,8 +697,8 @@ STRINGS = {
         ),
         "whatsapp_reading": "WhatsApp stiker to'plami o'qilmoqda...",
         "whatsapp_summary_head": "WhatsApp to'plamidan {added} ta stiker import qilindi",
-        "not_emoji_message": "Qo'shish uchun rasm/GIF/video/stiker yuboring, oxirgisini qayta belgilash uchun emoji yuboring, yoki /done ni bosing.",
-        "no_sticker_to_tag": "Avval stiker qo'shing, keyin uni belgilash uchun emoji yuboring.",
+        "not_emoji_message": "Qo'shish uchun rasm, GIF, video yoki stiker yuboring. Stiker emojisini o'zgartirish uchun uning ✅ xabariga emoji bilan javob bering.",
+        "no_sticker_to_tag": "Stiker emojisini o'zgartirish uchun uning ✅ xabariga emoji bilan javob bering.",
         "retagged_success": "Emoji o'zgartirildi: {emojis}",
         "retag_failed": "Emojini yangilab bo'lmadi: {error}",
         "nothing_added_yet": "Siz hali hech narsa qo'shmadingiz. Avval rasm yuboring.",
@@ -817,14 +786,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Из них {bonus} ⚡ — бонусный кредит, он сгорит {date}.',
         "credit_cannot_be_withdrawn": '⚡ — это кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с платежом? /paysupport',
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
-        "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
-        "report_send": '📨 Отправить мои данные',
+        "report_button": '🐞 Отправить подробности',
+        "problem_logged_note": 'Анонимный технический отчёт сохранён.',
+        "problem_logged_note_optin": 'Анонимный технический отчёт сохранён. По желанию можно отправить подробности.',
+        "report_disclaimer": "📨 Отправить подробности к случаю {incident}?\n\nУже сохранено, без ничего о вас: бот, код {code}, время, версия.\n\n«Отправить» добавит:\n• ваш Telegram ID\n• ваш @username, если есть\n• ваш язык\n• личный чат или группа\n\nВаши сообщения и файлы — никогда. Стирается через 30 дней или сразу через /deletemydata.",
+        "report_send": '📨 Отправить',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
+        "report_sent": '✅ Спасибо — добавлено к случаю {incident}.',
         "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_cancelled": 'Отменено — о вас ничего не отправлено.',
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
         "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
@@ -858,12 +828,12 @@ STRINGS = {
             "• кому вы дали доступ на добавление в пак и какие ссылки создали\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
-            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
+            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• сколько всего сделано — ссылки по сайтам, конвертации, стикеры, пересланные сообщения — общий счёт за день по всему боту, без сведений о том, кто\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "• то, что бот в этот момент для вас делает — пока не закончит"
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
+        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nПод сбоем, неудавшимся /deletemydata или /feedback, или ошибкой, которая повторяется у вас снова и снова, кнопка «Отправить подробности» предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
             "• Telegram — он передаёт каждое сообщение в обе стороны и действует по своим "
@@ -875,7 +845,7 @@ STRINGS = {
             "внешние сервисы не вызываются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца, а дневные счётчики сделанного — в них нет ничего о том, кто, — через 400 дней. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
             "/deletemydata — стереть всё, что бот хранит о вас\n"
@@ -942,50 +912,13 @@ STRINGS = {
         "feedback_failed": "Отзыв не отправлен — что-то сломалось на моей стороне. Попробуйте ещё раз через несколько минут.",
         "cancel_button_feedback": "💬 Отзыв",
         "cancel_item_feedback": "отзыв, который я просил написать",
-        "help_brief": (
-            "Как это устроено:\n"
-            "\n"
-            "• /newpack создаёт набор стикеров: присылайте картинки, GIF, видео или стикеры, после каждого можно эмодзи, в конце /done.\n"
-            "• /addsticker добавляет в уже готовый набор; /mypacks — список наборов с кнопками: переименовать, поделиться, удалить.\n"
-            "• /import копирует стикеры из другого набора Telegram или из экспорта WhatsApp.\n"
-            "• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n"
-            "\n"
-            "Основные команды: /newpack · /addsticker · /mypacks · /cancel\n"
-            "Все команды — в полном руководстве: кнопка ниже или /fullhelp.\n"
-            "\n"
-        ),
+        "help_brief": "Как это устроено:\n\n• /newpack создаёт набор стикеров: дайте название, потом присылайте картинки, GIF, видео или стикеры — каждый добавляется сразу.\n• Кнопки под полем ввода: ✏️ — добавлять в набор, 👁 — открыть его. Чтобы сменить эмодзи стикера, ответьте эмодзи на его сообщение с ✅.\n• /mypacks — список наборов с кнопками: переименовать, поделиться, удалить. /import копирует стикеры из другого набора Telegram или из экспорта WhatsApp.\n• Идеи или проблемы: /feedback — это прочитает только тот, кто ведёт этих ботов, ответа не будет.\n\nОсновные команды: /newpack · /addsticker · /mypacks · /cancel\nВсе команды — в полном руководстве: кнопка ниже или /fullhelp.\n\n",
         "help_full_button": "📖 Полное руководство",
         "help_brief_button": "↩️ Кратко",
         "help_page_everything": "Полное руководство: /fullhelp",
         "help_page_gone": "Этой страницы справки больше нет. Отправьте /help, чтобы увидеть актуальные.",
-        "helppage_newpack": (
-            "🆕 /newpack — новый набор стикеров\n"
-            "\n"
-            "1. Отправьте /newpack, затем название набора сообщением (до {title_max} символов; длиннее — обрежу). Если Telegram не примет название, начните его с буквы.\n"
-            "2. Присылайте то, что станет стикерами, по одному в сообщении: фото или картинки файлом, GIF, видео или стикеры. Набор создаётся с первым стикером — нет стикера, нет набора.\n"
-            "3. Каждый стикер получает {emoji}. Чтобы сменить, сразу после него пришлите эмодзи (до {emoji_max}): они заменят эмодзи последнего стикера.\n"
-            "4. /done, когда закончите, — я пришлю ссылку на набор. /cancel — прервать.\n"
-            "\n"
-            "Во что что превращается:\n"
-            "• Фото, картинка файлом или обычный стикер — обычный стикер, {side} px по длинной стороне.\n"
-            "• GIF, видео или видеостикер — видеостикер: {side} px, первые {seconds} с, {fps} кадров в секунду, без звука, меньше {kb} КБ. Если так ужать не выйдет, я скажу и предложу наш бот-конвертер.\n"
-            "• Анимированные стикеры (.tgs) добавить нельзя.\n"
-            "• Много сразу: набор стикеров WhatsApp (.zip или .wastickers) или /import из набора Telegram.\n"
-            "\n"
-            "Пример: /newpack, потом «Кошачьи морды», потом три фото вашей кошки, потом 😺, потом /done."
-        ),
-        "helppage_addsticker": (
-            "➕ /addsticker — добавить стикеры в ваш набор\n"
-            "\n"
-            "1. /addsticker покажет ваши наборы. Нажмите нужный, затем «➕ Добавить стикеры».\n"
-            "2. Присылайте фото, GIF, видео или стикеры — так же, как для нового набора. Каждый получает {emoji}; эмодзи, присланные сразу после, его заменят.\n"
-            "3. /done, когда закончите.\n"
-            "• Если прислать стикер, который уже есть в наборе, он из набора уберётся. Если он последний, я сначала спрошу — это удалит весь набор.\n"
-            "• В списке только ваши наборы, созданные через этого бота. Ещё нет? /newpack.\n"
-            "• /mypacks показывает тот же список. В меню набора его можно ещё переименовать, дать кому-то редактировать вместе с вами или удалить.\n"
-            "\n"
-            "Пример: /addsticker, нажмите «Кошачьи морды», затем «➕ Добавить стикеры», пришлите новое фото, потом /done."
-        ),
+        "helppage_newpack": "🆕 /newpack — новый набор стикеров\n\n1. Отправьте /newpack (или нажмите ➕ Новый набор), затем название набора сообщением (до {title_max} символов; длиннее — обрежу). Если Telegram не примет название, начните его с буквы.\n2. Присылайте то, что станет стикерами, по одному в сообщении: фото или картинки файлом, GIF, видео или стикеры. Набор создаётся с первым стикером — нет стикера, нет набора. На каждый добавленный я отвечаю ✅.\n3. Каждый стикер получает {emoji}. Чтобы сменить, ответьте эмодзи на его сообщение с ✅ (или на то, что вы прислали) — до {emoji_max}.\n4. И всё: завершать ничего не нужно. Кнопки наборов остаются под полем ввода; /cancel — прервать.\n\nВо что что превращается:\n• Фото, картинка файлом или обычный стикер — обычный стикер, {side} px по длинной стороне.\n• GIF, видео или видеостикер — видеостикер: {side} px, до {seconds} с, {fps} кадров в секунду, без звука, меньше {kb} КБ. Для клипа длиннее предложу ускорение (или обрежьте сами); для слишком тяжёлого — ниже разрешение или меньше кадров.\n• Анимированные стикеры (.tgs) добавить нельзя.\n• Много сразу: набор стикеров WhatsApp (.zip или .wastickers) или /import из набора Telegram.\n\nПример: /newpack, потом «Кошачьи морды», потом три фото вашей кошки, потом ответьте 😺 на одно из сообщений с ✅.",
+        "helppage_addsticker": "➕ /addsticker — добавить стикеры в ваш набор\n\n1. Нажмите ✏️ у нужного набора под полем ввода (или /addsticker, нажмите набор, затем «➕ Добавить стикеры»).\n2. Присылайте фото, GIF, видео или стикеры — так же, как для нового набора. Каждый получает {emoji}; чтобы сменить, ответьте эмодзи на его сообщение с ✅.\n• Если прислать стикер, который уже есть в наборе, он из набора уберётся. Если он последний, я сначала спрошу — это удалит весь набор.\n• Прислали что-то, не открыв набор? Я подержу это 10 минут и спрошу, в какой набор добавить.\n• В списке только ваши наборы, созданные через этого бота. Ещё нет? /newpack.\n• /mypacks показывает тот же список. В меню набора его можно ещё переименовать, дать кому-то редактировать вместе с вами или удалить.\n\nПример: нажмите ✏️ у «Кошачьи морды», потом пришлите новое фото.",
         "helppage_import": (
             "📥 /import — много стикеров сразу из другого набора\n"
             "\n"
@@ -993,7 +926,7 @@ STRINGS = {
             "• /import и ссылка на открытый набор Telegram (t.me/addstickers/…) или его имя копирует его стикеры в ваш набор вместе с эмодзи. До {max} за раз.\n"
             "• Анимированные стикеры (.tgs) пропускаются, и я скажу, сколько.\n"
             "• Из WhatsApp: вместо этого пришлите файл набора .zip или .wastickers.\n"
-            "• Дальше присылайте ещё или /done, чтобы закончить.\n"
+            "• Дальше присылайте ещё.\n"
             "\n"
             "Пример: /newpack, потом «Избранное», потом /import t.me/addstickers/SomePack"
         ),
@@ -1013,7 +946,7 @@ STRINGS = {
             "Здравствуйте! Я превращаю ваши изображения, GIF, видео и стикеры в наборы "
             "стикеров Telegram.\n\n"
         ),
-        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/done - закончить редактирование набора\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
+        "help_text": 'Команды:\n/newpack - начать новый набор стикеров\n/addsticker - добавить стикеры в существующий набор\n/mypacks - показать ваши наборы\n/import <ссылка/имя набора> - (во время редактирования) массово скопировать стикеры из другого набора Telegram, или отправить файл экспорта набора стикеров WhatsApp .zip/.wastickers\n/cancel - остановить то, чего я от вас жду (спрошу, что именно)\n/feedback - предложить идею или сообщить о проблеме; это прочитает только тот, кто ведёт этих ботов, ответа не будет\n/whomade <ссылка/имя набора> - узнать, кто создал набор (если он был создан через этого бота)\n/donate - помочь с расходами на хостинг (совершенно необязательно)\n/en, /uz, /rus - сменить язык (или /language — он спрашивает)\n/balance - ваш ⚡ кредит\n/paysupport - проблема с оплатой\n/privacy - что я о вас храню\n/terms - для чего можно пользоваться ботом\n/deletemydata - удалить всё, что я о вас храню\n/start - что этот бот делает и с чего начать\n/fullhelp - это полное руководство (/help - краткое)\n/convert - конвертация файлов теперь в ConvertBot; команда подскажет, куда идти\n\nВо время редактирования набора: отправляйте изображения, GIF, видео или статические/видео-стикеры, чтобы добавить их.\nОтправьте эмодзи сразу после стикера, чтобы пометить его этим эмодзи.\n\nНажмите на набор в /mypacks, чтобы переименовать его, настроить совместное редактирование, чтобы кто-то ещё мог добавлять стикеры, или удалить его насовсем (только для владельца, дважды спрашивает перед этим).\n\nХотите скачать видео из Instagram/TikTok или сконвертировать файл в другой формат? Теперь это делают соседние боты ниже.\n\n⚠️ ВНИМАНИЕ: платежи окончательные — Stars, оплаченные через /donate, НЕ возвращаются, а добавленный ими ⚡ кредит НЕЛЬЗЯ вывести.\n\n',
         "whomade_usage": "Использование: /whomade <имя набора или ссылка t.me/addstickers>",
         "whomade_not_found": (
             "У меня нет записи об этом наборе — либо он не был создан через этого "
@@ -1023,12 +956,7 @@ STRINGS = {
         "coedit_link_invalid": "Эта ссылка для совместного редактирования недействительна — возможно, владелец набора сбросил её.",
         "coedit_pack_gone": "Похоже, этого набора больше не существует.",
         "coedit_own_pack": "Это ваш собственный набор — используйте /mypacks, чтобы им управлять.",
-        "coedit_joined_intro": (
-            "Вас добавили как соредактора набора «{title}»! Отправляйте изображения, "
-            "GIF, видео или статические/видео-стикеры, чтобы добавить их — эмодзи по "
-            "умолчанию 😭, отправьте эмодзи сразу после, чтобы переметить последний. "
-            "По завершении — /done."
-        ),
+        "coedit_joined_intro": "Теперь вы соавтор «{title}». Отправляйте картинки, GIF, видео или стикеры, чтобы добавить.",
         "btn_new_pack": "➕ Новый набор",
         "btn_my_packs": "📁 Мои наборы",
         "btn_help": "❓ Помощь",
@@ -1058,6 +986,36 @@ STRINGS = {
         "only_owner_rename": "Переименовать набор может только его владелец.",
         "rename_prompt": "Отправьте новое название для «{title}».",
         "rename_broken_state": "Что-то пошло не так — попробуйте снова переименовать через /mypacks.",
+        "session_lost": "Работа с набором закрылась после долгой паузы. Начните заново: /newpack или /addsticker.",
+        "held_full": "Я уже держу {n} шт. — сначала выберите для них набор, потом пришлите это снова.",
+        "held_already_in_pack": "Этот стикер уже есть в «{title}» — оставлен как есть.",
+        "btn_kb_edit": "✏️ Изменить «{title}»",
+        "btn_kb_view": "👁 Открыть «{title}»",
+        "pack_view": "👁 «{title}»",
+        "item_added": "✅ Добавлено в «{title}» с {emoji}. Ответьте на это сообщение эмодзи, чтобы сменить.",
+        "item_added_video": "✅ Добавлено в «{title}» как видео-стикер с {emoji}. Ответьте на это сообщение эмодзи, чтобы сменить.",
+        "item_added_fit": "✅ Добавлено в «{title}» ({how}) с {emoji}. Ответьте на это сообщение эмодзи, чтобы сменить.",
+        "retag_unknown": "Я уже не знаю, к какому стикеру относилось то сообщение.",
+        "packs_keyboard_note": "📦 Ваши наборы — на кнопках внизу: нажмите на набор, чтобы добавлять в него стикеры.",
+        "pack_button_gone": "Не нахожу этот набор — возможно, его удалили. Вот ваши наборы сейчас.",
+        "held_offer": "В какой набор добавить {n} шт.? Они ждут {minutes} мин.",
+        "btn_held_discard": "✖️ Не добавлять",
+        "held_expired": "Это ждало слишком долго — отправьте снова.",
+        "held_discarded": "Не добавлено.",
+        "video_too_long": "Этот клип длится {seconds} с; видео-стикер — не больше {limit} с. Выберите скорость или обрежьте его до {limit} с сами и пришлите снова.",
+        "video_too_long_no_speed": "Этот клип длится {seconds} с; видео-стикер — не больше {limit} с, а чтобы уместить его, нужно ускорение больше {speed}×. Обрежьте его до {limit} с (или до {longest} с, а потом ускорьте) и пришлите снова.",
+        "video_too_heavy": "Этот клип не помещается в {kb} КБ, которые Telegram даёт видео-стикеру. Сделайте его легче:",
+        "video_too_heavy_last": "Всё равно не помещается в {kb} КБ. Обрежьте его короче и пришлите снова.",
+        "btn_speed_fit": "⏩ {speed}× — ровно впритык",
+        "btn_speed": "⏩ {speed}×",
+        "btn_lower_res": "🔽 Ниже разрешение (рекомендуется)",
+        "btn_lower_fps": "🎞 Меньше кадров ({fps} fps)",
+        "btn_skip_clip": "✖️ Пропустить этот клип",
+        "video_fit_expired": "Этот выбор устарел — пришлите клип снова.",
+        "video_fit_skipped": "Пропущено — этот клип не добавлен.",
+        "video_fit_added": "✅ Добавлено ({how}).",
+        "fit_lower_res": "ниже разрешение",
+        "fit_lower_fps": "{fps} fps",
         "btn_back_to_pack": "⬅️ Назад к набору",
         "renamed_success": "Переименовано в «{title}».",
         "renamed_failed": "Не удалось переименовать: {error}",
@@ -1076,23 +1034,13 @@ STRINGS = {
         "newpack_title_prompt": "Каким будет название набора?",
         "title_empty": "Это пусто — отправьте настоящее название для набора.",
         "title_truncated": "Telegram ограничивает название набора 64 символами — используется «{title}».",
-        "editing_intro_new": (
-            "Отправляйте изображения, GIF, видео или статические/видео-стикеры — "
-            "каждый добавляется с эмодзи по умолчанию 😭. Отправьте эмодзи сразу "
-            "после, чтобы переметить последний. По завершении — /done."
-        ),
+        "editing_intro_new": "Отправляйте картинки, GIF, видео или стикеры, чтобы добавить.",
         "no_packs_for_add": "У вас пока нет наборов. Сначала используйте /newpack.",
         "pick_pack_prompt": "Какой набор? Нажмите на него, затем «➕ Добавить стикеры».",
-        "editing_intro_add": (
-            "Отправляйте изображения, GIF, видео или статические/видео-стикеры, "
-            "чтобы добавить их — эмодзи по умолчанию 😭, отправьте эмодзи сразу "
-            "после, чтобы переметить последний. По завершении — /done.\n\n"
-            "Совет: если отправить стикер, который уже есть в этом наборе, он будет "
-            "удалён, а не добавлен повторно."
-        ),
+        "editing_intro_add": "Отправляйте картинки, GIF, видео или стикеры, чтобы добавить.",
         "status_verb_creating": "Создание",
         "status_verb_editing": "Редактирование",
-        "status_line": "📝 {verb} «{title}» — за эту сессию добавлено {count} стикер(ов)",
+        "status_line": "✏️ {verb} «{title}»",
         "status_default_title": "этот набор",
         "btn_delete_pack_yes": "🗑️ Да, удалить набор",
         "btn_cancel": "Отмена",
@@ -1108,7 +1056,7 @@ STRINGS = {
         "image_process_failed": "Не удалось обработать это изображение: {error}",
         "added_default_emoji": "Добавлено {emoji} — отправьте эмодзи, чтобы переметить.",
         "batch_not_added": "⚠️ {done}/{total} — не добавлено: {failed}",
-        "last_attempt_failed": "⚠️ Последняя попытка не удалась — отправьте другой файл, чтобы попробовать снова, или /cancel.",
+        "last_attempt_failed": "⚠️ Не добавлено — отправьте ещё раз, чтобы повторить.",
         "converting_video": "Преобразование в видео-стикер...",
         "video_convert_failed_redirect": (
             "{error}\n\nПревратить это в стикер нельзя, но если вам просто нужен "
@@ -1136,12 +1084,8 @@ STRINGS = {
         "import_summary_head": "Импортировано {added} стикер(ов) из «{source}»",
         "import_summary_skipped": ", пропущено {skipped} неподдерживаемых (анимированные/Lottie)",
         "import_summary_failed": ", {failed} не удалось",
-        "import_summary_tail": ". Можете отправлять ещё, или /done, чтобы закончить.",
-        "done_standalone_hint": (
-            "Нечего завершать — сейчас вы не редактируете набор. "
-            "Начните новый через /newpack или нажмите «Добавить стикеры» "
-            "на наборе из /mypacks."
-        ),
+        "import_summary_tail": ".",
+        "done_standalone_hint": "Завершать нечего — стикеры добавляются, как только вы их присылаете. Чтобы добавить в набор, нажмите ✏️ у него внизу.",
         "import_standalone_hint": (
             "Сначала начните или откройте набор (/newpack, или нажмите «Добавить "
             "стикеры» на наборе из /mypacks), затем используйте /import <ссылка> "
@@ -1149,8 +1093,8 @@ STRINGS = {
         ),
         "whatsapp_reading": "Чтение набора стикеров WhatsApp...",
         "whatsapp_summary_head": "Импортировано {added} стикер(ов) из набора WhatsApp",
-        "not_emoji_message": "Отправьте изображение/GIF/видео/стикер, чтобы добавить, эмодзи, чтобы переметить последний, или /done.",
-        "no_sticker_to_tag": "Сначала добавьте стикер, затем отправьте эмодзи, чтобы его пометить.",
+        "not_emoji_message": "Отправляйте картинки, GIF, видео или стикеры, чтобы добавить. Чтобы сменить эмодзи стикера, ответьте эмодзи на его сообщение с ✅.",
+        "no_sticker_to_tag": "Чтобы сменить эмодзи стикера, ответьте эмодзи на его сообщение с ✅.",
         "retagged_success": "Переметено как {emojis}.",
         "retag_failed": "Не удалось обновить эмодзи: {error}",
         "nothing_added_yet": "Вы ещё ничего не добавили. Сначала отправьте изображение.",
@@ -1235,7 +1179,6 @@ COMMAND_MENU = {
         "addsticker": "To'plamingizga stiker qo'shish",
         "mypacks": "To'plamlaringiz",
         "import": "Boshqa to'plamdan stikerlarni ko'chirish",
-        "done": "Tahrirlayotgan to'plamni yakunlash",
         "whomade": "To'plamni kim yaratgan — stikerini yuboring",
         "cancel": "Kutayotgan amalimni to'xtatish",
         "help": "Nimalar qila olaman",
@@ -1253,7 +1196,6 @@ COMMAND_MENU = {
         "addsticker": "Добавить стикеры в ваш пак",
         "mypacks": "Ваши паки",
         "import": "Скопировать стикеры из другого пака",
-        "done": "Завершить пак, который вы редактируете",
         "whomade": "Кто сделал пак — пришлите его стикер",
         "cancel": "Остановить то, чего я жду",
         "help": "Что я умею",
@@ -1310,14 +1252,15 @@ STRINGS = {
         "topup_thanks_bonus": '🎁 Plus {bonus} ⚡ bonus credit — it expires on {date}.',
         "credit_cannot_be_withdrawn": '⚡ is credit for conversions in ConvertBot, and can NOT be withdrawn or turned back into Stars. A problem with a payment? /paysupport',
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
-        "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
-        "report_send": '📨 Send my details',
+        "report_button": '🐞 Send more details',
+        "problem_logged_note": "Anonymous technical report saved.",
+        "problem_logged_note_optin": "Anonymous technical report saved. You can opt in to send more details.",
+        "report_disclaimer": "📨 Send more details with incident {incident}?\n\nSaved already, nothing about you: the bot, code {code}, the time, the version.\n\nSend adds:\n• your Telegram ID\n• your @username, if you have one\n• your language\n• private chat or group\n\nNever your messages or files. Cleared after 30 days, or now with /deletemydata.",
+        "report_send": '📨 Send',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
+        "report_sent": '✅ Thank you — added to incident {incident}.',
         "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_cancelled": 'Cancelled — nothing about you was sent.',
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
         "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
@@ -1337,7 +1280,7 @@ STRINGS = {
 
         "privacy_heading": "🔒 Privacy",
         "privacy_kept_heading": "What this bot keeps:",
-        "privacy_stored": '• your Telegram user id, and the language you chose\n• the file you send — deleted as soon as it has been converted, or kept for up to 15 minutes after each conversion if you turn on "keep file" to convert it to more formats; anything a crash leaves behind is swept up on a timer and at startup\n• a timestamp each time you use the bot, so its owner can tell whether anyone is using it\n• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• your ⚡ credit balance, and a record of every top-up, conversion charge and ⚡ returned to your balance: the amount, what it was for, and Telegram\'s payment id for anything paid\n• whatever the bot is in the middle of doing with you, until it is finished',
+        "privacy_stored": '• your Telegram user id, and the language you chose\n• the file you send — deleted as soon as it has been converted, or kept for up to 15 minutes after each conversion if you turn on "keep file" to convert it to more formats; anything a crash leaves behind is swept up on a timer and at startup\n• a timestamp each time you use the bot, so its owner can tell whether anyone is using it\n• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• how much was done — links per site, conversions, stickers, relayed messages — counted per day for the whole bot, with nothing about who\n• your ⚡ credit balance, and a record of every top-up, conversion charge and ⚡ returned to your balance: the amount, what it was for, and Telegram\'s payment id for anything paid\n• whatever the bot is in the middle of doing with you, until it is finished',
         "privacy_problems_heading": "When something goes wrong:",
         "privacy_problems": (
             "Every error this bot shows anybody is written down by itself: the error code, an "
@@ -1345,7 +1288,8 @@ STRINGS = {
             "you — not your id, not your name, not what you sent. A fault nobody reports is "
             "still a fault, which is why it does not wait to be asked.\n"
             "\n"
-            "\"Add my details\" under an error offers to attach four things to that one "
+            "Under a crash, a failed /deletemydata or /feedback, or an error that keeps "
+            "happening to you, \"Send more details\" offers to attach four things to that one "
             "incident: your Telegram user id, your @username if you have one, the language you "
             "picked, and whether the chat is private or a group. All four are named on screen "
             "first, and nothing is sent unless you tap Send. What you wrote and the files you "
@@ -1365,7 +1309,7 @@ STRINGS = {
             "handed to an outside service"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
+        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months; the daily counts of what was done, which say nothing about who, after 400 days. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
         "privacy_your_choices": (
             "What you can do:\n"
             "/deletemydata — erase what this bot holds on you\n"
@@ -1626,12 +1570,12 @@ STRINGS = {
         "job_no_credit": "That conversion couldn't start: it costs {price} ⚡ and your balance is {balance} ⚡. Nothing was charged — /recharge tops it up.",
         "job_refunded_line": 'The {price} ⚡ went back to your balance — you have {balance} ⚡.',
         "job_reason_refused": "I couldn't convert that file: {detail}",
-        "job_reason_timeout": 'That conversion ran past its {minutes}-minute limit, so I stopped it. The owner has been told.',
+        "job_reason_timeout": 'That conversion ran past its {minutes}-minute limit, so I stopped it.',
         "job_reason_too_slow": "This one would take about {minutes} minutes to convert, and a conversion here can run for {limit}, so I stopped it now rather than make you wait for the limit. A shorter clip, or a lower resolution, will fit.",
-        "job_reason_crash": 'The conversion failed on my side. The owner has been told.',
+        "job_reason_crash": 'The conversion failed on my side.',
         "job_reason_no_memory": "This one needs more memory to convert than this server has — that happens with 4K and HDR video. Your file is fine: a version at 1080p or lower will convert.",
-        "job_reason_too_large": 'The {target} came out at {mb} MB, more than the {limit} MB I can send back for this conversion — JPG, WEBP or AVIF will be far smaller. The owner has been told.',
-        "job_reason_send_failed": 'The file converted, but sending it to you failed. The owner has been told.',
+        "job_reason_too_large": 'The {target} came out at {mb} MB, more than the {limit} MB I can send back for this conversion — JPG, WEBP or AVIF will be far smaller.',
+        "job_reason_send_failed": 'The file converted, but sending it to you failed.',
         "job_reason_interrupted": 'I was restarted in the middle of that conversion. Send it again in a minute.',
         "unknown_order": "Unknown order.",
         "unrecognized_message": (
@@ -1733,14 +1677,15 @@ STRINGS = {
         "topup_thanks_bonus": '🎁 Ustiga {bonus} ⚡ bonus kredit — muddati {date} kuni tugaydi.',
         "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit: uni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. To'lovda muammo bo'lsa: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
-        "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
-        "report_send": "📨 Ma'lumotlarimni yuborish",
+        "report_button": "🐞 Qo'shimcha ma'lumot yuborish",
+        "problem_logged_note": "Anonim texnik hisobot saqlandi.",
+        "problem_logged_note_optin": "Anonim texnik hisobot saqlandi. Xohlasangiz, qo'shimcha ma'lumot yuborishingiz mumkin.",
+        "report_disclaimer": "📨 {incident} hodisasiga qo'shimcha ma'lumot yuborasizmi?\n\nAllaqachon saqlangan, siz haqingizda hech narsa yo'q: bot, {code} kodi, vaqt, versiya.\n\n\"Yuborish\" qo'shadi:\n• Telegram ID raqamingiz\n• bo'lsa, @username'ingiz\n• tilingiz\n• shaxsiy suhbatmi yoki guruh\n\nXabarlaringiz va fayllaringiz hech qachon kirmaydi. 30 kundan keyin o'chiriladi, /deletemydata bilan esa darhol.",
+        "report_send": '📨 Yuborish',
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
         "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
         "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
@@ -1760,14 +1705,14 @@ STRINGS = {
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• yuborgan faylingiz — o'girilishi bilanoq o'chiriladi; «faylni saqlash» yoqilgan bo'lsa, boshqa formatlarga ham o'girish uchun har konvertatsiyadan keyin 15 daqiqagacha saqlanadi; nosozlikdan keyin qolib ketgan fayllar muntazam va bot ishga tushganda tozalanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• ⚡ kredit balansingiz va har bir to'ldirish, konvertatsiya uchun yechilgan hamda balansga qaytgan ⚡ yozuvi: miqdori, nima uchunligi va pullik to'lovlarda Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• yuborgan faylingiz — o'girilishi bilanoq o'chiriladi; «faylni saqlash» yoqilgan bo'lsa, boshqa formatlarga ham o'girish uchun har konvertatsiyadan keyin 15 daqiqagacha saqlanadi; nosozlikdan keyin qolib ketgan fayllar muntazam va bot ishga tushganda tozalanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• qancha ish qilingani — sayt bo'yicha havolalar, konvertatsiyalar, stikerlar, yuborilgan xabarlar — butun bot bo'yicha kunlik hisob, kim ekani haqida ma'lumotsiz\n• ⚡ kredit balansingiz va har bir to'ldirish, konvertatsiya uchun yechilgan hamda balansga qaytgan ⚡ yozuvi: miqdori, nima uchunligi va pullik to'lovlarda Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nIshdan chiqish, bajarilmagan /deletemydata yoki /feedback, yoki sizda takror-takror yuz berayotgan xato ostidagi \"Qo'shimcha ma'lumot yuborish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
         "privacy_seen_by": "• Telegram — barcha xabarlar u orqali o'tadi va u o'z qoidalari asosida ishlaydi\n• bot joylashgan hosting va bot foydalanadigan ma'lumotlar bazasi",
         "privacy_others": "• boshqa hech kim — fayllar botning o'z serverida o'giriladi va hech qanday tashqi xizmatga yuborilmaydi",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
+        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi; qancha ish qilinganining kunlik hisobi esa — unda kimligi yo'q — 400 kundan keyin. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
         "privacy_your_choices": "Nima qilishingiz mumkin:\n/deletemydata — bot siz haqingizda saqlagan ma'lumotlarni o'chirish\n/terms — botdan foydalanish shartlari\n\nBotni Telegramda bloklasangiz, u sizga yozmay qo'yadi, lekin hech narsa o'chmaydi. Ikkalasini ham xohlasangiz, avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan maqsadiga ko'ra, qonun va Telegram qoidalari doirasida foydalaning. Uni boshqalarni bezovta qilish uchun ishlatmang va belgilangan cheklovlardan oshirib yuklamang — aks holda akkaunt bloklanadi.",
@@ -1996,12 +1941,12 @@ STRINGS = {
         "job_no_credit": "Konvertatsiya boshlanmadi: narxi {price} ⚡, balansingizda esa {balance} ⚡. Hech narsa yechilmadi — balansni /recharge orqali to'ldiring.",
         "job_refunded_line": '{price} ⚡ balansingizga qaytib tushdi — hozir {balance} ⚡.',
         "job_reason_refused": "Faylni o'girib bo'lmadi: {detail}",
-        "job_reason_timeout": "Konvertatsiya {minutes} daqiqalik vaqt chegarasidan oshib ketgani uchun to'xtatildi. Bot egasiga xabar berildi.",
+        "job_reason_timeout": "Konvertatsiya {minutes} daqiqalik vaqt chegarasidan oshib ketgani uchun to'xtatildi.",
         "job_reason_too_slow": "Bu faylni o'girish taxminan {minutes} daqiqa olardi, bu yerda esa bitta konvertatsiya ko'pi bilan {limit} daqiqa ishlaydi. Shuning uchun chegaragacha kuttirib o'tirmay, hozir to'xtatdim. Qisqaroq video yoki pastroq sifat bemalol sig'adi.",
-        "job_reason_crash": 'Konvertatsiya bot tomonidagi xatolik tufayli bajarilmadi. Bot egasiga xabar berildi.',
+        "job_reason_crash": 'Konvertatsiya bot tomonidagi xatolik tufayli bajarilmadi.',
         "job_reason_no_memory": "Bu faylni o'girishga serverning xotirasi yetmadi — 4K va HDR videolarda shunday bo'ladi. Faylingizda muammo yo'q: uning 1080p yoki undan past sifatdagi nusxasi bemalol o'giriladi.",
-        "job_reason_too_large": "{target} fayli {mb} MB chiqdi, bu konvertatsiya natijasini esa faqat {limit} MB gacha yubora olaman. JPG, WEBP yoki AVIF ancha kichik bo'ladi. Bot egasiga xabar berildi.",
-        "job_reason_send_failed": "Fayl o'girildi, lekin uni sizga yuborib bo'lmadi. Bot egasiga xabar berildi.",
+        "job_reason_too_large": "{target} fayli {mb} MB chiqdi, bu konvertatsiya natijasini esa faqat {limit} MB gacha yubora olaman. JPG, WEBP yoki AVIF ancha kichik bo'ladi.",
+        "job_reason_send_failed": "Fayl o'girildi, lekin uni sizga yuborib bo'lmadi.",
         "job_reason_interrupted": 'Konvertatsiya vaqtida bot qayta ishga tushdi. Bir daqiqadan keyin faylni qaytadan yuboring.',
         "unknown_order": "Noma'lum buyurtma.",
         "unrecognized_message": 'Bu o\'girish mumkin bo\'lgan fayl emas — fayl yuboring yoki qabul qilinadigan formatlarni /formats orqali ko\'ring. Format nomini yozsangiz (masalan, "heic" yoki "epub"), uni nimaga o\'girish mumkinligini aytaman.',
@@ -2065,14 +2010,15 @@ STRINGS = {
         "topup_thanks_bonus": '🎁 И ещё {bonus} ⚡ бонусного кредита — он сгорит {date}.',
         "credit_cannot_be_withdrawn": '⚡ — это кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с платежом? /paysupport',
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
-        "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
-        "report_send": '📨 Отправить мои данные',
+        "report_button": '🐞 Отправить подробности',
+        "problem_logged_note": 'Анонимный технический отчёт сохранён.',
+        "problem_logged_note_optin": 'Анонимный технический отчёт сохранён. По желанию можно отправить подробности.',
+        "report_disclaimer": "📨 Отправить подробности к случаю {incident}?\n\nУже сохранено, без ничего о вас: бот, код {code}, время, версия.\n\n«Отправить» добавит:\n• ваш Telegram ID\n• ваш @username, если есть\n• ваш язык\n• личный чат или группа\n\nВаши сообщения и файлы — никогда. Стирается через 30 дней или сразу через /deletemydata.",
+        "report_send": '📨 Отправить',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
+        "report_sent": '✅ Спасибо — добавлено к случаю {incident}.',
         "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_cancelled": 'Отменено — о вас ничего не отправлено.',
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
         "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
@@ -2092,9 +2038,9 @@ STRINGS = {
 
         "privacy_heading": "🔒 Конфиденциальность",
         "privacy_kept_heading": "Что бот хранит:",
-        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
+        "privacy_stored": '• ваш числовой id в Telegram и выбранный язык\n• присланный файл — удаляется сразу после конвертации, или хранится до 15 минут после каждой конвертации, если включить «хранить файл», чтобы конвертировать его и в другие форматы; всё, что осталось после сбоя, подчищается по таймеру и при запуске\n• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли ботом хоть кто-нибудь\n• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• сколько всего сделано — ссылки по сайтам, конвертации, стикеры, пересланные сообщения — общий счёт за день по всему боту, без сведений о том, кто\n• ваш баланс ⚡ кредита и запись о каждом пополнении, списании за конвертацию и возврате ⚡ на баланс: сумму, за что и платёжный id Telegram для оплаченного\n• то, что бот в этот момент для вас делает — пока не закончит',
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
+        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nПод сбоем, неудавшимся /deletemydata или /feedback, или ошибкой, которая повторяется у вас снова и снова, кнопка «Отправить подробности» предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
             "• Telegram — он передаёт каждое сообщение в обе стороны и действует по своим "
@@ -2106,7 +2052,7 @@ STRINGS = {
             "наружу не передаются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца, а дневные счётчики сделанного — в них нет ничего о том, кто, — через 400 дней. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
             "/deletemydata — стереть всё, что бот хранит о вас\n"
@@ -2365,12 +2311,12 @@ STRINGS = {
         "job_no_credit": 'Конвертация не началась: она стоит {price} ⚡, а на балансе {balance} ⚡. Ничего не списано — /recharge пополнит баланс.',
         "job_refunded_line": '{price} ⚡ вернулись на баланс — теперь {balance} ⚡.',
         "job_reason_refused": 'Не получилось конвертировать этот файл: {detail}',
-        "job_reason_timeout": 'Конвертация не уложилась в {minutes} мин., и я её остановил. Владелец в курсе.',
+        "job_reason_timeout": 'Конвертация не уложилась в {minutes} мин., и я её остановил.',
         "job_reason_too_slow": "На этот файл ушло бы около {minutes} мин., а конвертация здесь может идти не дольше {limit} мин., поэтому я остановил её сразу, а не заставил вас ждать до конца лимита. Подойдёт ролик покороче или в меньшем разрешении.",
-        "job_reason_crash": 'Конвертация сломалась на моей стороне. Владелец в курсе.',
+        "job_reason_crash": 'Конвертация сломалась на моей стороне.',
         "job_reason_no_memory": "Для этого файла не хватило памяти сервера — так бывает с видео в 4K и HDR. С самим файлом всё в порядке: версия в 1080p или ниже сконвертируется.",
-        "job_reason_too_large": '{target} получился на {mb} МБ, а по этой конвертации я могу отправить не больше {limit} МБ. JPG, WEBP или AVIF будут намного меньше. Владелец в курсе.',
-        "job_reason_send_failed": 'Файл сконвертирован, но отправить его вам не вышло. Владелец в курсе.',
+        "job_reason_too_large": '{target} получился на {mb} МБ, а по этой конвертации я могу отправить не больше {limit} МБ. JPG, WEBP или AVIF будут намного меньше.',
+        "job_reason_send_failed": 'Файл сконвертирован, но отправить его вам не вышло.',
         "job_reason_interrupted": 'Меня перезапустили посреди конвертации. Пришлите файл снова через минуту.',
         "unknown_order": "Неизвестный заказ.",
         "unrecognized_message": (
@@ -2568,14 +2514,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Of that, {bonus} ⚡ is bonus credit and expires on {date}.',
         "credit_cannot_be_withdrawn": '⚡ is credit for conversions in ConvertBot, and can NOT be withdrawn or turned back into Stars. A problem with a payment? /paysupport',
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
-        "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
-        "report_send": '📨 Send my details',
+        "report_button": '🐞 Send more details',
+        "problem_logged_note": "Anonymous technical report saved.",
+        "problem_logged_note_optin": "Anonymous technical report saved. You can opt in to send more details.",
+        "report_disclaimer": "📨 Send more details with incident {incident}?\n\nSaved already, nothing about you: the bot, code {code}, the time, the version.\n\nSend adds:\n• your Telegram ID\n• your @username, if you have one\n• your language\n• private chat or group\n\nNever your messages or files. Cleared after 30 days, or now with /deletemydata.",
+        "report_send": '📨 Send',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
+        "report_sent": '✅ Thank you — added to incident {incident}.',
         "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_cancelled": 'Cancelled — nothing about you was sent.',
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
         "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
@@ -2620,7 +2567,7 @@ STRINGS = {
             "counts\n"
             "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
             "using it\n"
-            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
+            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• how much was done — links per site, conversions, stickers, relayed messages — counted per day for the whole bot, with nothing about who\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "• whatever the bot is in the middle of doing with you, until it is finished\n"
             "\n"
@@ -2634,7 +2581,8 @@ STRINGS = {
             "you — not your id, not your name, not what you sent. A fault nobody reports is "
             "still a fault, which is why it does not wait to be asked.\n"
             "\n"
-            "\"Add my details\" under an error offers to attach four things to that one "
+            "Under a crash, a failed /deletemydata or /feedback, or an error that keeps "
+            "happening to you, \"Send more details\" offers to attach four things to that one "
             "incident: your Telegram user id, your @username if you have one, the language you "
             "picked, and whether the chat is private or a group. All four are named on screen "
             "first, and nothing is sent unless you tap Send. What you wrote and the files you "
@@ -2656,7 +2604,7 @@ STRINGS = {
             "policies and not this one."
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
+        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months; the daily counts of what was done, which say nothing about who, after 400 days. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
         "privacy_your_choices": (
             "What you can do:\n"
             "/deletemydata — erase what this bot holds on you\n"
@@ -2883,14 +2831,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Shundan {bonus} ⚡ — bonus kredit, uning muddati {date} kuni tugaydi.',
         "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit: uni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. To'lovda muammo bo'lsa: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
-        "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
-        "report_send": "📨 Ma'lumotlarimni yuborish",
+        "report_button": "🐞 Qo'shimcha ma'lumot yuborish",
+        "problem_logged_note": "Anonim texnik hisobot saqlandi.",
+        "problem_logged_note_optin": "Anonim texnik hisobot saqlandi. Xohlasangiz, qo'shimcha ma'lumot yuborishingiz mumkin.",
+        "report_disclaimer": "📨 {incident} hodisasiga qo'shimcha ma'lumot yuborasizmi?\n\nAllaqachon saqlangan, siz haqingizda hech narsa yo'q: bot, {code} kodi, vaqt, versiya.\n\n\"Yuborish\" qo'shadi:\n• Telegram ID raqamingiz\n• bo'lsa, @username'ingiz\n• tilingiz\n• shaxsiy suhbatmi yoki guruh\n\nXabarlaringiz va fayllaringiz hech qachon kirmaydi. 30 kundan keyin o'chiriladi, /deletemydata bilan esa darhol.",
+        "report_send": '📨 Yuborish',
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
         "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
         "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
@@ -2909,14 +2858,14 @@ STRINGS = {
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• siz yuborgan havolalar: har biri u bo'yicha fayl olinayotgan paytda, keyin esa oxirgi beshtasi — o'sha yuklamalar ostidagi tugmalar ishlashi uchun. Botdan 12 soat foydalanmasangiz, ular o'chiriladi\n• bot sizga hozirgina yuborgan fayl — 5 daqiqa davomida, uning ostidagi tugma va qayta yuborilgan o'sha havola faylni qaytadan yuklamasdan javob berishi uchun. Boshqa havola yuborsangiz, /deletemydata buyrug'ini bersangiz yoki bot qayta ishga tushsa, u oldinroq o'chiriladi. Bularning hammasi yuklab olinganidan keyin 12 soatdan kechiktirmay o'chiriladi\n• bot avval yuborgan fayllarning Telegram fayl ID'lari — postning qaytarib bo'lmaydigan kodi ostida saqlanadi, kim so'ragani esa saqlanmaydi. Ular yordamida bot o'sha postni qayta yuklab olmasdan yana yubora oladi. Fayl ID'sidan qayta foydalanishdan oldin bot post hali ham ochiq ekanini kamida har 12 soatda tekshiradi. Hech kim foydalanmagan fayl ID'lari 90 kundan keyin o'chiriladi\n• har bir yuklab olish uchun bitta yozuv: qaysi platformadan va qachon; kunlik limit shu asosida hisoblanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n\nShu 5 daqiqadan tashqari faylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
+        "privacy_stored": "• Telegram ID raqamingiz, tilingiz, izoh va sifat sozlamalaringiz\n• siz yuborgan havolalar: har biri u bo'yicha fayl olinayotgan paytda, keyin esa oxirgi beshtasi — o'sha yuklamalar ostidagi tugmalar ishlashi uchun. Botdan 12 soat foydalanmasangiz, ular o'chiriladi\n• bot sizga hozirgina yuborgan fayl — 5 daqiqa davomida, uning ostidagi tugma va qayta yuborilgan o'sha havola faylni qaytadan yuklamasdan javob berishi uchun. Boshqa havola yuborsangiz, /deletemydata buyrug'ini bersangiz yoki bot qayta ishga tushsa, u oldinroq o'chiriladi. Bularning hammasi yuklab olinganidan keyin 12 soatdan kechiktirmay o'chiriladi\n• bot avval yuborgan fayllarning Telegram fayl ID'lari — postning qaytarib bo'lmaydigan kodi ostida saqlanadi, kim so'ragani esa saqlanmaydi. Ular yordamida bot o'sha postni qayta yuklab olmasdan yana yubora oladi. Fayl ID'sidan qayta foydalanishdan oldin bot post hali ham ochiq ekanini kamida har 12 soatda tekshiradi. Hech kim foydalanmagan fayl ID'lari 90 kundan keyin o'chiriladi\n• har bir yuklab olish uchun bitta yozuv: qaysi platformadan va qachon; kunlik limit shu asosida hisoblanadi\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• qancha ish qilingani — sayt bo'yicha havolalar, konvertatsiyalar, stikerlar, yuborilgan xabarlar — butun bot bo'yicha kunlik hisob, kim ekani haqida ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n• bot siz uchun bajarayotgan ish — u tugagunicha\n\nShu 5 daqiqadan tashqari faylning o'zi saqlanmaydi: u olinadi, sizga yuboriladi va o'chiriladi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nIshdan chiqish, bajarilmagan /deletemydata yoki /feedback, yoki sizda takror-takror yuz berayotgan xato ostidagi \"Qo'shimcha ma'lumot yuborish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
         "privacy_seen_by": "• Telegram — barcha xabarlar u orqali o'tadi va u o'z qoidalari asosida ishlaydi\n• bot joylashgan hosting va bot foydalanadigan ma'lumotlar bazasi",
         "privacy_others": "• siz havolasini yuborgan sayt, hamda sayt to'g'ridan-to'g'ri javob bermaganda bot murojaat qiladigan yuklab olish xizmatlari. Ular havolani oladi va so'rov sizdan emas, bot serveridan kelganini ko'radi; ular nimani qayd etishi o'z qoidalariga bog'liq, bu botning qoidalariga emas.",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
+        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi; qancha ish qilinganining kunlik hisobi esa — unda kimligi yo'q — 400 kundan keyin. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
         "privacy_your_choices": "Nima qilishingiz mumkin:\n/deletemydata — bot siz haqingizda saqlagan ma'lumotlarni o'chirish\n/terms — botdan foydalanish shartlari\n\nBotni Telegramda bloklasangiz, u sizga yozmay qo'yadi, lekin hech narsa o'chmaydi. Ikkalasini ham xohlasangiz, avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan maqsadiga ko'ra, qonun va Telegram qoidalari doirasida foydalaning. Uni boshqalarni bezovta qilish uchun ishlatmang va belgilangan cheklovlardan oshirib yuklamang — aks holda akkaunt bloklanadi.",
@@ -3127,14 +3076,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Из них {bonus} ⚡ — бонусный кредит, он сгорит {date}.',
         "credit_cannot_be_withdrawn": '⚡ — это кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с платежом? /paysupport',
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
-        "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
-        "report_send": '📨 Отправить мои данные',
+        "report_button": '🐞 Отправить подробности',
+        "problem_logged_note": 'Анонимный технический отчёт сохранён.',
+        "problem_logged_note_optin": 'Анонимный технический отчёт сохранён. По желанию можно отправить подробности.',
+        "report_disclaimer": "📨 Отправить подробности к случаю {incident}?\n\nУже сохранено, без ничего о вас: бот, код {code}, время, версия.\n\n«Отправить» добавит:\n• ваш Telegram ID\n• ваш @username, если есть\n• ваш язык\n• личный чат или группа\n\nВаши сообщения и файлы — никогда. Стирается через 30 дней или сразу через /deletemydata.",
+        "report_send": '📨 Отправить',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
+        "report_sent": '✅ Спасибо — добавлено к случаю {incident}.',
         "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_cancelled": 'Отменено — о вас ничего не отправлено.',
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
         "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
@@ -3179,7 +3129,7 @@ STRINGS = {
             "дневной лимит\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
-            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
+            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• сколько всего сделано — ссылки по сайтам, конвертации, стикеры, пересланные сообщения — общий счёт за день по всему боту, без сведений о том, кто\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "• то, что бот в этот момент для вас делает — пока не закончит\n"
             "\n"
@@ -3187,7 +3137,7 @@ STRINGS = {
             "удаляются."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
+        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nПод сбоем, неудавшимся /deletemydata или /feedback, или ошибкой, которая повторяется у вас снова и снова, кнопка «Отправить подробности» предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
             "• Telegram — он передаёт каждое сообщение в обе стороны и действует по своим "
@@ -3200,7 +3150,7 @@ STRINGS = {
             "бота, а не от вас; что они у себя пишут в логи — их дело и их правила, а не эти."
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца, а дневные счётчики сделанного — в них нет ничего о том, кто, — через 400 дней. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
             "/deletemydata — стереть всё, что бот хранит о вас\n"
@@ -3497,14 +3447,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Of that, {bonus} ⚡ is bonus credit and expires on {date}.',
         "credit_cannot_be_withdrawn": '⚡ is credit for conversions in ConvertBot, and can NOT be withdrawn or turned back into Stars. A problem with a payment? /paysupport',
         "paysupport_text": '💳 Help with a payment\n\nPayments are FINAL: Stars are NOT refunded, and ⚡ credit can NOT be withdrawn or turned back into Stars.\n\nIf a payment went wrong — you were charged and no credit arrived, or you were charged twice — write to {contact} with the date, the amount and your Telegram id, {user_id}. It will be checked and put right with credit.\n\n/balance lists every payment and what it added.',
-        "report_button": '🐞 Add my details',
-        "problem_logged_note": "This is already written down for the bot's owner — the code, the time and the version, and nothing about you.",
-        "report_disclaimer": "📨 Add your own details to this problem?\n\nAlready recorded, with you left out of it: the bot's name, the error code {code}, the incident number {incident}, when it happened and the bot's version.\n\nTapping Send adds four things: your Telegram user ID, your @username if you have one, the language you picked, and whether this chat is private or a group. Not what you wrote, and not the file you sent.\n\nIt lets your case be found in the logs, which is usually what makes a rare problem fixable. Entirely your choice.",
-        "report_send": '📨 Send my details',
+        "report_button": '🐞 Send more details',
+        "problem_logged_note": "Anonymous technical report saved.",
+        "problem_logged_note_optin": "Anonymous technical report saved. You can opt in to send more details.",
+        "report_disclaimer": "📨 Send more details with incident {incident}?\n\nSaved already, nothing about you: the bot, code {code}, the time, the version.\n\nSend adds:\n• your Telegram ID\n• your @username, if you have one\n• your language\n• private chat or group\n\nNever your messages or files. Cleared after 30 days, or now with /deletemydata.",
+        "report_send": '📨 Send',
         "report_cancel": '✖️ Cancel',
-        "report_sent": '✅ Thank you — your details are on incident {incident} now, which is what makes this one findable.',
+        "report_sent": '✅ Thank you — added to incident {incident}.',
         "report_already": 'Your details are already on incident {incident}. Nothing more was sent.',
-        "report_cancelled": 'Cancelled — nothing about you was sent. The problem itself stays logged.',
+        "report_cancelled": 'Cancelled — nothing about you was sent.',
         "report_failed": "⚠️ The report couldn't be sent right now. Please try again later.",
         "report_invalid": 'This button no longer works.',
         "crash_notice": "⚠️ Something went wrong on the bot's side while handling that, so it wasn't done. Please try again in a moment.",
@@ -3542,7 +3493,7 @@ STRINGS = {
             "• who you have blocked\n"
             "• a timestamp each time you use the bot, so its owner can tell whether anyone is "
             "using it\n"
-            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n"
+            "• how many times each button is tapped, counted per day for the whole bot, with nothing about who tapped it\n• how much was done — links per site, conversions, stickers, relayed messages — counted per day for the whole bot, with nothing about who\n"
             "• a record of any donation: the amount and Telegram's payment id\n"
             "\n"
             "What is not kept is what anybody writes. Messages pass straight through and are "
@@ -3563,7 +3514,8 @@ STRINGS = {
             "you — not your id, not your name, not what you sent. A fault nobody reports is "
             "still a fault, which is why it does not wait to be asked.\n"
             "\n"
-            "\"Add my details\" under an error offers to attach four things to that one "
+            "Under a crash, a failed /deletemydata or /feedback, or an error that keeps "
+            "happening to you, \"Send more details\" offers to attach four things to that one "
             "incident: your Telegram user id, your @username if you have one, the language you "
             "picked, and whether the chat is private or a group. All four are named on screen "
             "first, and nothing is sent unless you tap Send. What you wrote and the files you "
@@ -3583,7 +3535,7 @@ STRINGS = {
             "is called"
         ),
         "privacy_kept_for_heading": "How long it stays:",
-        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
+        "privacy_kept_for": 'Settings and anything the bot is holding for you stay until you erase them or stop using it. Counted use is dropped after about three months; the daily counts of what was done, which say nothing about who, after 400 days. Payment records and your ⚡ balance are kept longer, because a dispute about a payment is settled against them.\n\nNothing here is sold, rented or used for advertising, and nothing goes to anyone not named above.',
         "privacy_your_choices": (
             "What you can do:\n"
             "/deletemydata — erase what this bot holds on you\n"
@@ -3916,14 +3868,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Shundan {bonus} ⚡ — bonus kredit, uning muddati {date} kuni tugaydi.',
         "credit_cannot_be_withdrawn": "⚡ — ConvertBot'dagi konvertatsiyalar uchun kredit: uni yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI. To'lovda muammo bo'lsa: /paysupport",
         "paysupport_text": "💳 To'lov bo'yicha yordam\n\nTo'lovlar QAYTARILMAYDI: Stars qaytarib berilmaydi, ⚡ kreditni esa yechib olib ham, Stars'ga aylantirib ham BO'LMAYDI.\n\nTo'lovda xatolik bo'lgan bo'lsa — pul yechilgan-u, kredit tushmagan bo'lsa yoki ikki marta yechilgan bo'lsa — {contact} manziliga to'lov sanasi, miqdori va Telegram ID raqamingizni ({user_id}) yozib yuboring. Tekshirilib, kredit bilan to'g'rilab beriladi.\n\n/balance har bir to'lovni va u qancha kredit qo'shganini ko'rsatadi.",
-        "report_button": "🐞 Ma'lumotlarimni qo'shish",
-        "problem_logged_note": "Bu muammo bot egasi uchun allaqachon yozib olindi — kodi, vaqti va bot versiyasi. Siz haqingizda hech narsa yo'q.",
-        "report_disclaimer": "📨 Bu muammoga o'zingiz haqingizdagi ma'lumotni ham qo'shasizmi?\n\nSizsiz yozib olingani: bot nomi, {code} xato kodi, {incident} hodisa raqami, qachon yuz bergani va bot versiyasi.\n\n\"Yuborish\" tugmasi to'rt narsani qo'shadi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. Yozganingiz ham, yuborgan faylingiz ham emas.\n\nShunda sizning holatingizni loglardan topib bo'ladi — kam uchraydigan muammoni odatda shu tuzatib beradi. To'liq o'zingiz hal qilasiz.",
-        "report_send": "📨 Ma'lumotlarimni yuborish",
+        "report_button": "🐞 Qo'shimcha ma'lumot yuborish",
+        "problem_logged_note": "Anonim texnik hisobot saqlandi.",
+        "problem_logged_note_optin": "Anonim texnik hisobot saqlandi. Xohlasangiz, qo'shimcha ma'lumot yuborishingiz mumkin.",
+        "report_disclaimer": "📨 {incident} hodisasiga qo'shimcha ma'lumot yuborasizmi?\n\nAllaqachon saqlangan, siz haqingizda hech narsa yo'q: bot, {code} kodi, vaqt, versiya.\n\n\"Yuborish\" qo'shadi:\n• Telegram ID raqamingiz\n• bo'lsa, @username'ingiz\n• tilingiz\n• shaxsiy suhbatmi yoki guruh\n\nXabarlaringiz va fayllaringiz hech qachon kirmaydi. 30 kundan keyin o'chiriladi, /deletemydata bilan esa darhol.",
+        "report_send": '📨 Yuborish',
         "report_cancel": '✖️ Bekor qilish',
-        "report_sent": "✅ Rahmat — ma'lumotlaringiz {incident} hodisasiga biriktirildi, endi uni topish oson.",
+        "report_sent": "✅ Rahmat — {incident} hodisasiga qo'shildi.",
         "report_already": "Ma'lumotlaringiz {incident} hodisasiga allaqachon biriktirilgan. Boshqa hech narsa yuborilmadi.",
-        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi. Muammoning o'zi yozib olingan holicha qoladi.",
+        "report_cancelled": "Bekor qilindi — siz haqingizda hech narsa yuborilmadi.",
         "report_failed": "⚠️ Hozir xabarni yuborib bo'lmadi. Keyinroq qayta urinib ko'ring.",
         "report_invalid": 'Bu tugma endi ishlamaydi.',
         "crash_notice": "⚠️ Buni bajarishda bot tomonida xatolik yuz berdi, shuning uchun amal bajarilmadi. Birozdan keyin qayta urinib ko'ring.",
@@ -3942,14 +3895,14 @@ STRINGS = {
 
         "privacy_heading": "🔒 Maxfiylik",
         "privacy_kept_heading": "Bu bot nimalarni saqlaydi:",
-        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
+        "privacy_stored": "• Telegram ID raqamingiz va tanlagan tilingiz\n• xabarlar havolangiz, agar yaratgan bo'lsangiz\n• kim kim bilan yozishayotgani: suhbat ikki foydalanuvchi ID raqami va tartib raqami sifatida saqlanadi — javob to'g'ri suhbatga yetib borishi shunga bog'liq\n• qaysi xabar qaysi suhbatga tegishli ekani (xabar raqami bo'yicha) va u qachon yetkazilgani\n• kimlarni bloklaganingiz\n• botdan foydalangan vaqtingiz — bot egasi botdan umuman foydalanilayotganini bilishi uchun\n• har bir tugma necha marta bosilgani — butun bot bo'yicha kunlik umumiy hisob, kim bosgani haqida hech qanday ma'lumotsiz\n• qancha ish qilingani — sayt bo'yicha havolalar, konvertatsiyalar, stikerlar, yuborilgan xabarlar — butun bot bo'yicha kunlik hisob, kim ekani haqida ma'lumotsiz\n• xayriya qilsangiz, uning yozuvi: miqdori va Telegram to'lov raqami\n\nYozilgan xabarlarning o'zi saqlanmaydi. Xabarlar to'g'ridan-to'g'ri yetkaziladi va bu yerda saqlanmaydi: ular ikkala tomonning Telegram chatida turadi va har kim o'z nusxasini o'chira oladi. Reaksiyalar ham xuddi shunday o'tadi: bot suhbatdoshingizdagi nusxaga xuddi shu reaksiyani qo'yadi, lekin buni hech qayerga yozib qo'ymaydi. Bunga yagona istisno — /feedback orqali o'zingiz yuborgan xabar (pastda).\n\nAnonimlik — siz yozayotgan odamga nisbatan: unga ismingiz, foydalanuvchi nomingiz yoki ID raqamingiz hech qachon ko'rsatilmaydi. Botning o'zidan esa yashirinib bo'lmaydi: yuqoridagi bog'lanishsiz javob umuman yetib bormasdi.",
         "privacy_problems_heading": "Nimadir noto'g'ri ketganda:",
-        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nXato ostidagi \"Ma'lumotlarimni qo'shish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
+        "privacy_problems": "Bot kimgadir xato ko'rsatsa, uni o'zi yozib qo'yadi: xato kodi, hodisa raqami, qachon yuz bergani va bot versiyasi. Bularda siz haqingizda hech narsa yo'q — ID raqamingiz ham, ismingiz ham, nima yuborganingiz ham. Hech kim xabar bermagan nosozlik ham nosozligicha qoladi, shuning uchun bot so'ralishini kutmaydi.\n\nIshdan chiqish, bajarilmagan /deletemydata yoki /feedback, yoki sizda takror-takror yuz berayotgan xato ostidagi \"Qo'shimcha ma'lumot yuborish\" tugmasi o'sha bitta hodisaga to'rt narsani biriktirishni taklif qiladi: Telegram ID raqamingiz, bo'lsa @username'ingiz, siz tanlagan til va bu suhbat shaxsiymi yoki guruhmi. To'rttasi ham avval ekranda aytiladi va \"Yuborish\"ni bosmasangiz hech narsa yuborilmaydi. Yozganlaringiz va yuborgan fayllaringiz esa bunga hech qachon kirmaydi.\n\nBu to'rttasi 30 kundan keyin o'z-o'zidan o'chiriladi, /deletemydata esa darhol o'chiradi. Xatolik yozuvining o'zi qoladi — u haqiqatan yuz bergan — shunchaki endi kim duch kelgani yozilmaydi. Yozuvlarning o'zi 180 kundan keyin o'chiriladi.",
         "privacy_seen_by_heading": "Yana kim ko'ra oladi:",
         "privacy_seen_by": "• Telegram — barcha xabarlar u orqali o'tadi va u o'z qoidalari asosida ishlaydi\n• bot joylashgan hosting va bot foydalanadigan ma'lumotlar bazasi",
         "privacy_others": "• boshqa hech kim — xabarlar faqat Telegram orqali o'tadi, tashqi xizmatlarga murojaat qilinmaydi",
         "privacy_kept_for_heading": "Qancha vaqt saqlanadi:",
-        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
+        "privacy_kept_for": "Sozlamalaringiz va bot siz uchun saqlab turgan narsalar ularni o'chirmaguningizcha yoki botdan foydalanishni to'xtatmaguningizcha turadi. Foydalanish qaydlari taxminan uch oydan keyin o'chiriladi; qancha ish qilinganining kunlik hisobi esa — unda kimligi yo'q — 400 kundan keyin. To'lov yozuvlari va ⚡ balansingiz esa uzoqroq saqlanadi, chunki to'lov bo'yicha nizolar ular asosida hal qilinadi.\n\nBu ma'lumotlar sotilmaydi, ijaraga berilmaydi, reklamada ishlatilmaydi va yuqorida aytilganlardan boshqa hech kimga berilmaydi.",
         "privacy_your_choices": "Nima qilishingiz mumkin:\n/deletemydata — bot siz haqingizda saqlagan ma'lumotlarni o'chirish\n/terms — botdan foydalanish shartlari\n\nBotni Telegramda bloklasangiz, u sizga yozmay qo'yadi, lekin hech narsa o'chmaydi. Ikkalasini ham xohlasangiz, avval /deletemydata yuboring.",
         "terms_heading": "📜 Shartlar",
         "terms_use": "Botdan maqsadiga ko'ra, qonun va Telegram qoidalari doirasida foydalaning. Uni boshqalarni bezovta qilish uchun ishlatmang va belgilangan cheklovlardan oshirib yuklamang — aks holda akkaunt bloklanadi.",
@@ -4207,14 +4160,15 @@ STRINGS = {
         "topup_thanks_bonus": 'Из них {bonus} ⚡ — бонусный кредит, он сгорит {date}.',
         "credit_cannot_be_withdrawn": '⚡ — это кредит на конвертации в ConvertBot, его НЕЛЬЗЯ вывести или обменять обратно на Stars. Проблема с платежом? /paysupport',
         "paysupport_text": '💳 Помощь с платежом\n\nПлатежи ОКОНЧАТЕЛЬНЫЕ: Stars НЕ возвращаются, а ⚡ кредит НЕЛЬЗЯ вывести или обменять обратно на Stars.\n\nЕсли с платежом что-то пошло не так — деньги списали, а кредит не пришёл, или списали дважды, — напишите на {contact}: дату, сумму и ваш Telegram ID, {user_id}. Это проверят и исправят кредитом.\n\n/balance показывает каждый платёж и что он добавил.',
-        "report_button": '🐞 Добавить мои данные',
-        "problem_logged_note": 'Эта проблема уже записана для владельца бота — код, время и версия. О вас там ничего нет.',
-        "report_disclaimer": '📨 Добавить к этой проблеме ваши данные?\n\nУже записано, без вас: название бота, код ошибки {code}, номер случая {incident}, когда это произошло и версия бота.\n\nКнопка «Отправить» добавит четыре вещи: ваш Telegram ID, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Ни того, что вы написали, ни отправленного файла.\n\nТогда ваш случай можно будет найти в логах — обычно именно это и позволяет починить редкую проблему. Решать только вам.',
-        "report_send": '📨 Отправить мои данные',
+        "report_button": '🐞 Отправить подробности',
+        "problem_logged_note": 'Анонимный технический отчёт сохранён.',
+        "problem_logged_note_optin": 'Анонимный технический отчёт сохранён. По желанию можно отправить подробности.',
+        "report_disclaimer": "📨 Отправить подробности к случаю {incident}?\n\nУже сохранено, без ничего о вас: бот, код {code}, время, версия.\n\n«Отправить» добавит:\n• ваш Telegram ID\n• ваш @username, если есть\n• ваш язык\n• личный чат или группа\n\nВаши сообщения и файлы — никогда. Стирается через 30 дней или сразу через /deletemydata.",
+        "report_send": '📨 Отправить',
         "report_cancel": '✖️ Отмена',
-        "report_sent": '✅ Спасибо — ваши данные теперь на случае {incident}, так его легко найти.',
+        "report_sent": '✅ Спасибо — добавлено к случаю {incident}.',
         "report_already": 'Ваши данные уже на случае {incident}. Больше ничего не отправлено.',
-        "report_cancelled": 'Отменено — о вас ничего не отправлено. Сама проблема остаётся записанной.',
+        "report_cancelled": 'Отменено — о вас ничего не отправлено.',
         "report_failed": '⚠️ Сейчас не удалось отправить сообщение. Попробуйте позже.',
         "report_invalid": 'Эта кнопка больше не работает.',
         "crash_notice": '⚠️ При обработке произошла ошибка на стороне бота, поэтому ничего не сделано. Попробуйте ещё раз чуть позже.',
@@ -4252,7 +4206,7 @@ STRINGS = {
             "• кого вы заблокировали\n"
             "• отметку времени на каждое обращение к боту — чтобы владелец видел, пользуется ли "
             "ботом хоть кто-нибудь\n"
-            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n"
+            "• сколько раз нажимают каждую кнопку — общий счёт за день по всему боту, без сведений о том, кто нажимал\n• сколько всего сделано — ссылки по сайтам, конвертации, стикеры, пересланные сообщения — общий счёт за день по всему боту, без сведений о том, кто\n"
             "• запись о пожертвовании: сумму и платёжный id Telegram\n"
             "\n"
             "Чего здесь нет — самих сообщений. Они проходят насквозь и тут не сохраняются: они "
@@ -4265,7 +4219,7 @@ STRINGS = {
             "id ответ просто некуда было бы доставить."
         ),
         "privacy_problems_heading": "Когда что-то ломается:",
-        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nКнопка «Добавить мои данные» под ошибкой предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
+        "privacy_problems": "Каждую ошибку, которую бот кому-то показывает, он записывает сам: код ошибки, номер случая, когда это произошло и версию бота. О вас там нет ничего — ни вашего id, ни имени, ни того, что вы отправили. Сбой, о котором никто не сообщил, остаётся сбоем, поэтому бот не ждёт, пока его попросят.\n\nПод сбоем, неудавшимся /deletemydata или /feedback, или ошибкой, которая повторяется у вас снова и снова, кнопка «Отправить подробности» предлагает привязать к этому случаю четыре вещи: ваш Telegram id, ваш @username, если он есть, выбранный вами язык и то, личный это чат или группа. Все четыре сначала названы на экране, и ничего не отправляется, пока вы не нажмёте «Отправить». Того, что вы написали, и отправленных файлов там не бывает никогда.\n\nЭти четыре стираются сами через 30 дней, а /deletemydata стирает их сразу. Запись об ошибке остаётся — она действительно произошла — просто перестаёт говорить, кто на неё наткнулся. Сами записи удаляются через 180 дней.",
         "privacy_seen_by_heading": "Кто ещё это видит:",
         "privacy_seen_by": (
             "• Telegram — он передаёт каждое сообщение в обе стороны и действует по своим "
@@ -4277,7 +4231,7 @@ STRINGS = {
             "сервисы не вызываются"
         ),
         "privacy_kept_for_heading": "Сколько это хранится:",
-        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
+        "privacy_kept_for": 'Настройки и всё, что бот держит для вас, остаются, пока вы их не сотрёте или не перестанете пользоваться ботом. Отметки об использовании удаляются примерно через три месяца, а дневные счётчики сделанного — в них нет ничего о том, кто, — через 400 дней. Записи о платежах и баланс ⚡ хранятся дольше — по ним разбираются споры о платежах.\n\nНичего из этого не продаётся, не сдаётся в аренду и не используется для рекламы, и никому кроме перечисленных выше не передаётся.',
         "privacy_your_choices": (
             "Что можно сделать:\n"
             "/deletemydata — стереть всё, что бот хранит о вас\n"

@@ -30,6 +30,8 @@ _Last reviewed: 23 October 2026._
   and says nothing about what was done.
 - **Button taps, counted.** How many times each button is tapped, per day for the whole bot. Nothing about who
   tapped it.
+- **What was done, counted.** Per day for the whole bot: how many links came from each site, which conversions
+  were made, how many stickers and packs, how many messages were relayed. For statistics. Nothing about who.
 - **Payments and donations**, if any: the amount, the currency, what it was
   for, the status, and Telegram's payment id.
 - **A ⚡ credit balance, and its ledger**, once you have paid or been given
@@ -48,8 +50,10 @@ _Last reviewed: 23 October 2026._
   automatically, because a fault nobody reports is still a fault, and nothing in
   it is about you: not your id, not your name, not what you sent. The message
   that carries the code says so, above the button.
-- **Your own details, only if you add them** — tapping "Add my details" under
-  an error offers to attach four things to that incident: your Telegram user
+- **Your own details, only if you add them** — under a crash, a failed
+  `/deletemydata` or `/feedback`, a reply that went astray, or an error that
+  keeps happening to you, tapping "Send more details" offers to attach four
+  things to that incident: your Telegram user
   id, your @username if you have one, the language you picked, and whether the
   chat is private or a group. All four are named on screen before anything is
   sent, and nothing is sent unless you tap Send. Never what you wrote and never
@@ -119,6 +123,7 @@ collected speculatively, and nothing is collected to be sold later.
 | user id, language, and what a bot's own section lists as kept "until erased" | until erased, or indefinitely while the bot is in use |
 | timestamp per use | about 90 days |
 | button tap counts | 45 days |
+| daily counts of what was done | 400 days |
 | work in progress | 12 hours |
 | details added to a problem report | 30 days |
 | problem records | 180 days |

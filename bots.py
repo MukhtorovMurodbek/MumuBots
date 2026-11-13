@@ -10,10 +10,12 @@ raise ImportError("bots.py is loaded section by section by main.py -- run main.p
 # ─── module: sticker_bot.bot ─────────────────────────────────────────────────
 """fstik-style sticker pack manager bot."""
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -29,6 +31,9 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputSticker,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyParameters,
 )
 from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 from telegram.ext import (
@@ -71,7 +76,7 @@ from db import (
     set_user_language,
 )
 from image_utils import to_sticker_png
-from video_sticker import to_video_sticker_webm, ConversionError
+from video_sticker import to_video_sticker_webm, ConversionError, TooBig
 from emoji_utils import DEFAULT_EMOJI, looks_like_emoji_message, split_emoji
 from import_utils import (
     parse_telegram_pack_source,
@@ -82,6 +87,7 @@ from import_utils import (
     MAX_IMPORT_PER_RUN,
 )
 from shared_features import (
+    note_stat,
     publish_profile,
     publish_commands,
     refresh_chat_menu,
@@ -197,7 +203,6 @@ BOT_COMMANDS = [
     BotCommand("addsticker", "Add stickers to one of your packs"),
     BotCommand("mypacks", "Your packs"),
     BotCommand("import", "Copy stickers in from another pack"),
-    BotCommand("done", "Finish the pack you are editing"),
     BotCommand("whomade", "Who made a pack — send me one of its stickers"),
     BotCommand("cancel", "Stop whatever I am waiting for"),
     BotCommand("help", "Everything I can do"),
@@ -244,7 +249,7 @@ def start_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 def packs_keyboard(packs: list[tuple[str, str]], lang: str) -> InlineKeyboardMarkup:
     """One button per pack (tap opens its menu), fStik-style."""
-    rows = [[InlineKeyboardButton(title, callback_data=f"packopen:{name}")] for name, title in packs]
+    rows = [[InlineKeyboardButton(title, callback_data=f"packopen:{pack_ref(name)}")] for name, title in packs]
     rows.append([InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="menu_newpack")])
     rows.append([InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_start")])
     return InlineKeyboardMarkup(rows)
@@ -253,12 +258,12 @@ def pack_detail_keyboard(pack_name: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(i18n.t(lang, "btn_open_pack"), url=f"https://t.me/addstickers/{pack_name}")],
-            [InlineKeyboardButton(i18n.t(lang, "btn_add_stickers"), callback_data=f"pack:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_add_stickers"), callback_data=f"pack:{pack_ref(pack_name)}")],
             [
-                InlineKeyboardButton(i18n.t(lang, "btn_rename"), callback_data=f"packrename:{pack_name}"),
-                InlineKeyboardButton(i18n.t(lang, "btn_coedit"), callback_data=f"packcoedit:{pack_name}"),
+                InlineKeyboardButton(i18n.t(lang, "btn_rename"), callback_data=f"packrename:{pack_ref(pack_name)}"),
+                InlineKeyboardButton(i18n.t(lang, "btn_coedit"), callback_data=f"packcoedit:{pack_ref(pack_name)}"),
             ],
-            [InlineKeyboardButton(i18n.t(lang, "btn_delete_pack"), callback_data=f"packdel:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_delete_pack"), callback_data=f"packdel:{pack_ref(pack_name)}")],
             [InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data="menu_mypacks")],
         ]
     )
@@ -298,7 +303,8 @@ def _sticker_error_note(exc: Exception, lang: str) -> str:
 # meanwhile join the same count.
 BATCH_MEDIA = (filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC | filters.ANIMATION
                | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO)
-BATCH_KEYS = ("batch_open", "batch_seen", "batch_failed", "batch_chat", "batch_removed", "status_note")
+BATCH_KEYS = ("batch_open", "batch_seen", "batch_failed", "batch_chat", "batch_removed", "batch_waiting",
+              "status_note")
 
 def _queued_items(context: ContextTypes.DEFAULT_TYPE, chat_id) -> int:
     """How many pictures, videos and stickers from this chat wait in the update queue behind the one being made (0 when the queue cannot be read)."""
@@ -333,11 +339,13 @@ async def _batch_item(update: Update, context: ContextTypes.DEFAULT_TYPE, handle
         data.update(batch_open=True, batch_seen=0, batch_failed=0, batch_chat=chat_id)
     data["batch_seen"] = data.get("batch_seen", 0) + 1
     data["batch_removed"] = False
+    data["batch_waiting"] = False
     before = data.get("sticker_count", 0)
     handled = False
     try:
         result = await handler(update, context)
-        handled = data.get("sticker_count", 0) > before or bool(data.get("batch_removed"))
+        handled = (data.get("sticker_count", 0) > before or bool(data.get("batch_removed"))
+                   or bool(data.get("batch_waiting")))
         return result
     finally:
         if not handled:
@@ -350,7 +358,9 @@ async def _batch_item(update: Update, context: ContextTypes.DEFAULT_TYPE, handle
                     lang = await i18n.get_lang(update.effective_user.id, context)
                     line = (f"✅ {seen}/{seen}" if not failed
                             else i18n.t(lang, "batch_not_added", done=seen, total=seen, failed=failed))
-                    await _refresh_status(context, lang, data.get("status_note", ""), batch_line=line)
+                    # The count alone: every item has its own answer now, so a note left over
+                    # from earlier (an import's error, say) would only be said again (review).
+                    await _refresh_status(context, lang, "", batch_line=line)
                 except Exception:
                     logger.debug("Couldn't show the run's last count", exc_info=True)
 
@@ -363,7 +373,7 @@ def _status_text(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "",
     intro = context.user_data.get("status_intro", "")
     text = i18n.t(lang, "status_line", verb=verb, title=title, count=count)
     if intro:
-        text = f"{intro}\n\n{text}"
+        text = f"{text}\n{intro}"
     line = _batch_line(context) if batch_line is None else batch_line
     if line:
         text += f"\n{line}"
@@ -378,27 +388,43 @@ def _has_status(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 async def _start_status(
     context: ContextTypes.DEFAULT_TYPE, chat_id: int, title: str, lang: str,
-    intro: str = "", adopt: dict | None = None,
+    intro: str = "", adopt: dict | None = None, **send_kwargs,
 ):
-    """Sets up the session's status message."""
+    """Sets up the session's status message ("✏️ Editing “Memes”"). `send_kwargs` go with a new one -- the pack buttons, say."""
     context.user_data["title"] = title
     context.user_data["sticker_count"] = 0
     context.user_data["status_intro"] = intro
     text = _status_text(context, lang)
-    try:
-        live = LiveMessage.restore(adopt)
-        if live is None:
-            live = await LiveMessage.send(context.bot, chat_id, text)
-        else:
-            await live.set(context.bot, text)
-        context.user_data[STATUS_KEY] = live.save()
-    except Exception:
-        logger.exception("Couldn't set up the status message")
+    for attempt in (1, 2):
+        try:
+            live = LiveMessage.restore(adopt)
+            if live is None:
+                live = await LiveMessage.send(context.bot, chat_id, text, **send_kwargs)
+            else:
+                await live.set(context.bot, text)
+            context.user_data[STATUS_KEY] = live.save()
+            return
+        except NetworkError as exc:
+            # No connection was made (TestBot, 2026-11-13: "httpx.ConnectError" at the TLS
+            # handshake), so nothing was sent and sending again cannot double it. Once.
+            if attempt == 1 and "ConnectError" in str(exc):
+                logger.info("No connection for the status message; trying once more")
+                await asyncio.sleep(1.5)
+                continue
+            raise
+    # Anything else goes up to error_handler, which tells the person (FM-CRASH): a pack that opened
+    # without a word is what the owner hit on TestBot, 2026-11-13 ("It has left me on seen").
 
 async def _refresh_status(context: ContextTypes.DEFAULT_TYPE, lang: str, note: str = "",
                           batch_line: "str | None" = None):
     live = LiveMessage.restore(context.user_data.get(STATUS_KEY))
     if live is None:
+        # No status message to put it in (it could not be sent, or the session's state is
+        # gone): a note still reaches the person, as a message of its own.
+        # Only a failure (a note ending in a problem code) -- progress lines would be noise.
+        chat_id = getattr(context, "_chat_id", None)
+        if note and chat_id is not None and problems.find_code(note):
+            await context.bot.send_message(chat_id, note)
         return
     context.user_data["status_note"] = note
     await live.set(context.bot, _status_text(context, lang, note, batch_line))
@@ -528,6 +554,200 @@ async def crashtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _deny(update, context)
     raise RuntimeError("Manual /crashtest trigger -- error tracking is working as intended.")
 
+# A pack's name is its title's slug, a random part and "_by_<bot username>" -- up to 61 characters
+# with mumu_sticker_bot, and more with a longer username. A button carries at most 64 bytes, so
+# "packdelconfirm1:<name>" could not be sent at all, and the message carrying it was lost without a
+# word (TestBot, 2026-11-14: Co-edit and Delete did nothing). Buttons carry pack_ref instead.
+def pack_ref(pack_name: str) -> str:
+    return hashlib.sha256(pack_name.encode()).hexdigest()[:10]
+
+async def _pack_of(user_id: int, ref: str) -> "str | None":
+    """The person's own pack a button means: by its reference, or by its full name on a button drawn before 2.1.6. None when it is not one of theirs (any more)."""
+    for name, _ in await asyncio.to_thread(get_user_packs, user_id):
+        if ref == name or ref == pack_ref(name):
+            return name
+    return None
+
+# ─── Pack buttons: a keyboard under the message box, one button per pack ────────────────────────
+# Tapping "📦 Memes" opens that pack ("✏️ Editing “Memes”") and the next picture goes straight in.
+# The buttons are worked out again from the person's packs on every tap, so they need no state:
+# the same titles in the same order give the same labels (a repeated title gets " · 2", counted
+# oldest first, so a new pack does not renumber the old ones).
+PACK_BUTTON = "📦 "
+PACK_BUTTONS_MAX = int(os.environ.get("SBOT_PACK_BUTTONS", "12"))
+PACK_LABEL_MAX = 40
+KB_TITLES = "kb_titles"
+# _last_seen too: cleared, the person looked gone -- to the soft stop's count until their next
+# message, and to the hourly prune, which dropped a session opened a minute before it ran.
+KEEP_ACROSS_SESSIONS = ("lang", "_last_seen", "held", "held_offer", "tags", "keyboard_stale", KB_TITLES)
+
+def _fresh_session(context) -> None:
+    """user_data cleared for a new session -- but held items, the retag map and the language stay."""
+    keep = {key: context.user_data[key] for key in KEEP_ACROSS_SESSIONS if key in context.user_data}
+    context.user_data.clear()
+    context.user_data.update(keep)
+
+def _pack_labels(packs) -> "list[tuple[str, str]]":
+    """(button label, pack name) for each pack, in the order given (newest first)."""
+    seen: dict = {}
+    numbered = {}
+    for name, title in reversed(list(packs)):
+        base = (title or name)[:PACK_LABEL_MAX]
+        seen[base] = seen.get(base, 0) + 1
+        numbered[name] = base if seen[base] == 1 else f"{base} · {seen[base]}"
+    return [(numbered[name], name) for name, _ in packs]
+
+def pack_reply_keyboard(packs, lang: str) -> ReplyKeyboardMarkup:
+    """Two buttons a pack -- "✏️ Edit Memes" opens it for adding, "👁 View Memes" shows it -- and "➕ New pack"."""
+    rows = [[KeyboardButton(i18n.t(lang, "btn_kb_edit", title=label)),
+             KeyboardButton(i18n.t(lang, "btn_kb_view", title=label))]
+            for label, _ in _pack_labels(packs)[:PACK_BUTTONS_MAX]]
+    rows.append([KeyboardButton(i18n.t(lang, "btn_new_pack"))])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
+
+_VARIATION_SELECTORS = dict.fromkeys(map(ord, "\ufe0f\ufe0e"), None)
+
+def _plain(text: str) -> str:
+    """Text with emoji variation selectors dropped: "✏️" and "✏" compare equal, whichever a client sends."""
+    return (text or "").translate(_VARIATION_SELECTORS).strip()
+
+def _pack_button_action(text: str, packs, remembered: "dict | None" = None) -> "tuple[str, str] | None":
+    """("edit" | "view", pack name) for a pack button's text, in any language -- the buttons stay
+    readable when the person changes language before the keyboard is redrawn."""
+    text = _plain(text)
+    owned = dict(packs)
+    labels = list(_pack_labels(packs))
+    # the labels on the keyboard last sent, for a pack renamed since (still one of theirs)
+    labels += [(label, name) for name, label in (remembered or {}).items() if name in owned]
+    for label, name in labels:
+        for lang in ("en", "uz", "ru"):
+            if text == _plain(i18n.t(lang, "btn_kb_edit", title=label)):
+                return "edit", name
+            if text == _plain(i18n.t(lang, "btn_kb_view", title=label)):
+                return "view", name
+    return None
+
+_BUTTON_PREFIXES: "list[str]" = []
+
+class _LooksLikePackButton(filters.MessageFilter):
+    """Text shaped like a pack button -- "✏️ Edit …" / "👁 View …" in any language -- and nothing
+    else. A bare "^(✏|👁)" took emoji such as "👁" or "✏️" (and a pack title starting with one) for
+    a button: no retag, no title, "I can't find that pack" (review of 2026-11-14)."""
+
+    def filter(self, message) -> bool:
+        if not _BUTTON_PREFIXES:
+            for lang in ("en", "uz", "ru"):
+                for key in ("btn_kb_edit", "btn_kb_view"):
+                    head = i18n.t(lang, key, title="\0").split("\0")[0]
+                    _BUTTON_PREFIXES.append(head.translate(_VARIATION_SELECTORS))
+        text = (message.text or "").translate(_VARIATION_SELECTORS)
+        return any(text.startswith(head) and len(text) > len(head) for head in _BUTTON_PREFIXES)
+
+PACK_BUTTON_TEXT = _LooksLikePackButton()
+
+# A pack can be renamed in Telegram's own sticker settings, which the bot is never told about
+# (TestBot, 2026-11-13: "testpack1" renamed "TestNameChange", and the bot kept the old name). So the
+# title is read back from Telegram wherever packs are listed or opened, and after every sticker
+# added, and the bot's own record follows it.
+async def _sync_title(context, pack_name: str, known: "str | None") -> str:
+    try:
+        sticker_set = await _telegram(context.bot.get_sticker_set, pack_name, read=True)
+    except Exception:
+        return known or pack_name
+    title = getattr(sticker_set, "title", None) or known or pack_name
+    if title != known:
+        try:
+            await asyncio.to_thread(set_pack_title, pack_name, title)
+        except Exception:
+            logger.debug("Couldn't save a pack's new title", exc_info=True)
+        if context.user_data.get("target_pack") == pack_name:
+            context.user_data["title"] = title
+    return title
+
+async def _sync_titles(context, packs) -> "list[tuple[str, str]]":
+    """The titles of the packs that get buttons (PACK_BUTTONS_MAX), read from Telegram all at once."""
+    packs = list(packs)
+    shown = packs[:PACK_BUTTONS_MAX]
+    titles = await asyncio.gather(*(_sync_title(context, name, title) for name, title in shown))
+    return [(name, title) for (name, _), title in zip(shown, titles)] + packs[PACK_BUTTONS_MAX:]
+
+async def _pack_keyboard_for(context, user_id: int, lang: str, sync: bool = False) -> ReplyKeyboardMarkup:
+    """The pack buttons as they are now (`sync`: titles read from Telegram first). The labels sent are kept (KB_TITLES), so a button still works after its pack is renamed."""
+    packs = await asyncio.to_thread(get_user_packs, user_id)
+    if sync:
+        packs = await _sync_titles(context, packs)
+    context.user_data[KB_TITLES] = {name: label for label, name in _pack_labels(packs)[:PACK_BUTTONS_MAX]}
+    return pack_reply_keyboard(packs, lang)
+
+async def _with_buttons(context, chat, user_id, lang: str) -> dict:
+    """reply_markup for a plain answer in a private chat: the pack buttons. They ride along on nearly
+    every answer, so they come back by themselves if anything took them away (/cancel did, on
+    TestBot 2026-11-13: "the button menu disappeared"). Never on a message that is edited later --
+    an edit cannot carry them."""
+    if chat is None or getattr(chat, "type", None) != "private" or not user_id:
+        return {}
+    try:
+        return {"reply_markup": await _pack_keyboard_for(context, user_id, lang)}
+    except Exception:
+        logger.debug("Pack buttons not attached", exc_info=True)
+        return {}
+
+def _new_pack_labels() -> "list[str]":
+    return sorted({i18n.t(lang, "btn_new_pack") for lang in ("en", "uz", "ru")})
+
+async def _send_pack_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> None:
+    if update.effective_chat is None or update.effective_chat.type != "private":
+        return
+    try:
+        await context.bot.send_message(update.effective_chat.id, i18n.t(lang, "packs_keyboard_note"),
+                                       reply_markup=await _pack_keyboard_for(
+                                           context, update.effective_user.id, lang, sync=True))
+    except Exception:
+        logger.debug("Couldn't send the pack buttons", exc_info=True)
+
+async def _open_pack(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, pack_name: str,
+                     owner_id: int, title: str, adopt: "dict | None" = None, intro_key: str = "editing_intro_add"):
+    """The pack is open for adding: "✏️ Editing “Memes”", and anything held goes in."""
+    # Opening the pack that is already open keeps its last sticker, so plain emoji still retag it
+    # (TestBot, 2026-11-13: the button tapped mid-session, then emoji -> "Add a sticker first").
+    same = context.user_data.get("target_pack") == pack_name
+    last_sticker = context.user_data.get("last_sticker_id") if same else None
+    title = await _sync_title(context, pack_name, title)
+    _fresh_session(context)
+    context.user_data.update(lang=lang, mode="add", pack_created=True, target_pack=pack_name, owner_id=owner_id)
+    if last_sticker:
+        context.user_data["last_sticker_id"] = last_sticker
+    send_kwargs = {}
+    if adopt is None and update.effective_chat.type == "private":
+        context.user_data.pop("keyboard_stale", None)
+        send_kwargs["reply_markup"] = await _pack_keyboard_for(context, update.effective_user.id, lang, sync=True)
+    await _start_status(context, update.effective_chat.id, title, lang, intro=i18n.t(lang, intro_key),
+                        adopt=adopt, **send_kwargs)
+    await _add_held(update, context, lang)
+    return EDITING
+
+async def pack_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on "✏️ Edit Memes" or "👁 View Memes" under the message box."""
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    packs = await asyncio.to_thread(get_user_packs, update.effective_user.id)
+    found = _pack_button_action(update.message.text.strip(), packs, context.user_data.get(KB_TITLES))
+    if found is None:
+        await update.message.reply_text(
+            i18n.t(lang, "pack_button_gone"),
+            reply_markup=await _pack_keyboard_for(context, update.effective_user.id, lang, sync=True))
+        return None
+    action, pack_name = found
+    title = dict(packs).get(pack_name) or pack_name
+    if action == "view":
+        title = await _sync_title(context, pack_name, title)
+        # One tap on the link opens the pack itself; whatever session is open stays open.
+        await update.message.reply_text(
+            i18n.t(lang, "pack_view", title=title),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                i18n.t(lang, "btn_open_pack"), url=f"https://t.me/addstickers/{pack_name}")]]))
+        return None
+    return await _open_pack(update, context, lang, pack_name, update.effective_user.id, title)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start prints the instructions -- except the very first one, which asks for a language first."""
     lang = await asyncio.to_thread(get_user_language, update.effective_user.id)
@@ -541,14 +761,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if _has_status(context):
         await _end_status(context, i18n.t(lang or "en", "cancelled_status_note"))
-    context.user_data.clear()
+    _fresh_session(context)
 
     if lang is None:
         await update.message.reply_text(i18n.LANGUAGE_PROMPT, reply_markup=language_keyboard())
         return ConversationHandler.END
 
     context.user_data["lang"] = lang
-    return await _continue_start(update, context, lang, None)
+    result = await _continue_start(update, context, lang, None)
+    await _send_pack_keyboard(update, context, lang)
+    return result
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/language -- the picker on demand, which is what /start used to be."""
@@ -571,7 +793,7 @@ async def _apply_language(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     pending = context.user_data.get("pending_start_args") or []
     if _has_status(context):
         await _end_status(context, i18n.t(lang, "cancelled_status_note"))
-    context.user_data.clear()
+    _fresh_session(context)
     context.user_data["lang"] = lang
 
     await refresh_chat_menu(context, update.effective_user.id, lang)
@@ -622,7 +844,7 @@ async def start_coedit_link(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await asyncio.to_thread(add_editor, pack_name, user.id)
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
 
-    context.user_data.clear()
+    _fresh_session(context)
     context.user_data["lang"] = lang
     context.user_data["mode"] = "add"
     context.user_data["pack_created"] = True
@@ -662,7 +884,7 @@ async def mypacks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_packs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     user_id = update.effective_user.id
-    packs = await asyncio.to_thread(get_user_packs, user_id)
+    packs = await _sync_titles(context, await asyncio.to_thread(get_user_packs, user_id))
     if not packs:
         kb = InlineKeyboardMarkup(
             [
@@ -676,7 +898,7 @@ async def show_packs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pack_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -685,7 +907,7 @@ async def pack_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
-    title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
+    title = await _sync_title(context, pack_name, await asyncio.to_thread(get_pack_title, pack_name))
     await edit_in_place(query.message, context.bot,
         i18n.t(lang, "pack_detail_title", title=title), reply_markup=pack_detail_keyboard(pack_name, lang)
     )
@@ -703,15 +925,15 @@ async def _send_coedit_message(message, bot, pack_name: str, lang: str):
     text = i18n.t(lang, "coedit_message", title=title, link=link, editors_line=editors_line)
     kb = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(i18n.t(lang, "btn_reset_link"), callback_data=f"cotoken_reset:{pack_name}")],
-            [InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data=f"packopen:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_reset_link"), callback_data=f"cotoken_reset:{pack_ref(pack_name)}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_back"), callback_data=f"packopen:{pack_ref(pack_name)}")],
         ]
     )
     await edit_in_place(message, bot, text, reply_markup=kb)
 
 async def coedit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -723,7 +945,7 @@ async def coedit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def coedit_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -737,7 +959,7 @@ async def coedit_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rename_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -746,7 +968,7 @@ async def rename_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     await query.answer()
-    context.user_data.clear()
+    _fresh_session(context)
     context.user_data["lang"] = lang
     context.user_data["rename_pack"] = pack_name
 
@@ -767,22 +989,23 @@ async def receive_new_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(i18n.t(lang, "rename_broken_state"))
         return ConversationHandler.END
 
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back_to_pack"), callback_data=f"packopen:{pack_name}")]])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_back_to_pack"), callback_data=f"packopen:{pack_ref(pack_name)}")]])
     try:
         await context.bot.set_sticker_set_title(name=pack_name, title=new_title)
         await asyncio.to_thread(set_pack_title, pack_name, new_title)
+        context.user_data["keyboard_stale"] = True
         await prompt.finish(context.bot, i18n.t(lang, "renamed_success", title=new_title), reply_markup=kb)
     except Exception as exc:
         logger.exception("Rename failed")
         await prompt.finish(context.bot, i18n.t(lang, "renamed_failed", error=exc), reply_markup=kb)
 
-    context.user_data.clear()
+    _fresh_session(context)
     return ConversationHandler.END
 
 async def delete_pack_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """First tap of 'Delete pack' -- owner-only (co-editors never even see this button, since it only appears in the /mypacks detail menu, but the check is repeated here too since callback_data can be replayed)."""
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -794,8 +1017,8 @@ async def delete_pack_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
     kb = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(i18n.t(lang, "btn_delete"), callback_data=f"packdelconfirm1:{pack_name}")],
-            [InlineKeyboardButton(i18n.t(lang, "btn_cancel_inline"), callback_data=f"packopen:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_delete"), callback_data=f"packdelconfirm1:{pack_ref(pack_name)}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_cancel_inline"), callback_data=f"packopen:{pack_ref(pack_name)}")],
         ]
     )
     await edit_in_place(query.message, context.bot,
@@ -806,7 +1029,7 @@ async def delete_pack_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_pack_confirm1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Second tap -- one more explicit confirmation before anything actually happens."""
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -818,8 +1041,8 @@ async def delete_pack_confirm1(update: Update, context: ContextTypes.DEFAULT_TYP
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
     kb = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(i18n.t(lang, "btn_delete_confirm"), callback_data=f"packdelconfirm2:{pack_name}")],
-            [InlineKeyboardButton(i18n.t(lang, "btn_cancel_inline"), callback_data=f"packopen:{pack_name}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_delete_confirm"), callback_data=f"packdelconfirm2:{pack_ref(pack_name)}")],
+            [InlineKeyboardButton(i18n.t(lang, "btn_cancel_inline"), callback_data=f"packopen:{pack_ref(pack_name)}")],
         ]
     )
     await edit_in_place(query.message, context.bot,
@@ -830,7 +1053,7 @@ async def delete_pack_confirm1(update: Update, context: ContextTypes.DEFAULT_TYP
 async def delete_pack_confirm2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Third tap -- actually deletes the set from Telegram and wipes local records."""
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -850,12 +1073,13 @@ async def delete_pack_confirm2(update: Update, context: ContextTypes.DEFAULT_TYP
             return
 
     await asyncio.to_thread(delete_pack_records, pack_name)
+    context.user_data["keyboard_stale"] = True
     kb = InlineKeyboardMarkup([[InlineKeyboardButton(i18n.t(lang, "btn_my_packs_back"), callback_data="menu_mypacks")]])
     await edit_in_place(query.message, context.bot, i18n.t(lang, "delete_success", title=title), reply_markup=kb)
 
 async def newpack_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
-    context.user_data.clear()
+    _fresh_session(context)
     context.user_data["lang"] = lang
     context.user_data["mode"] = "new"
     context.user_data["pack_created"] = False
@@ -882,12 +1106,13 @@ async def receive_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _start_status(
         context, update.effective_chat.id, title, lang, intro=intro, adopt=prompt,
     )
+    await _add_held(update, context, lang)
     return EDITING
 
 async def addsticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     user_id = update.effective_user.id
-    packs = await asyncio.to_thread(get_user_packs, user_id)
+    packs = await _sync_titles(context, await asyncio.to_thread(get_user_packs, user_id))
     if not packs:
         await update.message.reply_text(i18n.t(lang, "no_packs_for_add"))
         return
@@ -897,7 +1122,7 @@ async def addsticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    pack_name = query.data.split(":", 1)[1]
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
     user = update.effective_user
     lang = await i18n.get_lang(user.id, context)
 
@@ -906,21 +1131,9 @@ async def pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(i18n.t(lang, "not_your_pack"), show_alert=True)
         return ConversationHandler.END
     await query.answer()
-
-    context.user_data.clear()
-    context.user_data["lang"] = lang
-    context.user_data["mode"] = "add"
-    context.user_data["pack_created"] = True
-    context.user_data["target_pack"] = pack_name
-    context.user_data["owner_id"] = owner_id
-
-    intro = i18n.t(lang, "editing_intro_add")
     title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
-    await _start_status(
-        context, query.message.chat_id, title, lang,
-        intro=intro, adopt=LiveMessage.adopt(query.message).save(),
-    )
-    return EDITING
+    return await _open_pack(update, context, lang, pack_name, owner_id, title,
+                            adopt=LiveMessage.adopt(query.message).save())
 
 # Telegram limits how quickly stickers go into a pack. A run of pictures (an album) meets that
 # limit as "Flood control exceeded. Retry in 10 seconds" (production, 2026-10-30), and that
@@ -1004,6 +1217,8 @@ async def _add_input_sticker(
         )
         context.user_data["target_pack"] = pack_name
         context.user_data["pack_created"] = True
+        context.user_data["keyboard_stale"] = True
+        note_stat("sticker_pack", "created")
     else:
         pack_name = context.user_data["target_pack"]
         await _telegram(
@@ -1023,6 +1238,13 @@ async def _add_input_sticker(
         # The sticker is in the pack; only its id for retagging is missing.
         logger.warning("Couldn't read the pack back after adding a sticker", exc_info=True)
         return None
+    title = getattr(sticker_set, "title", None)
+    if title and title != context.user_data.get("title"):
+        context.user_data["title"] = title
+        try:
+            await asyncio.to_thread(set_pack_title, pack_name, title)
+        except Exception:
+            logger.debug("Couldn't save a pack's new title", exc_info=True)
     return sticker_set.stickers[-1].file_id
 
 async def _remember_last_sticker(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1036,28 +1258,106 @@ async def _remember_last_sticker(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         logger.debug("Couldn't re-read the pack after a bulk import", exc_info=True)
 
-async def _is_own_pack_sticker(context: ContextTypes.DEFAULT_TYPE, sticker) -> bool:
-    """True if an incoming sticker message is a sticker that's still actually in the pack currently being edited (as opposed to a fresh image, or a sticker from some *other* pack, which still gets added normally)."""
+# ─── Items: one picture, clip or sticker the person sent ────────────────────────────────────────
+# Every item is answered in place, as a reply to it: "✅ Added to “Memes” with 😭. Reply to this
+# message with emoji to change it." The reply's message id is remembered beside the sticker it made
+# (TAGS_KEY), so emoji sent as a reply to it retag that sticker -- any of them, not only the last.
+# An item is a plain dict (it waits in user_data while held, so it has to be JSON):
+# chat, msg (its message id), kind ("static" | "video"), file_id, set and uid (a sticker's own
+# pack and unique id, to notice one that is already in the pack), at (when it came).
+TAGS_KEY = "tags"
+TAGS_KEEP = 400  # two per sticker: its ✅ answer and the message it was made from
+
+def _item_of(msg) -> "dict | None":
+    """The item a message carries, or None for anything that is not a picture, clip or sticker."""
+    sticker = msg.sticker
+    if sticker is not None:
+        if sticker.is_animated:
+            return None
+        kind, file_id = ("video" if sticker.is_video else "static"), sticker.file_id
+    elif msg.photo:
+        kind, file_id = "static", msg.photo[-1].file_id
+    elif msg.animation:
+        kind, file_id = "video", msg.animation.file_id
+    elif msg.video:
+        kind, file_id = "video", msg.video.file_id
+    elif msg.document and (msg.document.mime_type or "").startswith("image/"):
+        kind, file_id = "static", msg.document.file_id
+    elif msg.document and (msg.document.mime_type or "").startswith("video/"):
+        kind, file_id = "video", msg.document.file_id
+    else:
+        return None
+    return {"chat": msg.chat_id, "msg": msg.message_id, "kind": kind, "file_id": file_id,
+            "set": getattr(sticker, "set_name", None), "uid": getattr(sticker, "file_unique_id", None),
+            "at": time.time()}
+
+async def _reply_to_item(context, item: dict, text: str, reply_markup=None, buttons: bool = True):
+    """A new message answering `item`, as a reply to it. In a private chat the pack buttons ride along (_with_buttons) -- unless `buttons` is False: an answer that is edited later ("Converting…") cannot keep them."""
+    # Never on an answer that carries a problem code: note_problem adds "Send more details" only
+    # beside an inline keyboard or none, and the pack buttons would keep it off (review).
+    if reply_markup is None and buttons and item["chat"] > 0 and not problems.find_code(text):
+        try:
+            reply_markup = await _pack_keyboard_for(context, item["chat"], context.user_data.get("lang") or "en")
+            context.user_data.pop("keyboard_stale", None)
+        except Exception:
+            logger.debug("Pack buttons not attached; the answer goes without them", exc_info=True)
+    sent = await context.bot.send_message(
+        item["chat"], text, reply_markup=reply_markup,
+        reply_parameters=ReplyParameters(message_id=item["msg"], allow_sending_without_reply=True))
+    live_message.bump(sent.chat_id, sent.message_id)
+    return sent
+
+async def _edit_reply(context, sent, text: str, reply_markup=None, item: "dict | None" = None):
+    """Rewrite one of the item replies in place -- never moved to the bottom, so it stays beside its item. Returns the message that now says it: `sent`, or, when the person deleted it, a new answer to `item`."""
+    try:
+        await context.bot.edit_message_text(chat_id=sent.chat_id, message_id=sent.message_id, text=text,
+                                            reply_markup=reply_markup)
+    except BadRequest as exc:
+        lowered = str(exc).lower()
+        if "not modified" in lowered:
+            return sent
+        if item is not None and ("not found" in lowered or "can't be edited" in lowered):
+            return await _reply_to_item(context, item, text, reply_markup=reply_markup, buttons=False)
+        raise
+    return sent
+
+def _tag_key(chat_id, message_id) -> str:
+    """Message ids are per chat: the same id in a group and in the private chat is two messages."""
+    return f"{chat_id}:{message_id}"
+
+def _remember_tag(context, chat_id, message_id: int, sticker_id: "str | None") -> None:
+    if not sticker_id or message_id is None:
+        return
+    tags = context.user_data.setdefault(TAGS_KEY, {})
+    tags[_tag_key(chat_id, message_id)] = sticker_id
+    for old in list(tags)[:-TAGS_KEEP]:
+        tags.pop(old, None)
+
+def _pack_title(context) -> str:
+    return context.user_data.get("title") or context.user_data.get("target_pack") or ""
+
+async def _is_own_pack_sticker(context: ContextTypes.DEFAULT_TYPE, item: dict) -> bool:
+    """True if the item is a sticker still in the pack being edited (as opposed to a fresh image, or a sticker from some *other* pack, which still gets added normally)."""
     target_pack = context.user_data.get("target_pack")
-    if not target_pack or not sticker.set_name or sticker.set_name != target_pack:
+    if not target_pack or not item.get("set") or item["set"] != target_pack:
         return False
     try:
         sticker_set = await context.bot.get_sticker_set(target_pack)
     except Exception:
         return True
-    return any(s.file_unique_id == sticker.file_unique_id for s in sticker_set.stickers)
+    return any(s.file_unique_id == item.get("uid") for s in sticker_set.stickers)
 
-async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE, sticker) -> int:
+async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE, item: dict) -> int:
     """Handles the 'sent a sticker that's already in this pack' case by removing it instead of trying (and failing) to re-add it -- Telegram rejects re-adding a sticker to the exact set it already belongs to with an unhelpful STICKERSET_INVALID error, so this sidesteps that entirely."""
     context.user_data["batch_removed"] = True  # the item did what it was sent for: not a failure in the count
     lang = await i18n.get_lang(update.effective_user.id, context)
     try:
-        sticker_set = await context.bot.get_sticker_set(sticker.set_name)
+        sticker_set = await context.bot.get_sticker_set(item["set"])
     except Exception:
         sticker_set = None
 
     if sticker_set and len(sticker_set.stickers) <= 1:
-        context.user_data["pending_removal"] = sticker.file_id
+        context.user_data["pending_removal"] = item["file_id"]
         kb = InlineKeyboardMarkup(
             [
                 [
@@ -1066,22 +1366,18 @@ async def _remove_own_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE
                 ]
             ]
         )
-        await update.message.reply_text(
-            i18n.t(lang, "remove_last_confirm"),
-            reply_markup=kb,
-        )
+        await _reply_to_item(context, item, i18n.t(lang, "remove_last_confirm"), reply_markup=kb)
         return EDITING
 
     try:
-        await _telegram(context.bot.delete_sticker_from_set, sticker=sticker.file_id)
+        await _telegram(context.bot.delete_sticker_from_set, sticker=item["file_id"])
     except Exception as exc:
         logger.exception("Failed to delete sticker from set")
         record_error(exc)
-        await update.message.reply_text(i18n.t(lang, "remove_failed", error=exc))
+        await _reply_to_item(context, item, i18n.t(lang, "remove_failed", error=exc))
         return EDITING
     context.user_data["sticker_count"] = max(0, context.user_data.get("sticker_count", 0) - 1)
-    await _refresh_status(context, lang)
-    await update.message.reply_text(i18n.t(lang, "remove_success"))
+    await _reply_to_item(context, item, i18n.t(lang, "remove_success"))
     return EDITING
 
 async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1108,7 +1404,8 @@ async def confirm_remove_last_sticker(update: Update, context: ContextTypes.DEFA
         await asyncio.to_thread(delete_pack_records, target_pack)
     await edit_in_place(query.message, context.bot, i18n.t(lang, "pack_deleted_empty"))
     await _end_status(context, i18n.t(lang, "pack_deleted_note"))
-    context.user_data.clear()
+    _fresh_session(context)
+    context.user_data["keyboard_stale"] = True
     return ConversationHandler.END
 
 async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1116,119 +1413,362 @@ async def receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _batch_item(update, context, _receive_media)
 
 async def _receive_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Static images / static stickers -> PNG sticker."""
-    msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
-    if msg.sticker and await _is_own_pack_sticker(context, msg.sticker):
-        return await _remove_own_sticker(update, context, msg.sticker)
-
-    if msg.photo:
-        file_id = msg.photo[-1].file_id
-    elif msg.document:
-        file_id = msg.document.file_id
-    elif msg.sticker:
-        file_id = msg.sticker.file_id
-    else:
+    item = _item_of(update.message)
+    if item is None:
         return EDITING
-
-    try:
-        raw = await _download_media(context.bot, file_id)
-        png_bytes = (await asyncio.to_thread(to_sticker_png, raw)).getvalue()
-    except Exception as exc:
-        record_error(exc)
-        await msg.reply_text(i18n.t(lang, "image_process_failed", error=exc))
-        return EDITING
-
-    input_sticker = InputSticker(sticker=png_bytes, emoji_list=[DEFAULT_EMOJI], format="static")
-
-    try:
-        last_id = await _add_input_sticker(context, update.effective_user, input_sticker)
-        context.user_data["last_sticker_id"] = last_id
-        context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
-
-        await _refresh_status(context, lang, i18n.t(lang, "added_default_emoji", emoji=DEFAULT_EMOJI))
-    except Exception as exc:
-        logger.exception("Sticker set operation failed")
-        record_error(exc)
-        await _refresh_status(
-            context, lang,
-            _sticker_error_note(exc, lang),
-        )
-
-    return EDITING
+    item["kind"] = "static"
+    return await _add_item(update, context, lang, item)
 
 async def receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """GIFs / videos / video stickers -> WEBM video sticker, counted when several come at once (_batch_item)."""
     return await _batch_item(update, context, _receive_video_media)
 
 async def _receive_video_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """GIFs / videos / video stickers -> WEBM video sticker (via ffmpeg)."""
-    msg = update.message
     lang = await i18n.get_lang(update.effective_user.id, context)
-    if msg.sticker and await _is_own_pack_sticker(context, msg.sticker):
-        return await _remove_own_sticker(update, context, msg.sticker)
+    item = _item_of(update.message)
+    if item is None:
+        return EDITING
+    item["kind"] = "video"
+    return await _add_item(update, context, lang, item)
 
-    if msg.animation:
-        file_id = msg.animation.file_id
-    elif msg.video:
-        file_id = msg.video.file_id
-    elif msg.document:
-        file_id = msg.document.file_id
-    elif msg.sticker:
-        file_id = msg.sticker.file_id
+async def _add_item(update, context, lang: str, item: dict, held: bool = False) -> int:
+    """One item into the pack being edited, answered as a reply to it."""
+    if item.get("set") and await _is_own_pack_sticker(context, item):
+        if held:
+            # Sent with no pack open, then this pack picked for it: that is no request to take
+            # it out (the review found the held sticker deleted from the pack picked for it).
+            await _reply_to_item(context, item, i18n.t(lang, "held_already_in_pack", title=_pack_title(context)))
+            return EDITING
+        return await _remove_own_sticker(update, context, item)
+    if item["kind"] == "video":
+        await _add_video_item(update, context, lang, item)
     else:
-        return EDITING
+        await _add_static_item(update, context, lang, item)
+    return EDITING
 
-    refusal = await refuse_new_work(lang, update.effective_user.id, msg.chat_id)
-    if refusal:
-        await msg.reply_text(refusal)
-        return EDITING
-
+async def _add_static_item(update, context, lang: str, item: dict) -> None:
+    """Static images / static stickers -> PNG sticker."""
     try:
-        raw = await _download_media(context.bot, file_id)
+        raw = await _download_media(context.bot, item["file_id"])
+        png_bytes = (await asyncio.to_thread(to_sticker_png, raw)).getvalue()
+    except Exception as exc:
+        record_error(exc)
+        await _reply_to_item(context, item, i18n.t(lang, "image_process_failed", error=exc))
+        return
+
+    input_sticker = InputSticker(sticker=png_bytes, emoji_list=[DEFAULT_EMOJI], format="static")
+    try:
+        last_id = await _add_input_sticker(context, update.effective_user, input_sticker)
+    except Exception as exc:
+        logger.exception("Sticker set operation failed")
+        record_error(exc)
+        await _reply_to_item(context, item, _sticker_error_note(exc, lang))
+        return
+    context.user_data["last_sticker_id"] = last_id
+    context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
+    note_stat("sticker", "picture")
+    sent = await _reply_to_item(context, item, i18n.t(lang, "item_added", title=_pack_title(context),
+                                                      emoji=DEFAULT_EMOJI))
+    _remember_tag(context, item["chat"], sent.message_id, last_id)
+    _remember_tag(context, item["chat"], item["msg"], last_id)
+
+async def _add_video_item(update, context, lang: str, item: dict) -> None:
+    """GIFs / videos / video stickers -> WEBM video sticker (via ffmpeg)."""
+    refusal = await refuse_new_work(lang, update.effective_user.id, item["chat"])
+    if refusal:
+        await _reply_to_item(context, item, refusal)
+        return
+    try:
+        raw = await _download_media(context.bot, item["file_id"])
     except Exception as exc:
         logger.warning("Couldn't fetch a clip to make a sticker of", exc_info=True)
         record_error(exc)
-        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
-        return EDITING
+        await _reply_to_item(context, item, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        return
 
-    await _refresh_status(context, lang, i18n.t(lang, "converting_video"))
+    duration = await asyncio.to_thread(video_sticker.clip_duration, bytes(raw))
+    if video_sticker.is_too_long(duration):
+        # Not cut short any more: the person picks a speed, or trims it themselves. Waiting on a
+        # choice is not a failure in the run's count; refused (no speed fits) it is.
+        if await _offer_video_fit(context, lang, item, None, {}, "long", duration):
+            context.user_data["batch_waiting"] = True
+        return
+    await _make_video_sticker(update, context, lang, raw, item, {}, None)
+
+def _needs_session(handler):
+    """A handler of an open pack session. The session's state can be gone while the conversation is still open -- dropped after USER_DATA_TTL_HOURS idle, or lost in a restart. A picture or clip is then held and the person asked which pack it is for (_hold_item); anything else is told the session closed. Either way the conversation ends instead of failing on a missing key."""
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if "owner_id" in context.user_data:
+            return await handler(update, context)
+        lang = await i18n.get_lang(update.effective_user.id, context)
+        if update.callback_query:
+            await update.callback_query.answer()
+        item = _item_of(update.message) if update.message else None
+        if item is not None and update.effective_chat.type == "private":
+            await _hold_item(context, lang, item)
+            return ConversationHandler.END
+        await reply(update, i18n.t(lang, "session_lost"))
+        return ConversationHandler.END
+    guarded.__name__ = handler.__name__
+    guarded.__doc__ = handler.__doc__
+    return guarded
+
+# ─── Held items: sent with no pack open ──────────────────────────────────────────────────────────
+# Someone who thinks a pack is still open sends pictures; the bot has no pack for them (none was
+# picked, or the session was dropped). They are held for HOLD_SECONDS and the person is asked which
+# pack they go to -- one question for a whole album, its count kept up to date.
+HELD_KEY = "held"
+HELD_OFFER_KEY = "held_offer"
+HOLD_SECONDS = int(os.environ.get("SBOT_HOLD_SECONDS", "600"))
+HOLD_MAX = 30
+
+def _held_now(context) -> list:
+    now = time.time()
+    return [item for item in context.user_data.get(HELD_KEY) or () if now - item.get("at", 0) < HOLD_SECONDS]
+
+async def _hold_item(context, lang: str, item: dict) -> None:
+    waiting = _held_now(context)
+    if len(waiting) >= HOLD_MAX:
+        # Never dropped without a word (the review found the oldest silently lost past 30).
+        await _reply_to_item(context, item, i18n.t(lang, "held_full", n=HOLD_MAX))
+        return
+    held = waiting + [item]
+    context.user_data[HELD_KEY] = held
+    packs = await asyncio.to_thread(get_user_packs, item["chat"])
+    if not waiting:
+        packs = await _sync_titles(context, packs)          # a new question: names as Telegram has them
+    rows = [[InlineKeyboardButton(PACK_BUTTON + label, callback_data=f"hp:{pack_ref(name)}")]
+            for label, name in _pack_labels(packs)[:PACK_BUTTONS_MAX]]
+    rows.append([InlineKeyboardButton(i18n.t(lang, "btn_new_pack"), callback_data="hp+"),
+                 InlineKeyboardButton(i18n.t(lang, "btn_held_discard"), callback_data="hp-")])
+    text = i18n.t(lang, "held_offer", n=len(held), minutes=HOLD_SECONDS // 60)
+    offer = LiveMessage.restore(context.user_data.get(HELD_OFFER_KEY)) if waiting else None
+    if offer is not None:
+        try:
+            await context.bot.edit_message_text(chat_id=offer.chat_id, message_id=offer.message_id, text=text,
+                                                reply_markup=InlineKeyboardMarkup(rows))
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+            logger.debug("Couldn't update the held-items question; asking again", exc_info=True)
+        except Exception:
+            logger.debug("Couldn't update the held-items question; asking again", exc_info=True)
+    sent = await _reply_to_item(context, item, text, reply_markup=InlineKeyboardMarkup(rows))
+    context.user_data[HELD_OFFER_KEY] = LiveMessage.adopt(sent).save()
+
+async def media_without_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A picture, clip or sticker in a private chat with no pack open: held, and the person asked which pack."""
+    item = _item_of(update.message)
+    if item is None:
+        return
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    await _hold_item(context, lang, item)
+
+async def held_pack_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A pack tapped under the held-items question: that pack opens, and what was held goes in."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    pack_name = await _pack_of(update.effective_user.id, query.data.split(":", 1)[1])
+    owner_id = await asyncio.to_thread(get_pack_owner, pack_name)
+    if owner_id != update.effective_user.id:
+        await query.answer(i18n.t(lang, "not_your_pack"), show_alert=True)
+        return None
+    await query.answer()
+    title = await asyncio.to_thread(get_pack_title, pack_name) or pack_name
+    return await _open_pack(update, context, lang, pack_name, owner_id, title,
+                            adopt=LiveMessage.adopt(query.message).save())
+
+async def held_new_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"➕ New pack" under the held-items question: the usual title prompt; what was held goes in once it is named."""
+    return await newpack_start(update, context)
+
+async def held_discard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    await query.answer()
+    context.user_data.pop(HELD_KEY, None)
+    context.user_data.pop(HELD_OFFER_KEY, None)
+    await edit_in_place(query.message, context.bot, i18n.t(lang, "held_discarded"))
+
+async def _add_held(update, context, lang: str) -> None:
+    """Whatever was held, into the pack that was just opened, each answered beside itself."""
+    held = context.user_data.pop(HELD_KEY, None) or []
+    context.user_data.pop(HELD_OFFER_KEY, None)
+    now = time.time()
+    fresh = [i for i in held if now - i.get("at", 0) < HOLD_SECONDS]
+    for item in held:
+        if item not in fresh:
+            await _reply_to_item(context, item, i18n.t(lang, "held_expired"))
+    for item in fresh:
+        try:
+            await _add_item(update, context, lang, item, held=True)
+        except Exception as exc:
+            # One item failing must not stop the rest -- and is never left without an answer.
+            logger.exception("A held item could not be added")
+            record_error(exc)
+            try:
+                await _reply_to_item(context, item, _sticker_error_note(exc, lang))
+            except Exception:
+                logger.debug("Couldn't tell about a held item that failed", exc_info=True)
+
+# A clip that does not fit a video sticker. Too long (over MAX_DURATION_S): speeds that fit it.
+# Too heavy (every attempt over MAX_BYTES): lower resolution (recommended) or a lower frame rate.
+# Trimming is the person's to do, for now. The choice waits in user_data under a short token,
+# since callback_data holds 64 bytes; the newest VIDEO_FIT_KEEP are kept.
+VIDEO_FIT_KEY = "video_fit"
+VIDEO_FIT_KEEP = 10
+
+async def _offer_video_fit(context, lang: str, item: dict, edit, fit: dict,
+                           why: str, duration: "float | None") -> None:
+    """Says why the clip does not fit and offers what would make it fit -- as a reply to the clip, or in place of the earlier answer to it (`edit`)."""
+    token = secrets.token_hex(4)
+    rows = []
+    note_stat("video_fit_offered", why)
+    offered = False
+    if why == "long":
+        speeds = video_sticker.speed_choices(duration)
+        seconds = f"{duration:.1f}"
+        if speeds:
+            text = i18n.t(lang, "video_too_long", seconds=seconds, limit=video_sticker.MAX_DURATION_S)
+            for i, speed in enumerate(speeds):
+                key = "btn_speed_fit" if i == 0 else "btn_speed"
+                rows.append([InlineKeyboardButton(i18n.t(lang, key, speed=f"{speed:g}"),
+                                                  callback_data=f"vfit:{token}:s{speed:g}")])
+        else:
+            text = i18n.t(lang, "video_too_long_no_speed", seconds=seconds,
+                          limit=video_sticker.MAX_DURATION_S, speed=f"{video_sticker.MAX_SPEED:g}",
+                          longest=f"{video_sticker.MAX_DURATION_S * video_sticker.MAX_SPEED:g}")
+    else:
+        if fit.get("res") and fit.get("fps"):
+            text = i18n.t(lang, "video_too_heavy_last", kb=video_sticker.MAX_BYTES // 1024)
+        else:
+            text = i18n.t(lang, "video_too_heavy", kb=video_sticker.MAX_BYTES // 1024)
+            if not fit.get("res"):
+                rows.append([InlineKeyboardButton(i18n.t(lang, "btn_lower_res"),
+                                                  callback_data=f"vfit:{token}:res")])
+            if not fit.get("fps"):
+                rows.append([InlineKeyboardButton(i18n.t(lang, "btn_lower_fps", fps=video_sticker.LOW_FPS),
+                                                  callback_data=f"vfit:{token}:fps")])
+    if rows:
+        offered = True
+        rows.append([InlineKeyboardButton(i18n.t(lang, "btn_skip_clip"), callback_data=f"vfit:{token}:x")])
+        waiting = context.user_data.setdefault(VIDEO_FIT_KEY, {})
+        waiting[token] = {"item": dict(item), "fit": dict(fit), "duration": duration}
+        for old in list(waiting)[:-VIDEO_FIT_KEEP]:
+            waiting.pop(old, None)
+    markup = InlineKeyboardMarkup(rows) if rows else None
+    if edit is not None:
+        await _edit_reply(context, edit, text, reply_markup=markup, item=item)
+    else:
+        await _reply_to_item(context, item, text, reply_markup=markup)
+    return offered
+
+async def video_fit_stale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A fit button tapped once its pack session is over (/done, /cancel, a lost session)."""
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    await update.callback_query.answer(i18n.t(lang, "video_fit_expired"), show_alert=True)
+
+async def video_fit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A tap on one of _offer_video_fit's buttons."""
+    query = update.callback_query
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    _, token, choice = query.data.split(":", 2)
+    entry = context.user_data.get(VIDEO_FIT_KEY, {}).pop(token, None)
+    if entry is None or not isinstance(entry.get("item"), dict):
+        await query.answer(i18n.t(lang, "video_fit_expired"), show_alert=True)
+        return EDITING
+    await query.answer()
+    if choice == "x":
+        note_stat("video_fit", "skipped")
+        await _edit_reply(context, query.message, i18n.t(lang, "video_fit_skipped"))
+        return EDITING
+    fit = dict(entry.get("fit") or {})
+    if choice.startswith("s"):
+        try:
+            fit["speed"] = float(choice[1:])
+        except ValueError:
+            return EDITING
+    elif choice == "res":
+        fit["res"] = True
+    elif choice == "fps":
+        fit["fps"] = True
+
+    item = entry["item"]
+    refusal = await refuse_new_work(lang, update.effective_user.id, item["chat"])
+    if refusal:
+        await _edit_reply(context, query.message, refusal)
+        return EDITING
+    await _edit_reply(context, query.message, i18n.t(lang, "converting_video"))
     try:
-        async with lifecycle.busy(msg.chat_id, i18n.t(lang, "restarting_send_again")):
-            webm_bytes = await asyncio.to_thread(to_video_sticker_webm, bytes(raw), lang)
+        raw = await _download_media(context.bot, item["file_id"])
+    except Exception as exc:
+        logger.warning("Couldn't fetch a clip again to make a sticker of", exc_info=True)
+        record_error(exc)
+        await _edit_reply(context, query.message, i18n.t(lang, "video_convert_generic_failed", error=exc))
+        return EDITING
+    await _make_video_sticker(update, context, lang, raw, item, fit, query.message)
+    return EDITING
+
+def _fit_label(fit: dict, lang: str) -> str:
+    """What was done to make it fit, for the line that says it was added: "2.2×, lower resolution"."""
+    parts = []
+    if fit.get("speed"):
+        parts.append(f"{fit['speed']:g}×")
+    if fit.get("res"):
+        parts.append(i18n.t(lang, "fit_lower_res"))
+    if fit.get("fps"):
+        parts.append(i18n.t(lang, "fit_lower_fps", fps=video_sticker.LOW_FPS))
+    return ", ".join(parts)
+
+async def _make_video_sticker(update, context, lang: str, raw, item: dict, fit: dict, answer) -> None:
+    """Encodes the clip with the person's choices (`fit`) and adds it. Its answer -- "Converting…", then the result -- is one reply beside the clip: `answer` when there already is one (the message that held the last choices), a new one otherwise. A clip still too heavy gets the size choices there."""
+    if answer is None:
+        answer = await _reply_to_item(context, item, i18n.t(lang, "converting_video"), buttons=False)
+    try:
+        async with lifecycle.busy(item["chat"], i18n.t(lang, "restarting_send_again")):
+            webm_bytes = await asyncio.to_thread(
+                to_video_sticker_webm, bytes(raw), lang, fit.get("speed") or 1.0,
+                bool(fit.get("res")), bool(fit.get("fps")))
+    except TooBig:
+        if await _offer_video_fit(context, lang, item, answer, fit, "heavy", None):
+            context.user_data["batch_waiting"] = True
+        return
     except ConversionError as exc:
 
         record_error(exc)
         kb = InlineKeyboardMarkup([sibling_bots_keyboard_row(BOT_NAME, only="convertbot")])
-
-        sent = await msg.reply_text(
-            i18n.t(lang, "video_convert_failed_redirect", error=exc), reply_markup=kb,
-        )
-        live_message.bump(sent.chat_id, sent.message_id)
-        await _refresh_status(context, lang)
-        return EDITING
+        await _edit_reply(context, answer, i18n.t(lang, "video_convert_failed_redirect", error=exc),
+                          reply_markup=kb, item=item)
+        return
     except Exception as exc:
         logger.exception("Video conversion failed")
         record_error(exc)
-        await _refresh_status(context, lang, i18n.t(lang, "video_convert_generic_failed", error=exc))
-        return EDITING
+        await _edit_reply(context, answer, i18n.t(lang, "video_convert_generic_failed", error=exc), item=item)
+        return
 
     input_sticker = InputSticker(sticker=webm_bytes, emoji_list=[DEFAULT_EMOJI], format="video")
 
     try:
         last_id = await _add_input_sticker(context, update.effective_user, input_sticker)
-        context.user_data["last_sticker_id"] = last_id
-        context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
-        await _refresh_status(context, lang, i18n.t(lang, "added_video_default_emoji", emoji=DEFAULT_EMOJI))
     except Exception as exc:
         logger.exception("Sticker set operation failed")
         record_error(exc)
-        await _refresh_status(
-            context, lang,
-            _sticker_error_note(exc, lang),
-        )
-
-    return EDITING
+        await _edit_reply(context, answer, _sticker_error_note(exc, lang), item=item)
+        return
+    context.user_data["last_sticker_id"] = last_id
+    context.user_data["sticker_count"] = context.user_data.get("sticker_count", 0) + 1
+    note_stat("sticker", "video")
+    for choice in ("speed", "res", "fps"):
+        if fit.get(choice):
+            note_stat("video_fit", choice)
+    how = _fit_label(fit, lang)
+    text = (i18n.t(lang, "item_added_fit", title=_pack_title(context), emoji=DEFAULT_EMOJI, how=how) if how
+            else i18n.t(lang, "item_added_video", title=_pack_title(context), emoji=DEFAULT_EMOJI))
+    shown = await _edit_reply(context, answer, text, item=item)
+    _remember_tag(context, item["chat"], shown.message_id, last_id)
+    _remember_tag(context, item["chat"], item["msg"], last_id)
 
 async def reject_unsupported_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
@@ -1294,7 +1834,8 @@ async def import_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def done_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Same idea for /done."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    await update.message.reply_text(i18n.t(lang, "done_standalone_hint"))
+    await update.message.reply_text(i18n.t(lang, "done_standalone_hint"),
+                                    **await _with_buttons(context, update.effective_chat, update.effective_user.id, lang))
 
 async def receive_whatsapp_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """A .zip/.wastickers file sent while editing -- treated as a WhatsApp sticker pack export and bulk-imported."""
@@ -1342,23 +1883,56 @@ async def receive_whatsapp_import(update: Update, context: ContextTypes.DEFAULT_
     await _refresh_status(context, lang, summary)
     return EDITING
 
+def _retag_target(update: Update, context) -> "str | None | bool":
+    """The sticker an emoji message is for: the one made from the message it replies to -- the ✅ answer, or the picture or sticker the person sent (TAGS_KEY). None when it replies to nothing; False when it replies to a message that made no sticker this bot remembers (never "the last one" then: that would retag the wrong sticker)."""
+    replied = update.message.reply_to_message
+    if replied is None:
+        return None
+    key = _tag_key(update.effective_chat.id, replied.message_id)
+    return (context.user_data.get(TAGS_KEY) or {}).get(key) or False
+
+async def retag_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Emoji sent as a reply to one of the ✅ answers, with no pack open: that sticker is retagged all the same."""
+    text = update.message.text or ""
+    if not looks_like_emoji_message(text):
+        return await unrecognized_message(update, context)
+    lang = await i18n.get_lang(update.effective_user.id, context)
+    target = _retag_target(update, context)
+    buttons = await _with_buttons(context, update.effective_chat, update.effective_user.id, lang)
+    if not target:
+        # An emoji reply to a message that made no sticker this bot remembers: say so, rather
+        # than "Not sure what that's for".
+        await update.message.reply_text(i18n.t(lang, "retag_unknown"), **buttons)
+        return
+    emojis = split_emoji(text)
+    try:
+        await context.bot.set_sticker_emoji_list(sticker=target, emoji_list=emojis)
+        await update.message.reply_text(i18n.t(lang, "retagged_success", emojis=" ".join(emojis)), **buttons)
+    except Exception as exc:
+        await update.message.reply_text(i18n.t(lang, "retag_failed", error=exc))
+
 async def maybe_emoji_override(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     lang = await i18n.get_lang(update.effective_user.id, context)
 
+    buttons = await _with_buttons(context, update.effective_chat, update.effective_user.id, lang)
     if not looks_like_emoji_message(text):
-        await update.message.reply_text(i18n.t(lang, "not_emoji_message"))
+        await update.message.reply_text(i18n.t(lang, "not_emoji_message"), **buttons)
         return EDITING
 
-    last_sticker_id = context.user_data.get("last_sticker_id")
+    target = _retag_target(update, context)
+    if target is False:
+        await update.message.reply_text(i18n.t(lang, "retag_unknown"), **buttons)
+        return EDITING
+    last_sticker_id = target or context.user_data.get("last_sticker_id")
     if not last_sticker_id:
-        await update.message.reply_text(i18n.t(lang, "no_sticker_to_tag"))
+        await update.message.reply_text(i18n.t(lang, "no_sticker_to_tag"), **buttons)
         return EDITING
 
     emojis = split_emoji(text)
     try:
         await context.bot.set_sticker_emoji_list(sticker=last_sticker_id, emoji_list=emojis)
-        await update.message.reply_text(i18n.t(lang, "retagged_success", emojis=" ".join(emojis)))
+        await update.message.reply_text(i18n.t(lang, "retagged_success", emojis=" ".join(emojis)), **buttons)
     except Exception as exc:
         await update.message.reply_text(i18n.t(lang, "retag_failed", error=exc))
 
@@ -1382,7 +1956,7 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if nudge:
         await update.message.reply_text(nudge)
 
-    context.user_data.clear()
+    _fresh_session(context)
     return ConversationHandler.END
 
 async def convert_redirect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1425,8 +1999,9 @@ async def _apply_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
         if item is None:
             continue
         if chosen == "editing":
-
-            await _end_status(context, i18n.t(lang, "cancelled_status_note"))
+            # finish_cancel says what stopped; a second "❌ Cancelled." under it was noise.
+            for key in (STATUS_KEY, "sticker_count", "status_intro", *BATCH_KEYS):
+                context.user_data.pop(key, None)
         if chosen in PACK_CANCEL_KEYS:
             pack_stopped = True
             stopped.append(item.label)
@@ -1434,7 +2009,8 @@ async def _apply_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
             stopped.append(item.label)
 
     if pack_stopped:
-        keep = {"lang": lang}
+        keep = {key: context.user_data[key] for key in KEEP_ACROSS_SESSIONS if key in context.user_data}
+        keep["lang"] = lang
         if "donate_custom_currency" in context.user_data:
             keep["donate_custom_currency"] = context.user_data["donate_custom_currency"]
         reset_user_state(context, keep)
@@ -1446,7 +2022,8 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = await _cancel_items(update, context, lang)
     if await ask_cancel_choice(update, context, items, lang):
         return None
-    await finish_cancel(update, context, lang, [])
+    buttons = await _with_buttons(context, update.effective_chat, update.effective_user.id, lang)
+    await finish_cancel(update, context, lang, [], keyboard=buttons.get("reply_markup"))
     return ConversationHandler.END
 
 async def cancel_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1464,13 +2041,18 @@ async def cancel_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
     else:
         keys = [key]
     stopped, pack_stopped = await _apply_cancel(update, context, lang, keys)
-    await finish_cancel_choice(update, context, lang, stopped)
+    buttons = await _with_buttons(context, update.effective_chat, update.effective_user.id, lang)
+    await finish_cancel_choice(update, context, lang, stopped, keyboard=buttons.get("reply_markup"))
     return ConversationHandler.END if pack_stopped else None
 
 async def unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Only ever reached with no active /newpack or pack-editing session -- while one's active, the conversation's own state handlers (e.g."""
     lang = await i18n.get_lang(update.effective_user.id, context)
-    await update.message.reply_text(i18n.t(lang, "unrecognized"))
+    buttons = await _with_buttons(context, update.effective_chat, update.effective_user.id, lang)
+    if looks_like_emoji_message(update.message.text or ""):
+        await update.message.reply_text(i18n.t(lang, "no_sticker_to_tag"), **buttons)
+        return
+    await update.message.reply_text(i18n.t(lang, "unrecognized"), **buttons)
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
@@ -1531,6 +2113,10 @@ def main():
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("newpack", newpack_start),
+            MessageHandler(filters.ChatType.PRIVATE & PACK_BUTTON_TEXT, pack_button),
+            MessageHandler(filters.ChatType.PRIVATE & filters.Text(_new_pack_labels()), newpack_start),
+            CallbackQueryHandler(held_pack_chosen, pattern="^hp:"),
+            CallbackQueryHandler(held_new_pack, pattern=r"^hp\+$"),
             CallbackQueryHandler(newpack_start, pattern="^menu_newpack$"),
             CallbackQueryHandler(pack_chosen, pattern="^pack:"),
             CallbackQueryHandler(rename_start, pattern="^packrename:"),
@@ -1546,31 +2132,32 @@ def main():
             CallbackQueryHandler(delete_my_data_chosen, pattern="^" + ERASE_PREFIX),
         ],
         states={
-            TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_title)],
+            TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, _needs_session(receive_title))],
             RENAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_new_title)],
             EDITING: [
-                CallbackQueryHandler(confirm_remove_last_sticker, pattern="^confirmremove:"),
+                CallbackQueryHandler(_needs_session(confirm_remove_last_sticker), pattern="^confirmremove:"),
+                CallbackQueryHandler(_needs_session(video_fit_chosen), pattern="^vfit:"),
                 MessageHandler(
                     filters.Document.FileExtension("zip") | filters.Document.FileExtension("wastickers"),
-                    receive_whatsapp_import,
+                    _needs_session(receive_whatsapp_import),
                 ),
                 MessageHandler(
                     filters.PHOTO | filters.Document.IMAGE | filters.Sticker.STATIC,
-                    receive_media,
+                    _needs_session(receive_media),
                 ),
                 MessageHandler(
                     filters.ANIMATION | filters.VIDEO | filters.Document.VIDEO | filters.Sticker.VIDEO,
-                    receive_video_media,
+                    _needs_session(receive_video_media),
                 ),
                 MessageHandler(
                     filters.Sticker.ANIMATED,
-                    reject_unsupported_sticker,
+                    _needs_session(reject_unsupported_sticker),
                 ),
-                CommandHandler("import", import_command),
-                CommandHandler("done", done),
+                CommandHandler("import", _needs_session(import_command)),
+                CommandHandler("done", _needs_session(done)),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
-                    maybe_emoji_override,
+                    _needs_session(maybe_emoji_override),
                 ),
             ],
         },
@@ -1583,6 +2170,8 @@ def main():
     )
 
     app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(video_fit_stale, pattern="^vfit:"))
+    app.add_handler(CallbackQueryHandler(held_discard, pattern="^hp-$"))
 
     app.add_handler(CallbackQueryHandler(language_chosen, pattern="^setlang:"))
     app.add_handler(CallbackQueryHandler(cancel_choice_callback, pattern="^cancelpick:"))
@@ -1637,6 +2226,8 @@ def main():
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, donation_payment_callback))
 
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & BATCH_MEDIA, media_without_pack))
+    app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & ~filters.COMMAND, retag_reply))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unrecognized_message))
 
     family_link.attach(app, BOT_NAME, "StickerBot", START_TIME)
@@ -2048,6 +2639,18 @@ def _ext_of(filename: str | None, fallback: str) -> str:
         return formats.normalise(_safe_ext(filename.rsplit(".", 1)[-1])) or fallback
     return fallback
 
+def _ext_of_file(file_obj, fallback: str) -> str:
+    """`_ext_of` on the file's name; a file sent with no name (a GIF from Telegram's own picker, say) falls back to its MIME type, then to `fallback`."""
+    ext = _ext_of(getattr(file_obj, "file_name", None), "")
+    if ext:
+        return ext
+    import mimetypes
+    guessed = mimetypes.guess_extension(getattr(file_obj, "mime_type", None) or "")
+    guessed = formats.normalise(guessed) if guessed else ""
+    if guessed and formats.is_supported_source(guessed):
+        return guessed
+    return fallback
+
 async def convert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     await update.message.reply_text(
@@ -2271,9 +2874,14 @@ async def _download_big(context, msg, path, declared_size: int, status, lang: st
 async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await i18n.get_lang(update.effective_user.id, context)
     msg = update.message
-    if msg.document:
+    # An animation comes with `document` set too (Bot API backward compatibility), so it is
+    # looked at first: a Telegram GIF is an MP4 with no sound and often has no file name.
+    if msg.animation:
+        file_obj = msg.animation
+        ext = _ext_of_file(file_obj, "mp4")
+    elif msg.document:
         file_obj = msg.document
-        ext = _ext_of(file_obj.file_name, "")
+        ext = _ext_of_file(file_obj, "")
     elif msg.photo:
         file_obj = msg.photo[-1]
         ext = "jpg"
@@ -2286,9 +2894,6 @@ async def convert_receive_file(update: Update, context: ContextTypes.DEFAULT_TYP
     elif msg.voice:
         file_obj = msg.voice
         ext = "ogg"
-    elif msg.animation:
-        file_obj = msg.animation
-        ext = _ext_of(getattr(file_obj, "file_name", None), "gif")
     else:
         return
 
@@ -3341,6 +3946,7 @@ from db import (
 )
 from shared_features import (
     note_job,
+    note_stat,
     note_tap,
     publish_profile,
     publish_commands,
@@ -4235,6 +4841,7 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 )
             await status.delete(context.bot)
             note_job(True)
+            note_stat("link_extra", f"album_{kind}")
         except _MergeStop as stop:
             await status.set(context.bot, _merge_text(lang, stop.key), **NO_PREVIEW)
             return False
@@ -4497,6 +5104,7 @@ async def _resend_by_file_id(update, context, lang, status, platform: str, url: 
                               lossless=lossless, redeliver_token=token)
             await status.delete(context.bot)
             note_job(True)
+            note_stat("link_site", platform)
         except Exception as exc:
             if isinstance(exc, BadRequest):
 
@@ -4575,6 +5183,7 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                   lossless=delivered_lossless, redeliver_token=token)
                 await status.delete(context.bot)
                 note_job(True)
+                note_stat("link_site", platform)
             except Exception as exc:
                 note_job(False)
 
@@ -4628,6 +5237,9 @@ async def _resolve_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                          lossless=delivered_lossless, redeliver_token=token)
                 await status.delete(context.bot)
                 note_job(True)
+                note_stat("link_site", platform)
+                for item in items:
+                    note_stat("link_media", f"{platform}:{getattr(item, 'kind', None) or 'other'}")
 
                 kept = delivery_cache.keep(update.effective_user.id, platform, url,
                                            list(zip(items, paths)), _cache_floor_mb())
@@ -4723,6 +5335,8 @@ async def _large_download(update, context, status, lang, platform: str, url: str
             await status.set(context.bot, i18n.t(lang, "large_files_send_failed", price=price, balance=back))
             return False
         note_job(True)
+        note_stat("link_site", platform)
+        note_stat("link_extra", "large_file")
         await status.set(context.bot, i18n.t(lang, "large_files_charged", mb=mb, price=price, balance=after))
         return True
     finally:
@@ -5134,6 +5748,7 @@ from db import (
     count_active_users_since,
 )
 from shared_features import (
+    note_stat,
     publish_profile,
     publish_commands,
     refresh_chat_menu,
@@ -6038,6 +6653,7 @@ async def _deliver_follower_message(update: Update, context: ContextTypes.DEFAUL
         await message.reply_text(i18n.t(follower_lang, "delivery_failed", error=exc))
         return
 
+    note_stat("anon_relay", "to_inbox")
     await asyncio.to_thread(
         record_relay_and_touch, active["id"],
         owner_id, [m.message_id for m in sent],
@@ -6089,6 +6705,7 @@ async def _deliver_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text(i18n.t(owner_lang, "reply_failed", error=exc))
         return
 
+    note_stat("anon_relay", "reply")
     await asyncio.to_thread(
         record_relay_and_touch, conversation_id,
         owner.id, [message.message_id],
@@ -6945,6 +7562,63 @@ async def buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"\u26a0\ufe0f Couldn't read the button taps: {exc}")
         return
     await send_long(context, update.effective_chat.id, report, "buttons.txt")
+
+STATS_DEFAULT_DAYS = 30
+STATS_MAX_DAYS = 400
+STATS_MAX_LINES = 12
+STATS_USAGE = f"Usage: /stats [days] -- from 1 to {STATS_MAX_DAYS} days, {STATS_DEFAULT_DAYS} if not said."
+STATS_LABELS = {
+    "link_site": "Links delivered, by site",
+    "link_media": "Media delivered, site:kind",
+    "link_extra": "Extras",
+    "conversion": "Conversions, from>to",
+    "sticker": "Stickers added",
+    "sticker_pack": "Packs",
+    "video_fit_offered": "Clips that didn't fit",
+    "video_fit": "What was done about them",
+    "anon_relay": "Messages relayed",
+}
+
+def _stats_report(days: int) -> str:
+    rows = family_link.stats_history(days)
+    if not rows:
+        return "No statistics recorded yet."
+    per_bot: dict[str, dict[str, list]] = {}
+    for row in rows:
+        per_bot.setdefault(row["bot_id"], {}).setdefault(row["metric"], []).append((row["key"], int(row["n"])))
+    names = {child["id"]: child["name"] for child in CHILDREN}
+    order = [child["id"] for child in CHILDREN if child["id"] in per_bot]
+    order += sorted(bot_id for bot_id in per_bot if bot_id not in names)
+    lines = [f"Statistics, last {days} days (anonymous daily counts, nothing about who)"]
+    for bot_id in order:
+        lines += ["", names.get(bot_id, bot_id)]
+        for metric, items in per_bot[bot_id].items():
+            total = sum(n for _, n in items)
+            lines.append(f"  {STATS_LABELS.get(metric, metric)} — {total}")
+            for key, n in items[:STATS_MAX_LINES]:
+                lines.append(f"    {key}: {n} ({n * 100 // total}%)")
+            if len(items) > STATS_MAX_LINES:
+                lines.append(f"    +{len(items) - STATS_MAX_LINES} more")
+    return "\n".join(lines)
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await guard(update, context):
+        return
+    days = STATS_DEFAULT_DAYS
+    if context.args:
+        try:
+            days = int(context.args[0])
+        except ValueError:
+            days = 0
+        if len(context.args) > 1 or not 1 <= days <= STATS_MAX_DAYS:
+            await update.message.reply_text(STATS_USAGE)
+            return
+    try:
+        report = await asyncio.to_thread(_stats_report, days)
+    except Exception as exc:
+        await update.message.reply_text(f"\u26a0\ufe0f Couldn't read the statistics: {exc}")
+        return
+    await send_long(context, update.effective_chat.id, report, "stats.txt")
 
 async def board_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The three buttons under the /status board."""
@@ -8145,6 +8819,11 @@ def routes_section(settings: dict, now: float) -> "list[str]":
         shown.append(f"{html.escape(ROUTES_NAMES.get(platform, platform))} {look}")
     return [head, "  " + " · ".join(shown)] if shown else [head]
 
+def _brief_line(code: str) -> str:
+    """The code's own plain-words line, under it: what the person ran into."""
+    text = problems.brief(code)
+    return f"\n      <i>{html.escape(text)}</i>" if text else ""
+
 def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
                          feedback_note: "str | None" = None, routes: "dict | None" = None,
                          now: "float | None" = None, people: "list | None" = None) -> str:
@@ -8184,7 +8863,7 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
             lines.append(
                 f"  {html.escape(_bot_name(bot_id))} · <code>{html.escape(code)}</code> "
                 f"×{len(group)} — {html.escape(problem.title if problem else 'unknown code')}"
-                f"{mark}\n      {incidents}")
+                f"{mark}{_brief_line(code)}\n      {incidents}")
 
     by_kind: dict = {}
     for (bot_id, code), group in grouped.get(problems.REFUSED, {}).items():
@@ -8193,7 +8872,7 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
         entries = sorted(by_kind.get(kind, ()), key=lambda e: (-len(e[2]), e[0], e[1]))
         if not entries:
             continue
-        icon, heading, meaning = problems.KIND_LABELS[kind]
+        icon, heading, _ = problems.KIND_LABELS[kind]
         total = sum(len(group) for _, _, group in entries)
         lines.append(f"\n{icon} <b>{html.escape(heading)} — {total}</b>")
         for bot_id, code, group in entries[:MAX_CODES_PER_KIND]:
@@ -8201,12 +8880,11 @@ def build_problem_report(rows: list, hours: int, feedback: "list | None" = None,
             count = f" ×{len(group)}" if len(group) > 1 else ""
             lines.append(
                 f"  {html.escape(_bot_name(bot_id))} · <code>{html.escape(code)}</code>{count} — "
-                f"{html.escape(problem.title if problem else 'unknown code')}")
+                f"{html.escape(problem.title if problem else 'unknown code')}{_brief_line(code)}")
         rest = entries[MAX_CODES_PER_KIND:]
         if rest:
             lines.append(f"  +{sum(len(group) for _, _, group in rest)} more, under "
                          f"{len(rest)} other code(s) — <code>/reports</code>")
-        lines.append(f"  <i>{html.escape(meaning)}</i>")
 
     if not rows:
         lines.append("\nNothing at all — no bot showed anybody a problem today.")
@@ -9649,6 +10327,7 @@ BOT_COMMANDS = [
     BotCommand("usage", "Memory, peaks, and what they cost"),
     BotCommand("idle", "How quiet each bot is; would sleeping pay?"),
     BotCommand("buttons", "Button taps per bot, counts only"),
+    BotCommand("stats", "Anonymous daily statistics, for infographics"),
     BotCommand("run", "Run a command inside another bot"),
     BotCommand("restart", "Restart a bot's service once nobody is using it"),
     BotCommand("shutdown", "Stop a bot's service once nobody is using it"),
@@ -9765,6 +10444,7 @@ def main():
     app.add_handler(CommandHandler("usage", usage_command))
     app.add_handler(CommandHandler("idle", idle_command))
     app.add_handler(CommandHandler("buttons", buttons_command))
+    app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("me", me_command))
     app.add_handler(CommandHandler("run", run_command))
     app.add_handler(CommandHandler("ping", broadcast_ping))

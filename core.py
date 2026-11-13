@@ -182,6 +182,21 @@ def init_family_schema() -> None:
             """
         )
 
+        # Anonymous counts for infographics: what was done, per UTC day -- which sites links came
+        # from, which conversions, which kind of sticker. No user id, no time finer than a day.
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.daily_stats (
+                bot_id TEXT NOT NULL,
+                day DATE NOT NULL,
+                metric TEXT NOT NULL,
+                key TEXT NOT NULL,
+                n INTEGER NOT NULL,
+                PRIMARY KEY (bot_id, day, metric, key)
+            )
+            """
+        )
+
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {FAMILY_SCHEMA}.bot_state (
@@ -1324,6 +1339,41 @@ def button_taps_history(days: int = 7) -> list[dict]:
         names = [column.name for column in cur.description]
         return [dict(zip(names, row)) for row in cur.fetchall()]
 
+STATS_RETENTION_DAYS = int(os.environ.get("FAMILY_STATS_RETENTION_DAYS") or 400)
+
+def record_stats(stats: dict) -> None:
+    """Add a window's anonymous counts, {(metric, key): n}, to today's (UTC) rows."""
+    if not _enabled or not stats:
+        return
+    rows = [(_bot_id, metric[:40], key[:60], n) for (metric, key), n in stats.items()
+            if isinstance(metric, str) and isinstance(key, str) and isinstance(n, int)
+            and not isinstance(n, bool) and n > 0]
+    if not rows:
+        return
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO {FAMILY_SCHEMA}.daily_stats AS t (bot_id, day, metric, key, n) "
+                f"VALUES (%s, (now() AT TIME ZONE 'UTC')::date, %s, %s, %s) "
+                f"ON CONFLICT (bot_id, day, metric, key) DO UPDATE SET n = t.n + EXCLUDED.n",
+                rows,
+            )
+        conn.commit()
+
+def stats_history(days: int = 30) -> list[dict]:
+    """Counts per bot, metric and key over the last `days` UTC days, largest first within a metric."""
+    if not _enabled:
+        return []
+    with _connect() as conn:
+        cur = conn.execute(
+            f"SELECT bot_id, metric, key, SUM(n)::bigint AS n FROM {FAMILY_SCHEMA}.daily_stats "
+            f"WHERE day > (now() AT TIME ZONE 'UTC')::date - %s "
+            f"GROUP BY bot_id, metric, key ORDER BY bot_id, metric, SUM(n) DESC, key",
+            (days,),
+        )
+        names = [column.name for column in cur.description]
+        return [dict(zip(names, row)) for row in cur.fetchall()]
+
 def usage_history(bot_id: str | None = None, hours: int = 24) -> list[dict]:
     """Recent samples, newest first. `bot_id=None` means every bot, which is what ManagerBot asks for."""
     if not _enabled:
@@ -2186,10 +2236,22 @@ def _finish_command(command_id: int, ok: bool, output: str, file_name, file_byte
         )
         conn.commit()
 
+# Family commands this process is running now -- a lifecycle work source (attach), so the soft stop
+# and the SIGTERM wait count them in-process. The table's 'running' rows were all it had, and
+# ManagerBot's watchdog marks a command 'timeout' 90 s after it was issued even while it still runs:
+# a long broadcast was invisible and could be cut off (review of 2026-11-14). The stop requests
+# themselves are not counted, or a stop would wait for itself.
+_STOP_COMMANDS = frozenset({"softstop", "softstopbot", "restart"})
+_running_here: dict = {}
+
+def running_here() -> int:
+    return sum(1 for command in _running_here.values() if command not in _STOP_COMMANDS)
+
 async def _run_one_command(context, row) -> None:
     command_id, command, raw_args = row
     handler = COMMANDS.get(command)
     logger.info("ManagerBot asked for: %s %s", command, raw_args)
+    _running_here[command_id] = command
     try:
         if handler is None:
             ok, output, name, data = False, f"Unknown command '{command}'.", None, None
@@ -2199,6 +2261,8 @@ async def _run_one_command(context, row) -> None:
     except Exception as exc:
         logger.exception("Family command %r failed", command)
         ok, output, name, data = False, f"{type(exc).__name__}: {exc}", None, None
+    finally:
+        _running_here.pop(command_id, None)
 
     try:
         await asyncio.to_thread(_finish_command, command_id, ok, output, name, data)
@@ -2269,6 +2333,11 @@ def _prune_family_rows() -> tuple[int, int, int, int]:
             (_bot_id, USAGE_RETENTION_DAYS),
         )
         taps = cur.rowcount
+        conn.execute(
+            f"DELETE FROM {FAMILY_SCHEMA}.daily_stats "
+            f"WHERE bot_id = %s AND day < (now() AT TIME ZONE 'UTC')::date - %s",
+            (_bot_id, STATS_RETENTION_DAYS),
+        )
         conn.commit()
     return commands, events, samples, taps
 
@@ -2351,6 +2420,7 @@ def attach(app, bot_id: str, display_name: str, start_time: datetime) -> None:
         return
 
     _enabled = True
+    lifecycle.add_work_source("family command(s)", running_here)
 
     sf = _monitoring()
     if sf and hasattr(sf, "set_event_hook"):
@@ -3528,11 +3598,17 @@ def _stop_this_bot() -> None:
 from __future__ import annotations
 
 import logging
+import re
 from collections import OrderedDict
 
 from telegram.error import BadRequest
 
 logger = logging.getLogger(__name__)
+
+# Refusals that mean the message itself is wrong -- never a passing state of the chat.
+_CONTENT_REFUSED = re.compile(
+    r"button_data_invalid|button_url_invalid|can't parse entities|message is too long|"
+    r"text must be non-empty|reply_markup_too_long|entities_too_long", re.IGNORECASE)
 
 MAX_TRACKED_CHATS = 2048
 
@@ -3636,8 +3712,16 @@ class LiveMessage:
 
         try:
             sent = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
+        except BadRequest as exc:
+            # Telegram refused the message itself -- a button's data over 64 bytes, broken
+            # formatting, text too long: the bot's own bug. Swallowed, the person saw nothing at all
+            # (TestBot, 2026-11-14), so it goes up to error_handler, which tells them.
+            if _CONTENT_REFUSED.search(str(exc)):
+                raise
+            logger.warning("Could not send a live message: %s", exc)
+            return self
         except Exception:
-            logger.debug("Could not send a live message", exc_info=True)
+            logger.warning("Could not send a live message", exc_info=True)
             return self
         self.message_id = sent.message_id
         self.watermark = _last_incoming.get(self.chat_id, 0)
@@ -4450,6 +4534,126 @@ ALERT_KEYS = {
     "anon_bot": {"conv_gone", "not_your_conversation"},
 }
 
+# One line per code for the owner's reports, in plain words: what the person ran into. PROBLEMS'
+# `meaning` is the longer account, for /explain.
+BRIEF = {
+    "FM-CRASH": "a handler failed with an error nothing caught; the person was told",
+    "FM-FLOOD": "someone sent more updates in a minute than the flood gate allows; the rest were ignored",
+    "FM-DONATE-CURRENCY": "/donate or /recharge named a currency the bot doesn't offer",
+    "FM-DONATE-UNAVAILABLE": "a currency is offered but its payment token isn't set",
+    "FM-DONATE-AMOUNT": "a payment amount wasn't a positive whole number, or came from an old button",
+    "FM-DONATE-TOO-MANY": "a Stars payment above the per-payment maximum",
+    "FM-DONATE-RANGE": "a card payment below or above that currency's range",
+    "FM-INVOICE": "Telegram refused to create an invoice; nothing was charged",
+    "FM-ERASE": "/deletemydata failed, nothing was erased; they were asked to retry",
+    "FM-UPDATING": "turned away because the bots are paused for an update",
+    "FM-UNKNOWN-COMMAND": "a slash command this bot doesn't have",
+    "FM-FEEDBACK-LIMIT": "more /feedback in a day than allowed; this one wasn't taken",
+    "FM-FEEDBACK-FAILED": "/feedback couldn't be saved; they were asked to send it again",
+    "CV-NO-EXTENSION": "a file whose format couldn't be told from its name",
+    "CV-TG-LIMIT": "a file over Telegram's 20 MB bot download limit",
+    "CV-GROUP-LIMIT": "a file over 20 MB sent in a group, where big files aren't taken",
+    "CV-BIG-UNAVAILABLE": "a file over 20 MB, and the route for big files was down",
+    "CV-DOWNLOAD": "fetching the file from Telegram failed; nothing converted or charged",
+    "CV-UNSUPPORTED": "a source or target format this server doesn't convert",
+    "CV-TOO-BIG": "a file (or album) over ConvertBot's size limit",
+    "CV-NO-TARGETS": "a readable format with nothing available to convert it to",
+    "CV-NOTHING-SENDABLE": "a picture so big that every result would be over the send limit",
+    "CV-MEGAPIXELS": "a picture over the megapixel limit (it would run out of memory)",
+    "CV-FORMAT-TOO-BIG": "a target tapped whose result would be over the send limit (old menu)",
+    "CV-STORAGE-USER": "their waiting files already fill their storage share",
+    "CV-STORAGE-FULL": "the server is short of temporary space",
+    "CV-QUEUE-FULL": "they already have the most conversions waiting",
+    "CV-EXPIRED": "a format chosen for a file no longer waiting",
+    "CV-JOB-GONE": "Stop tapped on a conversion that had already ended",
+    "CV-NO-CREDIT": "the balance didn't cover the conversion when its turn came; not charged",
+    "CV-UNKNOWN-ORDER": "a payment for an order the bot doesn't know; declined, not charged",
+    "CV-MIXED-BATCH": "an album of different formats, which one conversion can't take",
+    "CV-UNRECOGNIZED": "a message that's neither a file nor a format name",
+    "CV-REFUSED": "the converter couldn't read or convert the file as asked",
+    "CV-TIMEOUT": "a conversion ran past its time limit and was stopped",
+    "CV-TOO-SLOW": "a conversion was on course to miss its time limit and was stopped early",
+    "CV-CRASH": "the conversion worker died without a result (usually memory)",
+    "CV-NO-MEMORY": "the conversion ran out of memory",
+    "CV-OUTPUT-TOO-BIG": "the result came out over what this conversion may send back",
+    "CV-SEND-FAILED": "the file converted but uploading it failed; ⚡ refunded",
+    "CV-RESTARTED": "the bot restarted mid-conversion; ⚡ refunded",
+    "DL-QUOTA-HOUR": "they used up their downloads for the hour",
+    "DL-QUOTA-DAY": "they used up their downloads for the day",
+    "DL-QUEUE-FULL": "they already have the most links in progress",
+    "DL-NO-SPACE": "the server is short of disk space; the download didn't start",
+    "DL-DELIVERY": "the media was fetched but uploading it to Telegram failed",
+    "DL-BLOCKED": "the site refused every route (blocked, rate-limited or asked to log in)",
+    "DL-NOT-FOUND": "the site says the post doesn't exist or isn't public",
+    "DL-TOO-BIG": "the media is bigger than a bot may send",
+    "DL-LARGE-OFF": "over the free size, and they haven't switched on large files",
+    "DL-LARGE-PRIVATE": "a large file asked for in a group (large files are private-only)",
+    "DL-LARGE-NO-CREDIT": "large files on, but the balance is below the cheapest one",
+    "DL-LARGE-TOO-BIG": "over even the large-file ceiling (Telegram's 2000 MB at most)",
+    "DL-LARGE-SHORT": "the large file cost more than the balance once its size was known",
+    "DL-LARGE-SEND": "a large file was charged for and couldn't be sent; credit returned",
+    "DL-ALL-ROUTES": "every download route failed, for some other reason",
+    "DL-REDDIT": "a Reddit post's data couldn't be read",
+    "DL-TWITTER-CARD": "an X/Twitter post's content couldn't be fetched; only the link went back",
+    "DL-UNRECOGNIZED": "not a link from a supported site",
+    "DL-BUTTON-EXPIRED": "a compressed/uncompressed button for a download no longer remembered",
+    "DL-MERGE-TOO-BIG": "PDF/ZIP tapped on an album with too many or too big files",
+    "DL-MERGE-NO-PHOTOS": "PDF tapped, but fewer than two photos came back",
+    "DL-MERGE-FAILED": "an album's PDF or ZIP couldn't be built or sent",
+    "ST-WHOMADE-UNKNOWN": "/whomade on a pack not made through this bot",
+    "ST-COEDIT-LINK": "a co-editing link that matches no pack (reset or mistyped)",
+    "ST-COEDIT-GONE": "a co-editing link to a pack that no longer exists",
+    "ST-NOT-YOURS": "a pack button tapped by someone who doesn't own the pack",
+    "ST-OWNER-ONLY": "a co-editor tried rename, co-edit settings or delete (owner only)",
+    "ST-RENAME-STATE": "a new pack name arrived after rename lost track of the pack",
+    "ST-RENAME-FAILED": "Telegram refused to rename a pack",
+    "ST-DELETE-FAILED": "Telegram refused to delete a pack",
+    "ST-TITLE-EMPTY": "an empty pack name",
+    "ST-REMOVE-FAILED": "removing a sticker from a pack failed",
+    "ST-IMAGE": "a picture couldn't be made into a sticker",
+    "ST-VIDEO-CONVERT": "a video couldn't be encoded into a sticker Telegram accepts",
+    "ST-VIDEO-FAILED": "an unexpected error while converting a video",
+    "ST-ANIMATED": "an animated (.tgs) sticker sent, which the bot can't copy",
+    "ST-IMPORT-SOURCE": "/import given something that isn't a pack name or link",
+    "ST-IMPORT": "an import found no pack, or a WhatsApp archive with no usable images",
+    "ST-TG-TIMEOUT": "Telegram didn't confirm adding a sticker in time",
+    "ST-TG-BAD-NAME": "Telegram rejected the pack's generated internal name",
+    "ST-TG-NAME-TAKEN": "the pack's generated internal name was already taken",
+    "ST-TG-PACK-FULL": "the pack hit Telegram's 120-sticker limit",
+    "ST-TG-BAD-FORMAT": "Telegram didn't accept the prepared sticker file",
+    "ST-TG-REJECTED": "Telegram rejected a sticker for a reason the bot doesn't know",
+    "ST-UNRECOGNIZED": "something sent outside a pack session that the bot has no use for",
+    "ST-NOTHING-ADDED": "/done before any sticker was added",
+    "ST-NO-STICKER": "an emoji sent before any sticker was added",
+    "ST-RETAG": "changing a sticker's emoji failed",
+    "AN-LINK-INVALID": "an inbox link that matches no inbox",
+    "AN-LINK-BLOCKED": "someone the inbox owner blocked opened their link",
+    "AN-LINK-PAUSED": "an inbox link opened while that inbox is paused",
+    "AN-INBOX-GONE": "a link to an inbox that was deleted",
+    "AN-SENDER-BLOCKED": "a guest the owner blocked wrote; not relayed",
+    "AN-NOT-STARTED": "the other person has stopped or never started the bot",
+    "AN-DELIVERY": "Telegram rejected relaying a message",
+    "AN-REPLY-NO-MATCH": "a reply matched someone else's conversation; not sent",
+    "AN-NEEDS-REPLY": "a message that wasn't a reply while conversations are open",
+    "AN-OPENING-NEEDS-REPLY": "something else arrived before the first message of a new conversation",
+    "AN-AMBIGUOUS": "a message without a reply while several conversations are open",
+    "AN-REPLY-BLOCKED": "the guest stopped the bot, so the owner's reply couldn't go",
+    "AN-REPLY-FAILED": "Telegram rejected relaying the owner's reply",
+    "AN-REPLY-STALE": "a reply to a message no conversation knows",
+    "AN-TOO-FAST": "more messages in a minute than AnonBot allows",
+    "AN-EDIT-NOT-RELAYED": "a relayed message was edited (edits don't travel)",
+    "AN-CONV-GONE": "a button for a conversation that's gone or isn't theirs",
+    "AN-NOT-YOURS": "a button for a conversation they're not part of",
+    "AN-NO-ANCHOR": "jump-to-start on a conversation whose first messages were pruned",
+    "AN-WHICH-UNKNOWN": "/which or /archive on a message in no conversation",
+    "AN-ARCHIVE-OWNER-ONLY": "a guest tried to archive (inbox owner only)",
+    "AN-UNADDRESSED": "a message from someone with no inbox and no open conversation",
+    "AN-REACTION-NOT-PASSED": "a reaction the bot can't show the other side (premium emoji, or a second one)",
+}
+
+def brief(code) -> str:
+    return BRIEF.get(code, "")
+
 SIMPLE = frozenset({
     "FM-FLOOD", "FM-DONATE-CURRENCY", "FM-DONATE-AMOUNT", "FM-DONATE-TOO-MANY", "FM-DONATE-RANGE",
     "FM-UPDATING", "FM-UNKNOWN-COMMAND", "FM-FEEDBACK-LIMIT",
@@ -4571,8 +4775,22 @@ def urgent(code) -> bool:
     return level(code) == URGENT
 
 def reportable(code) -> bool:
-    """Whether a message ending in this code offers a Report button."""
+    """Whether a message ending in this code is a fault: it says an anonymous report was saved, and may offer the details button (wants_details, or core's repeat count)."""
     return is_code(code) and code not in SIMPLE
+
+# A person's details (id, @username, language, chat type) are asked for only where knowing who it
+# was changes what the owner can do: a crash to follow up, an erase or a piece of feedback that did
+# not happen and is theirs, a reply that went to the wrong conversation. Anything else -- a timeout,
+# a download or upload that failed, Telegram refusing -- is fixed from the anonymous record; there
+# the button is offered only when it keeps happening to the same person (core.DETAILS_AFTER).
+WANTS_DETAILS = frozenset({
+    "FM-CRASH", "CV-CRASH", "ST-VIDEO-FAILED",
+    "FM-ERASE", "FM-FEEDBACK-FAILED",
+    "AN-REPLY-NO-MATCH",
+})
+
+def wants_details(code) -> bool:
+    return code in WANTS_DETAILS
 
 def code_for(bot: str, key: str) -> "str | None":
     """The code a message key carries in this bot, or None."""
@@ -4609,7 +4827,7 @@ def decode(code: str) -> str:
             f"What happened: {problem.meaning}\n"
             f"Likely causes: {problem.causes}\n"
             f"What to check: {problem.check}\n"
-            f"Report button: {'offered' if reportable(code) else 'not offered, the message explains itself'}")
+            f"Details button: {'offered' if wants_details(code) else 'offered when it keeps happening to one person' if reportable(code) else 'not offered, the message explains itself'}")
 
 # ─── module: shared_features ─────────────────────────────────────────────────
 """Small self-contained features used by this bot -- kept in one file for convenience."""
@@ -5642,8 +5860,8 @@ async def release_force_reply(update, context, stored_only: bool = False) -> boo
     return released
 
 def reset_user_state(context, keep: dict | None = None) -> None:
-    """user_data.clear(), minus the one key /cancel is not finished with."""
-    preserved = {k: context.user_data[k] for k in (FORCE_REPLY_KEY,) if k in context.user_data}
+    """user_data.clear(), minus the one key /cancel is not finished with -- and _last_seen, which says the person is here (the soft stop's count and the idle prune both read it)."""
+    preserved = {k: context.user_data[k] for k in (FORCE_REPLY_KEY, "_last_seen") if k in context.user_data}
     context.user_data.clear()
     context.user_data.update(preserved)
     if keep:
@@ -5711,8 +5929,8 @@ def build_cancel_text(lang: str, stopped: list[str]) -> str:
     return i18n.t(lang, "cancel_header") + "\n" + "\n".join(f"\u2022 {item}" for item in stopped)
 
 async def finish_cancel(update, context, lang: str, stopped: list[str],
-                        stored_only: bool = False) -> None:
-    """The last two steps of every bot's /cancel: release the reply lock and say what was stopped."""
+                        stored_only: bool = False, keyboard=None) -> None:
+    """The last two steps of every bot's /cancel: release the reply lock and say what was stopped. The answer clears any keyboard -- or puts up `keyboard` instead (StickerBot's pack buttons, which a bare removal took away)."""
     released = await release_force_reply(update, context, stored_only=stored_only)
 
     if released and not stopped:
@@ -5722,10 +5940,10 @@ async def finish_cancel(update, context, lang: str, stopped: list[str],
         return
     await message.reply_text(
         build_cancel_text(lang, stopped),
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=keyboard or ReplyKeyboardRemove(),
     )
 
-async def finish_cancel_choice(update, context, lang: str, stopped: list[str]) -> None:
+async def finish_cancel_choice(update, context, lang: str, stopped: list[str], keyboard=None) -> None:
     """finish_cancel's twin for the button path."""
     query = update.callback_query
     had_prompt = FORCE_REPLY_KEY in context.user_data
@@ -5739,7 +5957,7 @@ async def finish_cancel_choice(update, context, lang: str, stopped: list[str]) -
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=i18n.t(lang, "cancel_reply_box_freed"),
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=keyboard or ReplyKeyboardRemove(),
         )
 
 async def keep_going(update, context, lang: str) -> None:
@@ -6098,22 +6316,56 @@ def remember_chat_lang(chat_id, lang) -> None:
     while len(_chat_langs) > 4096:
         _chat_langs.popitem(last=False)
 
-def report_markup(lang: str, code: str, incident: str, markup=None):
-    """`markup` with a Report row added, or a keyboard holding only that row."""
-    if (not REPORT_BUTTONS or not problems.reportable(code) or _has_report(markup)
-            or (markup is not None and not isinstance(markup, InlineKeyboardMarkup))):
+DETAILS_AFTER = int(os.environ.get("PROBLEM_DETAILS_AFTER", "3"))
+DETAILS_WINDOW_SECONDS = int(os.environ.get("PROBLEM_DETAILS_WINDOW_SECONDS", "3600"))
+_repeats: "OrderedDict[tuple, deque]" = OrderedDict()
+
+def offers_details(chat_id, code, count: bool = False, ahead: bool = False) -> bool:
+    """Whether this problem, in this chat, gets the details button: always for problems.WANTS_DETAILS, never for one that explains itself, and for any other fault from its DETAILS_AFTER-th time in this chat within DETAILS_WINDOW_SECONDS. `count` records this occurrence; `ahead` asks about one not counted yet."""
+    if not problems.reportable(code):
+        return False
+    if problems.wants_details(code):
+        return True
+    if chat_id is None:
+        return False
+    now = time.monotonic()
+    key = (chat_id, code)
+    seen = _repeats.get(key) or deque()
+    if count:
+        seen.append(now)
+    while seen and now - seen[0] > DETAILS_WINDOW_SECONDS:
+        seen.popleft()
+    if seen:
+        _repeats[key] = seen
+        _repeats.move_to_end(key)
+        while len(_repeats) > 4096:
+            _repeats.popitem(last=False)
+    else:
+        _repeats.pop(key, None)
+    return len(seen) + (1 if ahead else 0) >= DETAILS_AFTER
+
+def report_markup(lang: str, code: str, incident: str, markup=None, chat_id=None):
+    """`markup` with a details row added, or a keyboard holding only that row -- when offers_details says so for this chat."""
+    if not REPORT_BUTTONS or not offers_details(chat_id, code, ahead=True):
+        return markup
+    return _with_details_row(lang, code, incident, markup)
+
+def _with_details_row(lang: str, code: str, incident: str, markup=None):
+    if _has_report(markup) or (markup is not None and not isinstance(markup, InlineKeyboardMarkup)):
         return markup
     rows = [list(row) for row in markup.inline_keyboard] if markup is not None else []
     rows.append([InlineKeyboardButton(i18n.t(lang, "report_button"),
                                       callback_data=f"rpt:{code}:{incident}")])
     return InlineKeyboardMarkup(rows)
 
-def _with_logged_note(text: str, code: str, lang: str) -> str:
-    """The same message, with one line saying it has already been written down and that nothing in what was written is about them."""
-    note = i18n.t(lang, "problem_logged_note")
+def _with_logged_note(text: str, code: str, lang: str, offered: bool = False) -> str:
+    """The same message, with one line saying an anonymous report was saved -- and, under a details button, that adding more is up to them."""
+    note = i18n.t(lang, "problem_logged_note_optin" if offered else "problem_logged_note")
     body = problems.strip_code(text)
-    if note in body:
-        return text
+    for known in (i18n.t(lang, "problem_logged_note_optin"), i18n.t(lang, "problem_logged_note")):
+        if body.endswith(known):
+            body = body[: -len(known)].rstrip()
+            break
     return f"{body}\n\n{note}{problems.code_line(code)}"
 
 def _has_report(markup) -> bool:
@@ -6151,7 +6403,8 @@ async def note_problem(chat_id, message_id, text, kwargs: dict):
     made = _button_incident(markup)
     known = _incidents.get((chat_id, message_id, code)) if message_id is not None else None
     incident = made or known or problems.new_incident()
-    wants_button = (made is None and REPORT_BUTTONS and problems.reportable(code)
+    offered = offers_details(chat_id, code, count=incident != known)
+    wants_button = (made is None and REPORT_BUTTONS and offered
                     and (markup is None or isinstance(markup, InlineKeyboardMarkup)))
     if wants_button or problems.reportable(code):
         lang = _chat_langs.get(chat_id)
@@ -6164,11 +6417,12 @@ async def note_problem(chat_id, message_id, text, kwargs: dict):
         lang = lang or "en"
         if wants_button:
             try:
-                kwargs["reply_markup"] = report_markup(lang, code, incident, markup)
+                kwargs["reply_markup"] = _with_details_row(lang, code, incident, markup)
             except Exception:
                 logging.getLogger(__name__).debug("Could not add a report button", exc_info=True)
         try:
-            text = _with_logged_note(text, code, lang)
+            text = _with_logged_note(text, code, lang,
+                                     offered=_has_report(kwargs.get("reply_markup")))
         except Exception:
             logging.getLogger(__name__).debug("Could not add the logged note", exc_info=True)
     if incident != known:
@@ -6457,11 +6711,18 @@ async def refuse_new_work(lang: str, user_id: int, chat_id: int) -> str | None:
 USER_DATA_TTL_HOURS = int(os.environ.get("USER_DATA_TTL_HOURS", "12"))
 
 def _prune_user_data(application) -> int:
-    cutoff = time.time() - USER_DATA_TTL_HOURS * 3600
-    stale = [
-        user_id for user_id, data in application.user_data.items()
-        if data.get("_last_seen", 0) < cutoff
-    ]
+    """Drop what is kept for people idle for USER_DATA_TTL_HOURS. State with no _last_seen at all is
+    not "idle forever": a handler that cleared user_data had just run for them (2.1.5 dropped a pack
+    session opened a minute before the hourly pass that way) -- it is stamped now and kept."""
+    now = time.time()
+    cutoff = now - USER_DATA_TTL_HOURS * 3600
+    stale = []
+    for user_id, data in application.user_data.items():
+        seen = data.get("_last_seen")
+        if seen is None:
+            data["_last_seen"] = now
+        elif seen < cutoff:
+            stale.append(user_id)
     for user_id in stale:
         application.drop_user_data(user_id)
     return len(stale)
@@ -6502,6 +6763,7 @@ async def flush_on_shutdown(application) -> None:
         await asyncio.to_thread(_flush_problems_now)
     except Exception:
         logging.getLogger(__name__).debug("Final problem flush failed", exc_info=True)
+    await asyncio.to_thread(_flush_stats_now)
     close = getattr(db, "close_pool", None)
     if close is not None:
         try:
@@ -6692,6 +6954,35 @@ def note_tap(key: str) -> None:
     except Exception:
         pass
 
+# Anonymous counts for infographics (family_link.record_stats): never who, never finer than a day.
+STAT_MAX_KEYS = 300
+_stats: "dict[tuple, int]" = {}
+
+def note_stat(metric: str, key: str, n: int = 1) -> None:
+    """Count one thing done -- note_stat("link_site", "tiktok") -- for today's anonymous totals."""
+    try:
+        item = (str(metric), str(key or "other"))
+        if item in _stats:
+            _stats[item] += n
+        elif len(_stats) < STAT_MAX_KEYS:
+            _stats[item] = n
+        else:
+            _stats[(item[0], "other")] = _stats.get((item[0], "other"), 0) + n
+    except Exception:
+        pass
+
+def take_stats() -> "dict[tuple, int]":
+    global _stats
+    stats, _stats = _stats, {}
+    return stats
+
+def _flush_stats_now(stats: "dict | None" = None) -> None:
+    stats = take_stats() if stats is None else stats
+    try:
+        family_link.record_stats(stats)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Stats not written (%s)", type(exc).__name__)
+
 def take_taps() -> "dict[str, int]":
     """The counts so far, and a fresh start."""
     global _taps
@@ -6824,6 +7115,7 @@ def _sample_usage_now(taps: "dict[str, int] | None" = None) -> None:
         family_link.record_taps(taps)
     except Exception as exc:
         logging.getLogger(__name__).debug("Button taps not written (%s)", type(exc).__name__)
+    _flush_stats_now()
     try:
         _check_usage_alarms(numbers, updates, users, jobs_ok, jobs_failed)
     except Exception:
