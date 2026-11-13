@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 REFS_MAX = 20000
 _refs: "OrderedDict[tuple[int, int], tuple[str, str]]" = OrderedDict()
+# The title Telegram gave the last time a pack was read back (last_sticker), so the private chat
+# can follow a rename made in Telegram's own sticker settings (bot.py, since 2.1.6). Bounded.
+TITLES_MAX = 5000
+_titles: "OrderedDict[str, str]" = OrderedDict()
 
 
 def remember(chat_id: int, message_id: int, pack_name: str, file_id: "str | None") -> None:
@@ -56,6 +60,19 @@ def sticker_of(message) -> "tuple[str, str] | None":
     if sticker is not None and sticker.set_name:
         return sticker.set_name, sticker.file_id
     return _refs.get((message.chat_id, message.message_id))
+
+
+def seen_title(pack_name: str) -> "str | None":
+    return _titles.get(pack_name)
+
+
+def _note_title(pack_name: str, title: "str | None") -> None:
+    if not title:
+        return
+    _titles[pack_name] = title
+    _titles.move_to_end(pack_name)
+    while len(_titles) > TITLES_MAX:
+        _titles.popitem(last=False)
 
 
 async def in_pack(bot, pack_name: "str | None", sticker) -> bool:
@@ -232,12 +249,17 @@ async def last_sticker(bot, pack_name: str) -> "tuple[str | None, int | None]":
     except Exception:
         logger.warning("Couldn't read the pack back after adding a sticker", exc_info=True)
         return None, None
+    _note_title(pack_name, getattr(sticker_set, "title", None))
     return sticker_set.stickers[-1].file_id, len(sticker_set.stickers)
 
 
-def added_text(lang: str, title: str, number: "int | None", emoji: str) -> str:
+def added_text(lang: str, title: str, number: "int | None", emoji: str, how: str = "") -> str:
     """What an added sticker's reply says: its place in the pack, or just that it went in when
-    the pack could not be read back."""
+    the pack could not be read back -- and `how` a clip was made to fit, if it was."""
+    if how:
+        if number is None:
+            return i18n.t(lang, "sticker_added_unnumbered_fit", title=title, emoji=emoji, how=how)
+        return i18n.t(lang, "sticker_added_to_fit", title=title, n=number, emoji=emoji, how=how)
     if number is None:
         return i18n.t(lang, "sticker_added_unnumbered", title=title, emoji=emoji)
     return i18n.t(lang, "sticker_added_to", title=title, n=number, emoji=emoji)

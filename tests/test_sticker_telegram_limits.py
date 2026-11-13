@@ -195,12 +195,14 @@ def test_a_clip_that_cannot_be_fetched_is_a_note_not_a_crash(bot, monkeypatch):
     async def go_ahead(*_a, **_k):
         return None
 
-    async def reply_text(self, text, **_):
+    async def send_message(chat_id, text, **kwargs):
+        # Since 2.1.6 the answer is a reply to the clip, sent with reply_parameters.
         bot.replies.append(text)
+        return SimpleNamespace(chat_id=chat_id, message_id=99)
 
     monkeypatch.setattr(bot, "refuse_new_work", go_ahead)
-    monkeypatch.setattr(Message, "reply_text", reply_text)
     fake = FakeBot(get_file=[TimedOut()] * 5)
+    fake.send_message = send_message
     context = SimpleNamespace(bot=fake, user_data={"status": None}, application=None)
     update = _media_update(3, document=Document(file_id="v", file_unique_id="w", mime_type="video/mp4",
                                                 file_name="a.mp4"))

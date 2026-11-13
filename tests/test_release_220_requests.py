@@ -536,21 +536,34 @@ def test_people_who_erased_their_data_leave_the_count_complete():
             conn.execute("DROP SCHEMA review_anon CASCADE")
 
 
-def test_a_picture_sent_during_a_question_goes_into_the_open_pack():
+def test_a_picture_sent_during_a_question_goes_into_the_open_pack(monkeypatch):
     import asyncio
     bot = load(STICKER, "bot")
-    calls = []
+    calls, held = [], []
 
     async def receive(update, context):
         calls.append(update)
         return bot.EDITING
 
+    async def hold(context, lang, item):
+        held.append(item["file_id"])
+
+    async def lang_of(*_):
+        return "en"
+    monkeypatch.setattr(bot, "_hold_item", hold)
+    monkeypatch.setattr(bot.i18n, "get_lang", lang_of)
     behind = bot._behind_question(receive)
     open_pack = SimpleNamespace(user_data={bot.STATUS_KEY: {"chat_id": 1, "message_id": 2}})
     # Added, and the question (None: the state it is in) keeps waiting.
     assert asyncio.run(behind("picture", open_pack)) is None and calls == ["picture"]
-    # With no pack open, nothing happens, as before.
-    assert asyncio.run(behind("other", SimpleNamespace(user_data={}))) is None and calls == ["picture"]
+    # With no pack open, the picture is held and the person asked which pack (since 2.1.6);
+    # the question still waits.
+    picture = SimpleNamespace(chat_id=1, message_id=3, sticker=None, photo=[SimpleNamespace(file_id="P")],
+                              animation=None, video=None, document=None)
+    update = SimpleNamespace(message=picture, effective_chat=SimpleNamespace(type="private"),
+                             effective_user=SimpleNamespace(id=1))
+    assert asyncio.run(behind(update, SimpleNamespace(user_data={}))) is None
+    assert calls == ["picture"] and held == ["P"]
 
 
 def test_the_co_edit_list_removes_the_invitation_its_button_shows(packs):

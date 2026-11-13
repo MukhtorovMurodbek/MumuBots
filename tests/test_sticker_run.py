@@ -3,6 +3,7 @@ should be in the newer version"): StickerBot's count of a run of pictures (2.1.4
 sticker's own reply; /gift for bots from 2.1.1 (2.1.2); /problems named the nightly report up to
 2.1.2 (2.1.3)."""
 import asyncio
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -96,21 +97,30 @@ def adding(monkeypatch):
         n = next(numbers)
         return f"file{n}", n + 10
 
-    async def reply_text(text, **kwargs):
+    async def send_message(chat_id, text, **kwargs):
+        # Since 2.1.6 each answer is a reply to its own item, sent with reply_parameters.
         replies.append(text)
-        return SimpleNamespace(chat_id=7, message_id=len(replies) + 100)
+        return SimpleNamespace(chat_id=chat_id, message_id=len(replies) + 100)
+
+    async def no_buttons(*args, **kwargs):
+        return None
 
     monkeypatch.setattr(bot, "_add_input_sticker", add)
+    monkeypatch.setattr(bot, "_pack_keyboard_for", no_buttons)
     monkeypatch.setattr(bot, "record_error", lambda exc: None)
     bot.replies, bot.broken = replies, broken
 
     def step(context, update, sticker="ok"):
         """One picture through _batch_item and _add_and_confirm, its reply recorded."""
+        item = {"chat": 7, "msg": update.update_id, "kind": "static", "file_id": "f", "set": None, "uid": None,
+                "at": time.time()}
+
         async def inner(update_, context_):
-            await bot._add_and_confirm(update_, context_, "en", sticker)
+            await bot._add_and_confirm(update_, context_, "en", sticker, item)
             return bot.EDITING
 
-        msg = SimpleNamespace(chat_id=7, message_id=update.update_id, reply_text=reply_text)
+        context.bot = SimpleNamespace(send_message=send_message)
+        msg = SimpleNamespace(chat_id=7, message_id=update.update_id)
         wrapped = SimpleNamespace(update_id=update.update_id, message=msg, effective_chat=update.effective_chat,
                                   effective_user=update.effective_user)
         return asyncio.run(bot._batch_item(wrapped, context, inner))
