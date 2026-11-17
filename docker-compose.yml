@@ -1,0 +1,25 @@
+# A local Postgres for development: one database for all five bots, as in production
+# (each bot makes its own schema in it).
+#
+#   docker compose up -d       start it (data persists in the pg-data volume)
+#   docker compose down        stop it (the data is still there next time)
+#   docker compose down -v     stop it and wipe the local data
+#
+# Local .env:  DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+# Tests use the same server by default (TEST_ADMIN_URL); they make and drop their own database.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pg-data:

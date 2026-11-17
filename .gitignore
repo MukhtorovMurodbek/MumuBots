@@ -1,0 +1,33 @@
+# Secrets: never commit these.
+.env
+.env.*
+!.env.example
+*.key
+data_key
+cookies*.txt
+
+# Runtime data: per-bot logs, per-bot .env files, downloads, uploads.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Private notes: the security notes, runbooks and release lists. Kept out of the public
+# repository; shared/security/README.md is the public summary.
+private/
+# Claude Code's local files; only the project notes (.claude/CLAUDE.md) are shared.
+.claude/*
+!.claude/CLAUDE.md
+CLAUDE.local.md
