@@ -17,6 +17,7 @@ import platforms
 import sandbox
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 MAX_DOWNLOAD_MB = int(os.environ.get("DBOT_MAX_DOWNLOAD_MB", "48"))
 
@@ -146,18 +147,25 @@ LOGIN_WALL_MARKERS = (
 )
 
 
+def _on(host: str, *domains: str) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _site_of(url: str) -> str:
-    lowered = url.lower()
+    try:
+        host = (urlsplit(url.strip()).hostname or "").lower()
+    except ValueError:
+        return "other"
     for site in ("instagram", "tiktok", platforms.UNADVERTISED, "pinterest", "reddit"):
-        if site in lowered:
+        if site in host:
             return site
-    if platforms.UNADVERTISED_SHORT_HOST in lowered:
+    if _on(host, platforms.UNADVERTISED_SHORT_HOST):
         return platforms.UNADVERTISED
-    if "twitter.com" in lowered or "//x.com" in lowered:
+    if _on(host, "twitter.com", "x.com", "fxtwitter.com", "vxtwitter.com", "fixupx.com"):
         return "twitter"
-    if "redd.it" in lowered:
+    if _on(host, "redd.it"):
         return "reddit"
-    if "pin.it" in lowered:
+    if _on(host, "pin.it"):
         return "pinterest"
     return "other"
 

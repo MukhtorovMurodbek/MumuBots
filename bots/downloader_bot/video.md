@@ -138,6 +138,12 @@ having crashed and helpfully shown its documentation.
 Which per-site cookie jar and proxy apply. The split matters: each site's problem wants an account on that site, and handing either site the other's cookies is worse
 than handing it none.
 
+Read from the link's host, never from the whole link (2026-11-18, after the first code scan of the new
+repository): matched anywhere, a Reddit post in r/instagram was taken for Instagram and given
+Instagram's cookies and proxy, and a link that merely carried "twitter.com" in its query was taken
+for X. A site's name inside the host still counts, so its media servers (cdninstagram.com,
+tiktokcdn.com) keep their site; the short hosts and X's are matched as whole domains.
+
 ### `BlockedBySource`
 
 The site refused the server, not the link.

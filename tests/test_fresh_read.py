@@ -60,3 +60,29 @@ def test_a_pick_from_the_picker_is_fetched_from_a_fresh_read(tmp_path):
     (tmp_path / "y.mp4").write_bytes(b"0")
     video._download(mock.Mock(YoutubeDL=_FakeYDL), LINK, 48, out, None, None, 720, True)
     assert _FakeYDL.log == [("extract", True, "136+140")]
+
+
+@pytest.mark.parametrize("url,site", [
+    ("https://www.instagram.com/reel/abc/", "instagram"),
+    ("https://scontent-fra5-1.cdninstagram.com/v/t51.jpg", "instagram"),
+    ("https://www.tiktok.com/@a/video/1", "tiktok"),
+    ("https://v16-webapp.tiktokcdn.com/x/video.mp4", "tiktok"),
+    ("https://www.reddit.com/r/instagram/comments/abc/x/", "reddit"),
+    ("https://v.redd.it/abc123", "reddit"),
+    ("https://x.com/a/status/1", "twitter"),
+    ("https://mobile.twitter.com/a/status/1", "twitter"),
+    ("https://example.org/?next=https://twitter.com/a", "other"),
+    ("https://evil.example/x.com/a", "other"),
+    ("https://pin.it/abc", "pinterest"),
+    ("https://br.pinterest.com/pin/1/", "pinterest"),
+    ("not a link", "other"),
+])
+def test_a_link_s_site_is_read_from_its_host(url, site):
+    assert load(DOWNLOADER, "video")._site_of(url) == site
+
+
+def test_the_unadvertised_site_and_its_short_links_keep_their_site():
+    video = load(DOWNLOADER, "video")
+    assert video._site_of(f"https://www.{SITE}.com/watch?v=abcdefghijk") == SITE
+    assert video._site_of(f"https://{SHORT}/abcdefghijk") == SITE
+    assert video._site_of(f"https://www.reddit.com/r/{SITE}/comments/x/") == "reddit"
