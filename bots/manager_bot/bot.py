@@ -1611,8 +1611,7 @@ async def _queue_credit_note(note: dict) -> bool:
                 db.queue_command, bot_id, "tellcredit", f"{note['user_id']} {note['before']} {note['after']}",
                 note["admin"], note["chat"])
         except Exception:
-            logger.warning("Could not ask %s to tell %s about the new balance", bot_id, note["user_id"],
-                           exc_info=True)
+            logger.warning("Could not ask %s to pass on a new balance", bot_id, exc_info=True)
             continue
         _CREDIT_NOTES[command_id] = dict(note, bot=bot_id)
         return True
@@ -1631,7 +1630,7 @@ async def _deliver_credit_note(context, note: dict, result: dict) -> None:
     try:
         await context.bot.send_message(chat_id=note["chat"], text=text)
     except Exception:
-        logger.warning("Could not report the credit note for %s", note["user_id"], exc_info=True)
+        logger.warning("Could not report a credit note back to the operator", exc_info=True)
 
 
 EVENTS_DEFAULT = 15
