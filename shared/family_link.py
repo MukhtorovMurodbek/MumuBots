@@ -1797,6 +1797,19 @@ async def _cmd_whois(context, args):
     return "\n".join(lines), None, None
 
 
+async def _cmd_tellcredit(context, args):
+    if len(args) != 3 or not all(arg.lstrip("-").isdigit() for arg in args):
+        return "Usage: tellcredit <user_id> <before> <after>", None, None
+    user_id, before, after = (int(arg) for arg in args)
+    lang = await asyncio.to_thread(_language_of, user_id)
+    try:
+        await context.bot.send_message(chat_id=user_id,
+                                       text=phrase("credit_updated", lang, before=before, after=after))
+    except Exception as exc:
+        return f"not reached ({type(exc).__name__}: {exc})", None, None
+    return "told", None, None
+
+
 async def _cmd_message(context, args):
     if len(args) < 2 or not args[0].lstrip("-").isdigit():
         return "Usage: message <user_id> <text>", None, None
@@ -1931,6 +1944,7 @@ _PLAIN = {
     "gift_granted": "\U0001f381 Mumu bots passed 100 users — thanks! {amount} ⚡ of free credit has been added, "
                     "good until {date}: about {conversions} paid conversions in {convert} or big downloads "
                     "in {download}. /balance",
+    "credit_updated": "\U0001f381 The balance has been updated from {before} ⚡ to {after} ⚡!",
     "gift_claimed": "\U0001f381 Gift: {amount} ⚡ of free credit — Mumu bots passed {users} users, thanks!\n"
                     "Good until {date} (UTC): about {conversions} paid conversions in {convert} or big "
                     "downloads in {download}.\n/balance",
@@ -2399,6 +2413,7 @@ COMMANDS = {
     "warnbusy": _cmd_warnbusy,
     "resume": _cmd_resume,
     "gift": _cmd_gift,
+    "tellcredit": _cmd_tellcredit,
 }
 
 COMMAND_HELP = {
@@ -2420,6 +2435,7 @@ COMMAND_HELP = {
     "warnbusy": "tell whoever is mid-something that it is about to be reset",
     "resume": "reopen, and tell everyone who was turned away",
     "gift": "gift <key> <credits> <last day YYYY-MM-DD> [--go] -- bonus credit for everyone, once each; counts unless --go",
+    "tellcredit": "tellcredit <user_id> <before> <after> -- tell one person, as that bot, that the balance changed",
 }
 
 

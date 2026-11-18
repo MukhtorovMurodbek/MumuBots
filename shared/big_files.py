@@ -270,10 +270,11 @@ async def download(chat_id: int, message_id: int, dest, expected_size: int = 0,
 
 
 async def send_document(chat_id: int, path, filename: str, caption: str = "", progress=None,
-                        waiting=None, video: "dict | None" = None) -> None:
+                        waiting=None, video: "dict | None" = None, html: bool = False) -> None:
     if not usable(chat_id):
         raise Unavailable("big files are only sent in private chats")
     await _run({"op": "send", "chat_id": chat_id, "path": str(path), "filename": filename, "caption": caption,
+                "parse_mode": "html" if html else None,
                 "limit_s": transfer_limit_s(Path(path).stat().st_size), "video": video}, progress, waiting)
 
 
@@ -431,7 +432,7 @@ async def _child_send(client, job: dict, progress) -> None:
             h=int(video.get("height") or 0), supports_streaming=True))
     await client.send_file(
         types.PeerUser(job["chat_id"]), file=uploaded, caption=job.get("caption") or None,
-        force_document=not video, supports_streaming=bool(video), parse_mode=None,
+        force_document=not video, supports_streaming=bool(video), parse_mode=job.get("parse_mode"),
         attributes=attributes)
 
 

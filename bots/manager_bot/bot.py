@@ -1531,18 +1531,22 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         who = update.effective_user
         detail = f"by admin {who.id}" + (f" (@{who.username})" if who.username else "")
         if kind == "set":
+            before = await asyncio.to_thread(family_link.star_balance, user_id)
             after = await asyncio.to_thread(
                 family_link.set_star_balance, user_id, amount, "adjustment", detail)
             what = f"set to {after} ⚡"
         else:
             after = await asyncio.to_thread(
                 family_link.move_stars, user_id, amount, "adjustment", detail)
+            before = after - amount
             what = f"{'+' if amount > 0 else ''}{amount} ⚡ → {after} ⚡"
         await asyncio.to_thread(
             family_link.report_event, "info", "payment",
             f"Balance of {user_id} {what} by admin {who.id}")
         await update.message.reply_text(
             f"⚡ <code>{user_id}</code>: {what}", parse_mode=ParseMode.HTML)
+        if after > before:
+            await _tell_credit(update, user_id, before, after)
 
     totals = await asyncio.to_thread(family_link.star_totals, user_id)
     rows = await asyncio.to_thread(family_link.star_ledger_for, user_id, BALANCE_HISTORY_ROWS)
@@ -1585,6 +1589,49 @@ async def addcredit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"⚡ +{amount} added to <code>{user_id}</code>. Balance now {after} ⚡.",
         parse_mode=ParseMode.HTML)
+    await _tell_credit(update, user_id, after - amount, after)
+
+
+CREDIT_NOTE_BOTS = ("downloaderbot", "convertbot", "stickerbot", "anonbot")
+_CREDIT_NOTES: "dict[int, dict]" = {}
+
+
+async def _tell_credit(update: Update, user_id: int, before: int, after: int) -> None:
+    note = {"user_id": user_id, "before": before, "after": after, "left": list(CREDIT_NOTE_BOTS),
+            "chat": update.effective_chat.id, "admin": update.effective_user.id, "tried": []}
+    if not await _queue_credit_note(note):
+        await update.message.reply_text("📨 The person could not be told: no bot took the message.")
+
+
+async def _queue_credit_note(note: dict) -> bool:
+    while note["left"]:
+        bot_id = note["left"].pop(0)
+        try:
+            command_id = await asyncio.to_thread(
+                db.queue_command, bot_id, "tellcredit", f"{note['user_id']} {note['before']} {note['after']}",
+                note["admin"], note["chat"])
+        except Exception:
+            logger.warning("Could not ask %s to tell %s about the new balance", bot_id, note["user_id"],
+                           exc_info=True)
+            continue
+        _CREDIT_NOTES[command_id] = dict(note, bot=bot_id)
+        return True
+    return False
+
+
+async def _deliver_credit_note(context, note: dict, result: dict) -> None:
+    name = (resolve_bot(note["bot"]) or {}).get("name", note["bot"])
+    if result["ok"] and (result["output"] or "").startswith("told"):
+        text = f"📨 {note['user_id']} was told through {name}: {note['before']} → {note['after']} ⚡."
+    else:
+        note["tried"].append(f"{name}: {(result['output'] or result['status'])[:100]}")
+        if await _queue_credit_note(note):
+            return
+        text = f"📨 {note['user_id']} could not be told about the new balance. " + "; ".join(note["tried"])
+    try:
+        await context.bot.send_message(chat_id=note["chat"], text=text)
+    except Exception:
+        logger.warning("Could not report the credit note for %s", note["user_id"], exc_info=True)
 
 
 EVENTS_DEFAULT = 15
@@ -2663,6 +2710,11 @@ async def result_pump(context: ContextTypes.DEFAULT_TYPE) -> None:
         group = _FANOUTS.pop(result["id"], None)
         if group is not None:
             await _deliver_fanout(context, group, result)
+            continue
+
+        credit = _CREDIT_NOTES.pop(result["id"], None)
+        if credit is not None:
+            await _deliver_credit_note(context, credit, result)
             continue
 
         chat_id = result["reply_chat_id"]

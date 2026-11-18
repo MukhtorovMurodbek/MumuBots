@@ -706,6 +706,31 @@ is /balance &lt;id> +N under a name nobody has to remember the syntax of.
 Recorded as a grant rather than a bonus, so it never expires, and in the
 family log so it shows up in /events beside everything else.
 
+The person is told too (2026-11-18): "The balance has been updated from x to y!", in their language,
+by \_tell_credit. So is somebody whose balance /balance raises (+N, or =N above what it was); a
+balance taken down tells nobody.
+
+_At `CREDIT_NOTE_BOTS = ("downloaderbot", "convertbot", "stickerbot", "anonbot")`:_
+
+The order the public bots are asked in. A bot can only message somebody who has started it, so the
+first one that reaches the person tells them; ⚡ is spent in DownloaderBot and ConvertBot, so those
+come first.
+
+### `_tell_credit()`
+
+Starts the chain for one change of balance; the operator hears at once if no bot took the request.
+
+### `_queue_credit_note()`
+
+The next bot in line, asked over the bus (family_link's tellcredit). The request is remembered by
+its command id in \_CREDIT_NOTES, where result_pump finds it.
+
+### `_deliver_credit_note()`
+
+One bot's answer: "told" ends the chain with a line to the operator saying which bot told them;
+anything else (never started that bot, blocked it, the bot is down) asks the next bot, and when
+none is left the operator hears every reason.
+
 _At `EVENTS_DEFAULT = 15`:_
 
 /events: how many it shows when no number is given, and the most it will.
@@ -1173,6 +1198,8 @@ nobody claimed.
 - At `await _after_a_stop(context, result)`:
   An accepted /shutdown also asks for a copy of the database (shutdown_copy).
   A failure there is logged and the answer is still delivered.
+- At `credit = _CREDIT_NOTES.pop(result["id"], None)`:
+  An answer to a credit note goes to \_deliver_credit_note, never to the chat as a raw result.
 - At `trace = _PING_TRACES.pop(result["id"], None)`:
   A /ping is answered by rewriting the message that announced it,
   with the whole round trip broken down -- not by a second message

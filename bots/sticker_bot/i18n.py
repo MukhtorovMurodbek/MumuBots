@@ -281,6 +281,7 @@ STRINGS = {
         "update_will_reset": "🔧 The bot is about to be updated, and the current step will be reset. It can be started again in a few minutes.",
         "update_done_try_now": "✅ Update done — try again now.",
         "gift_granted": "🎁 Mumu bots passed 100 users — thanks! {amount} ⚡ of free credit has been added, good until {date}: about {conversions} paid conversions in {convert} or big downloads in {download}. /balance",
+        "credit_updated": "🎁 The balance has been updated from {before} ⚡ to {after} ⚡!",
         "video_convert_ffmpeg_missing": (
             "ffmpeg isn't installed on this host, so GIF/video stickers can't "
             "be converted. Install it with 'apt install ffmpeg' (Linux), "
@@ -629,6 +630,7 @@ STRINGS = {
         "update_will_reset": "🔧 Bot hozir yangilanadi va joriy amal to'xtaydi. Bir necha daqiqadan keyin qaytadan boshlash mumkin.",
         "update_done_try_now": "✅ Yangilanish tugadi — endi qayta urinib ko'ring.",
         "gift_granted": "🎁 Mumu botlari 100 foydalanuvchidan oshdi — rahmat! {amount} ⚡ bepul kredit qo'shildi, {date} gacha amal qiladi: {convert} da taxminan {conversions} ta pullik konvertatsiya yoki {download} da katta fayllar. /balance",
+        "credit_updated": "🎁 Balans {before} ⚡ dan {after} ⚡ ga yangilandi!",
         "video_convert_ffmpeg_missing": (
             "Bu serverda ffmpeg o'rnatilmagan, shuning uchun GIF/video stikerlarni "
             "aylantirib bo'lmaydi. Uni 'apt install ffmpeg' (Linux), 'brew install "
@@ -1010,6 +1012,7 @@ STRINGS = {
         "update_will_reset": "🔧 Бот сейчас обновится, и текущее действие сбросится. Начать заново можно через несколько минут.",
         "update_done_try_now": "✅ Обновление готово — попробуйте снова.",
         "gift_granted": "🎁 У Mumu-ботов уже больше 100 пользователей — спасибо! Начислено {amount} ⚡ бесплатного кредита до {date}: это около {conversions} платных конвертаций в {convert} или больших загрузок в {download}. /balance",
+        "credit_updated": "🎁 Баланс обновлён: было {before} ⚡, стало {after} ⚡!",
         "video_convert_ffmpeg_missing": (
             "На этом сервере не установлен ffmpeg, поэтому GIF/видео-стикеры нельзя "
             "преобразовать. Установите его через 'apt install ffmpeg' (Linux), "

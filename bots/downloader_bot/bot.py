@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import contextvars
 import hashlib
+import html
 import logging
 import os
 import shutil
@@ -21,6 +22,7 @@ from telegram import (
     BotCommand, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
     LinkPreviewOptions, MessageEntity, Update, InlineKeyboardButton, InlineKeyboardMarkup,
 )
+from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 
 NO_PREVIEW = {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
@@ -1058,13 +1060,11 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if os.path.getsize(out_path) > large_files.BOT_API_SEND_BYTES:
                 raise _MergeStop("merge_too_big")
 
-            caption = None
-            if await asyncio.to_thread(get_caption_enabled, user_id):
-                caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+            caption = _media_caption(lang, await asyncio.to_thread(get_caption_enabled, user_id))
             with open(out_path, "rb") as handle:
                 await message.reply_document(
                     handle, filename=merge.output_name(platform, kind),
-                    caption=caption, read_timeout=120, write_timeout=120,
+                    caption=caption, parse_mode=ParseMode.HTML, read_timeout=120, write_timeout=120,
                     disable_content_type_detection=True,
                 )
             await status.delete(context.bot)
@@ -1131,7 +1131,8 @@ async def _reply_image_with_button(update, context, data: bytes, stem: str, lang
     token = _remember_delivery(context, platform, url, lossless)
     sent = await _reply_image(update, data, stem,
                               reply_markup=None if group is not None else _nudge_kb(lang, token, lossless),
-                              lossless=lossless)
+                              lossless=lossless,
+                              caption=_media_caption(lang, await _credit_wanted(update.effective_user.id)))
     filename = f"{stem}.{_image_extension(data)}"
     await asyncio.to_thread(delivery_cache.keep_bytes, update.effective_user.id, platform, url,
                             resolvers.MediaItem("photo", filename=filename), data, filename,
@@ -1139,19 +1140,30 @@ async def _reply_image_with_button(update, context, data: bytes, stem: str, lang
     return sent
 
 
+COPYRIGHT_URL = (os.environ.get("TERMS_URL") or "").strip()
+
+
+def _media_caption(lang: str, credit: bool) -> str:
+    caption = (i18n.t(lang, "copyright_note", url=html.escape(COPYRIGHT_URL, quote=True)) if COPYRIGHT_URL
+               else i18n.t(lang, "copyright_note_plain"))
+    if credit:
+        caption += "\n\n" + html.escape(i18n.t(lang, "download_credit_caption", username=BOT_USERNAME))
+    return caption
+
+
 async def _reply_image(update: Update, data: bytes, stem: str, reply_markup=None,
-                       lossless: bool | None = None):
+                       lossless: bool | None = None, caption: "str | None" = None):
     if lossless is None:
         lossless = await asyncio.to_thread(get_lossless_enabled, update.effective_user.id)
     if lossless:
         return await update.effective_message.reply_document(
             document=BytesIO(data),
             filename=f"{stem}.{_image_extension(data)}",
-            reply_markup=reply_markup,
+            reply_markup=reply_markup, caption=caption, parse_mode=ParseMode.HTML,
             disable_content_type_detection=True,
         )
     return await update.effective_message.reply_photo(
-        BytesIO(data), reply_markup=reply_markup)
+        BytesIO(data), reply_markup=reply_markup, caption=caption, parse_mode=ParseMode.HTML)
 
 
 @contextmanager
@@ -1191,9 +1203,7 @@ async def _send_media(update, context, items_with_paths, lang,
                       probing: "video.ProbeRun | None" = None,
                       title: "str | None" = None, duration: "int | None" = None) -> "list[tuple[str, str]] | None":
     group = _GROUP.get()
-    caption = None
-    if await _credit_wanted(update.effective_user.id):
-        caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+    caption = _media_caption(lang, await _credit_wanted(update.effective_user.id))
     if lossless is None:
         lossless = (group["as_file"] if group is not None
                     else await asyncio.to_thread(get_lossless_enabled, update.effective_user.id))
@@ -1227,26 +1237,26 @@ async def _send_media(update, context, items_with_paths, lang,
             if lossless:
                 sent = await message.reply_document(
                     f, filename=os.path.basename(item.filename or path),
-                    caption=caption, reply_markup=keyboard,
+                    caption=caption, parse_mode=ParseMode.HTML, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                     disable_content_type_detection=True,
                 )
             elif item.kind == "video":
                 sent = await message.reply_video(
-                    f, caption=caption, reply_markup=keyboard,
+                    f, caption=caption, parse_mode=ParseMode.HTML, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                     **shape,
                 )
             elif item.kind == "audio":
                 ext = os.path.splitext(item.filename or path or "")[1] or ".m4a"
                 sent = await message.reply_audio(
-                    f, caption=caption, reply_markup=keyboard, title=(title or None) and title[:64],
+                    f, caption=caption, parse_mode=ParseMode.HTML, reply_markup=keyboard, title=(title or None) and title[:64],
                     filename=_audio_filename(title, ext), duration=duration or None,
                     read_timeout=120, write_timeout=120,
                 )
             else:
                 sent = await message.reply_photo(
-                    f, caption=caption, reply_markup=keyboard,
+                    f, caption=caption, parse_mode=ParseMode.HTML, reply_markup=keyboard,
                     read_timeout=120, write_timeout=120,
                 )
         file_id = _file_id_of(sent, item.kind, lossless)
@@ -1266,11 +1276,11 @@ async def _send_media(update, context, items_with_paths, lang,
                 if lossless:
                     group.append(InputMediaDocument(
                         handle, filename=os.path.basename(item.filename or path),
-                        caption=cap, disable_content_type_detection=True))
+                        caption=cap, parse_mode=ParseMode.HTML, disable_content_type_detection=True))
                 elif item.kind == "video":
-                    group.append(InputMediaVideo(handle, caption=cap, **shapes[n]))
+                    group.append(InputMediaVideo(handle, caption=cap, parse_mode=ParseMode.HTML, **shapes[n]))
                 else:
-                    group.append(InputMediaPhoto(handle, caption=cap))
+                    group.append(InputMediaPhoto(handle, caption=cap, parse_mode=ParseMode.HTML))
             sent_group = await message.reply_media_group(
                 group, read_timeout=120, write_timeout=120)
         finally:
@@ -1584,7 +1594,8 @@ async def _large_download(update, context, status, lang, platform: str, url: str
             too_big = isinstance(exc, net.TooLarge) or exc.kind == "too_big"
             if not too_big:
                 note_job(False)
-            await status.set(context.bot, i18n.t(lang, "large_files_too_big", max=large_files.LARGE_MAX_MB)
+            await status.set(context.bot, i18n.t(lang, "large_files_too_big", max=large_files.LARGE_MAX_MB,
+                                                 minutes=video.MAX_DURATION_S // 60)
                              if too_big else i18n.t(lang, "download_all_routes_failed"), **NO_PREVIEW)
             return False
         except net.FetchError as exc:
@@ -1634,9 +1645,7 @@ async def _credit_wanted(user_id: int) -> bool:
 
 
 async def _send_large(update, context, items_with_paths, lang, status=None) -> None:
-    caption = None
-    if await _credit_wanted(update.effective_user.id):
-        caption = i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)
+    caption = _media_caption(lang, await _credit_wanted(update.effective_user.id))
     probing = video.ProbeRun()
 
     async def waiting() -> None:
@@ -1647,8 +1656,8 @@ async def _send_large(update, context, items_with_paths, lang, status=None) -> N
         if os.path.getsize(path) > large_files.BOT_API_SEND_BYTES:
             shape = await video.probe(path, probing) if item.kind == "video" else None
             await big_files.send_document(update.effective_chat.id, path,
-                                          os.path.basename(item.filename or path), caption or "",
-                                          waiting=waiting,
+                                          os.path.basename(item.filename or path), caption,
+                                          waiting=waiting, html=True,
                                           video=None if shape is None else {
                                               "duration": shape.duration or 0, "width": shape.width,
                                               "height": shape.height})

@@ -736,6 +736,20 @@ puts under a video. Reddit and Twitter reach the chat through here rather
 than through \_send_media, and a button that appeared under a downloaded
 video but not under a downloaded picture would read as a bug.
 
+_At `COPYRIGHT_URL = (os.environ.get("TERMS_URL") or "").strip()`:_
+
+Where the copyright note sends a rights holder: this bot's terms in LEGAL.md, whose top line is the
+operator contact. main.py gives every bot its own TERMS_URL.
+
+### `_media_caption()`
+
+What goes under every file the bot sends of its own (2026-11-18, shipped first in MumuCombined 2.2.0):
+a short note that the material may be protected by copyright, with a link for a rights holder to
+report it, and then the credit line for whoever keeps it on. HTML, so every send that carries it
+says so (parse_mode), the MTProto route included (big_files.send_document's `html`). Asked for
+"just in case", the way other download bots mark what they send. A channel's post keeps its own
+text: what is put into it is the channel's, not the bot's.
+
 ### `_reply_image()`
 
 One image back, compressed as a photo or verbatim as a file -- see

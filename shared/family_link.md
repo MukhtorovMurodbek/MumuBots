@@ -925,6 +925,13 @@ release, from the process itself rather than from a guess about the image.
 `versions` sends the whole list as a requirements-style file;
 `versions <name>` answers the matching lines as text.
 
+### `_cmd_tellcredit()`
+
+Tells one person, as this bot and in their language, that the operator changed their ⚡ balance:
+"told", or why not. Asked for on 2026-11-18 ("give updates to the person who is receiving a gift
+from me personally") and shipped first in MumuCombined 2.2.0. ManagerBot asks the public bots one
+at a time (bot.py, CREDIT_NOTE_BOTS), because a bot can only message somebody who has started it.
+
 ### `_cmd_message()`
 
 Sends as THIS bot -- that is the whole point of routing it here

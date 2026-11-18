@@ -210,6 +210,11 @@ RuntimeError for anything else the child reported.
 
 - `continue` — a line over the limit: not one the child wrote; readline dropped it
 
+### `send_document()`
+
+`html` sends the caption as HTML (DownloaderBot's copyright note has a link and italics); without it
+the caption is plain text, as it always was.
+
 ### `close()`
 
 Stop any transfer still running -- the bot is shutting down. Never raises.
