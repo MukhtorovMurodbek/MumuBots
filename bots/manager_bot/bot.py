@@ -2891,7 +2891,6 @@ def _help_page_promo() -> str:
     amount = family_link.PROMO_CREDITS
     users = family_link.PROMO_USERS
     claim_days = family_link.PROMO_CLAIM_DAYS
-    spend_days = family_link.PROMO_SPEND_DAYS
     minutes = PROMO_COUNT_SECONDS // 60
     return f"""🎉 /promo — the {amount} ⚡ gift for everyone who writes to ConvertBot or DownloaderBot
 
@@ -2909,7 +2908,7 @@ What /promo shows depends on where the gift stands:
 Once started:
 • Claiming stays open for {claim_days} days: until midnight UTC at the end of the {claim_days}th day after the start.
 • The first message a person sends to ConvertBot or DownloaderBot in that time gives them {amount} ⚡ of bonus credit, once in all, not once per bot. They are told in their own language.
-• Each gift can be spent for {spend_days} days from the day it was claimed. What is left then disappears at the end of that day, UTC.
+• Every gift can be spent until {family_link.promo_spend_by()}, whenever it was claimed. What is left then disappears at the end of that day, UTC.
 • AnonBot shows the ad once to each person who writes to it and does not have the gift yet: not on the first /start of an inbox link, not in the middle of a question, and not again after a restart.
 
 /promo stop ends the claiming at once. Credit already given stays and can be spent until it runs out. Before the start, or after the end, there is nothing to stop.
@@ -3487,12 +3486,14 @@ def _promo_status_text(started: datetime, closes: datetime, claims: int, seen: "
 def _promo_card_text(count: int) -> str:
     closes = family_link.promo_closes_for(datetime.now(timezone.utc))
     claim_by = html.escape(_promo_last_day(closes))
-    amount, spend_days = family_link.PROMO_CREDITS, family_link.PROMO_SPEND_DAYS
+    amount = family_link.PROMO_CREDITS
     return (
         f"Start the {amount} ⚡ gift? This can be done once.\n"
-        f"• Anyone who writes to ConvertBot or DownloaderBot until {claim_by} (the end of that day, UTC) "
-        f"gets {amount} ⚡ of bonus credit, once, automatically, and a notice.\n"
-        f"• Each gift can be spent for {spend_days} days from the day it is claimed.\n"
+        f"• ConvertBot and DownloaderBot offer it to everyone who writes to them, with a button; /gift "
+        f"claims it too. It can be claimed until {claim_by} (the end of that day, UTC): {amount} ⚡ of "
+        f"bonus credit, once, and a notice saying until when it lasts.\n"
+        f"• Every gift can be spent until {html.escape(family_link.promo_spend_by())} (the end of that day, "
+        f"UTC), whenever it was claimed.\n"
         f"• AnonBot shows this ad once to each person who writes to it, until then:\n\n"
         f"{family_link.promo_ad('en', closes)}\n\n"
         f"Unique users now: {count}."

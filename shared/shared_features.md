@@ -255,13 +255,14 @@ that arrive a hundred at a time.
   with at most PER_USER_WAITING_MAX waiting (PerUserUpdateProcessor),
   and a download still has its own limits.
 
-## The 220 ⚡ gift, claimed by writing (ConvertBot and DownloaderBot, 2.2.0)
+## The 220 ⚡ gift, claimed with a button or /gift (ConvertBot and DownloaderBot, 2.2.0)
 
 While the gift is open (family_link, "The 220 ⚡ gift"), the first message
-somebody sends one of these two bots gives it to them -- once across the
-family -- and tells them. The bot's own answer is never held up for it: the
-handler only decides whether to look, and the reading, the claim and the
-notice run as a task of their own.
+somebody sends one of these two bots gets the offer, with its dates and a
+button; the button or /gift gives it to them -- once across the family --
+and tells them until when it can be spent. The bot's own answer is never
+held up by the offer: the handler only decides whether to look, and the
+reading and the offer run as a task of their own.
 
 _At `_promo_claiming: set = set()`:_
 
@@ -280,13 +281,29 @@ this bot if any, else the one their Telegram app is set to, else English.
 Never i18n.get_lang, which would cache "en" for them as if they had chosen
 it -- and never written back, so the picker still decides.
 
-### `_claim_and_tell()`
+_At `PROMO_CALLBACK = "promogift"`:_
+
+The offer's button. Since 2026-11-18 (first in MumuCombined 2.2.0) the gift is claimed on purpose
+-- the button or /gift -- rather than by any first message: the operator asked for it, and the offer
+can then say the dates before anything is given.
+
+### `_offer_gift()`
+
+The first private message while the gift is open, from somebody who has not had it, gets the
+offer: the amount, the last day to claim it (UTC), the day it stops being spendable, and the
+button. Once per person per process (PROMO_DONE_KEY): a restart may offer it once more, which is
+cheaper than a table for it.
 
 - At `if window is not None and now >= window[1]:`:
   Not started yet (nothing remembered: it may start later), or over.
-- At `log.warning("The gift could not be claimed (%s); the next message tries again", type(exc …`:
-  Nothing was given (a claim is one transaction) and nothing is
-  remembered, so their next message tries again.
+- At `log.warning("The gift could not be offered (%s); the next message tries again", type(exc).__name__)`:
+  Nothing is remembered, so their next message tries again.
+
+### `_claim_and_tell()`
+
+The button or /gift: the gift and a notice saying until when it can be spent, or why not -- already
+claimed (one per person), or nothing open.
+
 - At `log.debug("The gift's notice could not be sent", exc_info=True)`:
   The credit is theirs either way, and /balance shows it.
 
@@ -294,8 +311,9 @@ it -- and never written back, so the picker still decides.
 
 Register in a group of its OWN (python-telegram-bot runs one handler per
 group), after the flood gate's: somebody being throttled claims nothing.
-Only a new message in a private chat counts -- not a button, an edit or a
-group -- because "the first message they send" is what was asked for.
+/gift and the button come first in that group and stop there, so no other
+handler answers the command. Any other new message in a private chat may
+get the offer -- not an edit or a group.
 
 ## Donation reminder + /donate (Telegram Stars)
 

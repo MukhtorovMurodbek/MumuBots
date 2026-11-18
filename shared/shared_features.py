@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import contextvars
 import gc
 import logging
@@ -24,7 +25,10 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict, NetworkError, RetryAfter
-from telegram.ext import ApplicationHandlerStop, BaseUpdateProcessor, ConversationHandler, TypeHandler
+from telegram.ext import (
+    ApplicationHandlerStop, BaseUpdateProcessor, CallbackQueryHandler, CommandHandler, ConversationHandler,
+    TypeHandler, filters,
+)
 
 import psycopg
 
@@ -265,7 +269,10 @@ def _notice_language(user_id: int, telegram_code: "str | None") -> str:
     return code if code in i18n.SUPPORTED_LANGUAGES else "en"
 
 
-async def _claim_and_tell(context, user_id: int, chat_id: int, telegram_code: "str | None" = None) -> None:
+PROMO_CALLBACK = "promogift"
+
+
+async def _offer_gift(context, user_id: int, chat_id: int, telegram_code: "str | None" = None) -> None:
     log = logging.getLogger(__name__)
     try:
         window = await asyncio.to_thread(family_link.promo_window)
@@ -274,23 +281,56 @@ async def _claim_and_tell(context, user_id: int, chat_id: int, telegram_code: "s
             if window is not None and now >= window[1]:
                 _promo_state["over"] = True
             return
-        outcome, expires = await asyncio.to_thread(family_link.claim_promo_gift, user_id)
+        if await asyncio.to_thread(family_link.promo_given_to, user_id):
+            context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
+            return
+        lang = await asyncio.to_thread(_notice_language, user_id, telegram_code)
+        context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
+        button = InlineKeyboardButton(family_link.phrase("gift_claim_button", lang, amount=family_link.PROMO_CREDITS),
+                                      callback_data=PROMO_CALLBACK)
+        await context.bot.send_message(chat_id=chat_id, text=family_link.promo_offer(lang, window[1]),
+                                       reply_markup=InlineKeyboardMarkup([[button]]))
     except Exception as exc:
-        log.warning("The gift could not be claimed (%s); the next message tries again", type(exc).__name__)
-        return
+        log.warning("The gift could not be offered (%s); the next message tries again", type(exc).__name__)
+        context.user_data.pop(PROMO_DONE_KEY, None)
     finally:
         _promo_claiming.discard(user_id)
-    context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
-    if outcome != family_link.PROMO_GIVEN:
-        return
+
+
+async def _claim_and_tell(context, user_id: int, chat_id: int, telegram_code: "str | None" = None) -> None:
+    log = logging.getLogger(__name__)
     try:
-        lang = await asyncio.to_thread(_notice_language, user_id, telegram_code)
-        await context.bot.send_message(chat_id=chat_id, text=family_link.promo_notice(lang, expires))
+        outcome, expires = await asyncio.to_thread(family_link.claim_promo_gift, user_id)
+    except Exception as exc:
+        log.warning("The gift could not be claimed (%s)", type(exc).__name__)
+        return
+    lang = await asyncio.to_thread(_notice_language, user_id, telegram_code)
+    if outcome == family_link.PROMO_GIVEN:
+        text = family_link.promo_notice(lang, expires)
+    elif outcome == family_link.PROMO_HAD:
+        text = family_link.phrase("gift_already_had", lang)
+    else:
+        text = family_link.phrase("gift_not_open", lang)
+    context.user_data[PROMO_DONE_KEY] = family_link.PROMO_KEY
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=text)
     except Exception:
         log.debug("The gift's notice could not be sent", exc_info=True)
 
 
 def attach_promo_claim(app, group: int = -2) -> None:
+    async def _claim_now(update, context) -> None:
+        user, chat = update.effective_user, update.effective_chat
+        if update.callback_query is not None:
+            with contextlib.suppress(Exception):
+                await update.callback_query.answer()
+        if user is not None and chat is not None and not getattr(user, "is_bot", False):
+            await _claim_and_tell(context, user.id, chat.id, getattr(user, "language_code", None))
+        raise ApplicationHandlerStop
+
+    app.add_handler(CommandHandler("gift", _claim_now, filters=filters.ChatType.PRIVATE), group=group)
+    app.add_handler(CallbackQueryHandler(_claim_now, pattern=f"^{PROMO_CALLBACK}$"), group=group)
+
     async def _claim_on_message(update, context) -> None:
         if _promo_state["over"]:
             return
@@ -302,7 +342,7 @@ def attach_promo_claim(app, group: int = -2) -> None:
             return
         _promo_claiming.add(user.id)
         context.application.create_task(
-            _claim_and_tell(context, user.id, chat.id, getattr(user, "language_code", None)))
+            _offer_gift(context, user.id, chat.id, getattr(user, "language_code", None)))
 
     app.add_handler(TypeHandler(Update, _claim_on_message), group=group)
 

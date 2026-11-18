@@ -1144,10 +1144,12 @@ the number the texts name is true when they are read. The key
 (`gift-220-users`) and the amount stay as they were, so nothing already
 written under them changes.
 
-From the start, for PROMO_CLAIM_DAYS, the first message somebody sends to
-ConvertBot or DownloaderBot gives them PROMO_CREDITS ⚡ of bonus credit, once
-(grant_bonus_once: the claim and the credit in one transaction), to spend
-within PROMO_SPEND_DAYS of that day. AnonBot shows its ad to each person once
+From the start, for PROMO_CLAIM_DAYS (3 since 2026-11-18; it was 14), ConvertBot and DownloaderBot
+offer the gift to whoever writes to them, and the offer's button or /gift gives them PROMO_CREDITS ⚡
+of bonus credit, once (grant_bonus_once: the claim and the credit in one transaction), to spend
+until PROMO_SPEND_UNTIL -- the same day for everyone, the end of 1 December 2026, as the operator
+asked on 2026-11-18. PROMO_SPEND_DAYS (28 days from the claim) was the rule before and is no
+longer used for it. AnonBot shows its ad to each person once
 meanwhile. /promo stop ends the claiming early; credit already given stays.
 
 Every day here ends at midnight UTC, the rule gift dates already follow (TERMS:
@@ -1210,8 +1212,11 @@ on a database error; the cached one answers False (see \_read_promo).
 
 ### `promo_expiry()`
 
-When a gift claimed at `claimed_at` runs out: the end of the
-PROMO_SPEND_DAYS-th day after the day it was claimed (UTC).
+When a gift claimed at `claimed_at` runs out: PROMO_SPEND_UNTIL, whenever it was claimed.
+
+### `promo_spend_by()`
+
+The last day the gift can be spent, as the texts show it (01.12.2026).
 
 ### `claim_promo_gift()`
 
@@ -1261,9 +1266,15 @@ on a database error.
 What somebody reads in ConvertBot or DownloaderBot when the gift was
 just given to them. Plain text.
 
+### `promo_offer()`
+
+What ConvertBot and DownloaderBot say to somebody who writes while the gift is open and has not
+had it: the amount, the last day to claim, the last day to spend, and how to claim. Plain text.
+
 ### `promo_ad()`
 
-AnonBot's ad for the gift, in HTML (the last paragraph is in italics).
+AnonBot's ad for the gift, in HTML (the last paragraph is in italics): how to claim it (/gift, or
+the button the bots show) and both dates.
 
 ### `_cmd_pause()`
 

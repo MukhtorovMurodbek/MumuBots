@@ -896,8 +896,8 @@ set -- instead of failing the first person who sends a big file.
   Counted first, then throttled: somebody who floods is still somebody
   who was here, and /status is supposed to say so.
 - At `attach_promo_claim(app)`:
-  The 220 ⚡ gift: the first message while it is open claims it (see
-  attach_promo_claim). Its own group, after the flood gate's.
+  The 220 ⚡ gift: /gift and the offer's button claim it, and the first message
+  while it is open gets the offer (see attach_promo_claim). Its own group, after the flood gate's.
 - At `app.add_handler(MessageHandler((filters.TEXT | filters.REPLY) & ~filters.COMMAND,`:
   Runs after track_activity but before every other handler -- a no-op
   unless /feedback or a "Custom" donate button has just asked for

@@ -1949,9 +1949,14 @@ _PLAIN = {
                     "Good until {date} (UTC): about {conversions} paid conversions in {convert} or big "
                     "downloads in {download}.\n/balance",
     "gift_ad": "\U0001f389 Mumu bots have passed {users} unique users, so {amount} ⚡ of free credit is being "
-               "given out! It can be claimed and used in {download} and {convert}.\n\n<i>To claim it, send any "
-               "message to either bot: the gift is added automatically. Claim it by {claim_by}; once claimed, "
-               "it lasts {days} days.</i>",
+               "given out! It can be claimed and used in {download} and {convert}.\n\n<i>To claim it, send /gift "
+               "to either bot, or tap the button it shows. Claim it by {claim_by}; it can be spent until "
+               "{spend_by}.</i>",
+    "gift_offer": "\U0001f381 Mumu bots passed {users} users: {amount} ⚡ of free credit for everyone, once.\n"
+                  "Claim it by {claim_by} (UTC) with the button below or /gift. It can be spent until {spend_by}.",
+    "gift_claim_button": "\U0001f381 Claim {amount} ⚡",
+    "gift_already_had": "\U0001f381 This gift has already been claimed: one per person. /balance",
+    "gift_not_open": "\U0001f381 No gift can be claimed right now.",
 }
 
 
@@ -2182,7 +2187,7 @@ async def _cmd_gift(context, args):
 PROMO_KEY = "gift-220-users"
 PROMO_USERS = 200
 PROMO_CREDITS = 220
-PROMO_CLAIM_DAYS = 14
+PROMO_CLAIM_DAYS = 3
 PROMO_SPEND_DAYS = 28
 PROMO_STARTED = f"promo:{PROMO_KEY}:started"
 PROMO_STOPPED = f"promo:{PROMO_KEY}:stopped"
@@ -2261,8 +2266,15 @@ def promo_open(now: "datetime | None" = None, fresh: bool = False) -> bool:
     return window[0] <= now < window[1]
 
 
+PROMO_SPEND_UNTIL = datetime(2026, 12, 2, tzinfo=timezone.utc)
+
+
 def promo_expiry(claimed_at: datetime) -> datetime:
-    return _end_of_day((claimed_at.astimezone(timezone.utc) + timedelta(days=PROMO_SPEND_DAYS)).date())
+    return PROMO_SPEND_UNTIL
+
+
+def promo_spend_by() -> str:
+    return (PROMO_SPEND_UNTIL - timedelta(microseconds=1)).strftime("%d.%m.%Y")
 
 
 def claim_promo_gift(user_id: int) -> "tuple[str, datetime | None]":
@@ -2339,9 +2351,16 @@ def promo_notice(lang: "str | None", expires_at: datetime) -> str:
     )
 
 
+def promo_offer(lang: "str | None", closes: datetime) -> str:
+    return phrase(
+        "gift_offer", lang, amount=PROMO_CREDITS, users=PROMO_USERS, spend_by=promo_spend_by(),
+        claim_by=(closes - timedelta(microseconds=1)).strftime("%d.%m.%Y"),
+    )
+
+
 def promo_ad(lang: "str | None", closes: datetime) -> str:
     return phrase(
-        "gift_ad", lang, amount=PROMO_CREDITS, users=PROMO_USERS, days=PROMO_SPEND_DAYS,
+        "gift_ad", lang, amount=PROMO_CREDITS, users=PROMO_USERS, spend_by=promo_spend_by(),
         claim_by=(closes - timedelta(microseconds=1)).strftime("%d.%m.%Y"), **_promo_bots(),
     )
 
