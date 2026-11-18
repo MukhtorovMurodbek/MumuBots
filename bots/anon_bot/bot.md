@@ -893,10 +893,18 @@ The update the reactions note answered; the ad waits for the next message.
 
 Is this one of the commands the gift's ad never follows?
 
+_At `PROMO_TEASER_FROM = datetime(2026, 11, 18, 2, tzinfo=timezone.utc)`:_
+
+Before the gift starts, from 11:00 KST on 2026-11-18 (first in MumuCombined 2.2.0): each person is
+told once that 2.2.0 is out and a giveaway is coming, with the channel's link ("gift_teaser"). The
+operator asked for it not to wait for the gift itself. PROMO_TEASER_KEY is its own row in
+promo_seen, so the gift's ad still comes once the gift opens.
+
 ### `promo_ad_note()`
 
 After whatever somebody came to do, and after the reactions note: if the
 gift is open and they have not had it nor been shown this ad, show it once.
+Before it starts (from PROMO_TEASER_FROM), the teaser instead, once.
 
 Quiet by design: a new message in a private chat only, never in the middle
 of a question or an inbox link's first message, and any failure here just
@@ -909,8 +917,8 @@ means no ad (nothing is recorded unless the ad is about to be sent).
 - At `if _no_ad_after(message):`:
   Nor under the privacy pages or a request to be forgotten: an ad there,
   and a row saying it was shown, is the wrong answer to a request to delete data.
-- At `if window is None or not window[0] <= datetime.now(timezone.utc) < window[1]:`:
-  Nothing is remembered when it is not open: it may open later.
+- At `if not window[0] <= now < window[1]:`:
+  Nothing is remembered when it is not open: it may open (again) later.
 - At `row = (sibling_bots_keyboard_row(BOT_NAME, only="downloaderbot")`:
   One row, DownloaderBot first as in the text. An ad with no way to
   reach the bots is not worth the person's one chance at it.

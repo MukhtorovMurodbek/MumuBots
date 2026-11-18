@@ -1251,6 +1251,8 @@ async def reactions_update_note(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 PROMO_AD_KEY = "_promo_ad"
+PROMO_TEASER_FROM = datetime(2026, 11, 18, 2, tzinfo=timezone.utc)
+PROMO_TEASER_KEY = "gift-220-users:teaser"
 NOTE_UPDATE_KEY = "_note_update"
 
 
@@ -1281,7 +1283,19 @@ async def promo_ad_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         window = await asyncio.to_thread(family_link.promo_window)
-        if window is None or not window[0] <= datetime.now(timezone.utc) < window[1]:
+        now = datetime.now(timezone.utc)
+        if window is None:
+            if now < PROMO_TEASER_FROM or context.user_data.get(PROMO_AD_KEY) == PROMO_TEASER_KEY:
+                return
+            lang = await asyncio.to_thread(get_user_language, user.id)
+            if not lang:
+                return
+            shown_now = await asyncio.to_thread(claim_promo_seen, user.id, PROMO_TEASER_KEY)
+            context.user_data[PROMO_AD_KEY] = PROMO_TEASER_KEY
+            if shown_now:
+                await context.bot.send_message(chat_id=chat.id, text=i18n.t(lang, "gift_teaser"))
+            return
+        if not window[0] <= now < window[1]:
             return
         row = (sibling_bots_keyboard_row(BOT_NAME, only="downloaderbot")
                + sibling_bots_keyboard_row(BOT_NAME, only="convertbot"))

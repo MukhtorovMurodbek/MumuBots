@@ -93,3 +93,28 @@ def test_the_texts_name_both_dates_in_every_language(lang):
             assert link.phrase(key, lang, amount=220) != key
     ad = load("anon_bot", "family_link").promo_ad(lang, CLOSES)
     assert "/gift" in ad and "01.12.2026" in ad and "{" not in ad
+
+
+def test_before_the_gift_anonbot_teases_it_once_from_11_kst(monkeypatch):
+    bot = load("anon_bot", "bot")
+    link = load("anon_bot", "family_link")
+    seen = set()
+    monkeypatch.setattr(link, "promo_window", lambda fresh=False: None)
+    monkeypatch.setattr(bot, "claim_promo_seen", lambda uid, promo: not (seen.add((uid, promo)) if (uid, promo) not in seen else True))
+    monkeypatch.setattr(bot, "get_user_language", lambda uid: "en")
+    monkeypatch.setattr(bot, "_no_ad_after", lambda message: False)
+    assert bot.PROMO_TEASER_FROM == datetime(2026, 11, 18, 2, tzinfo=timezone.utc)
+    update = SimpleNamespace(message=SimpleNamespace(text="hi"), update_id=1,
+                             effective_user=SimpleNamespace(id=31, is_bot=False),
+                             effective_chat=SimpleNamespace(id=31, type="private"))
+    context = _context()
+    monkeypatch.setattr(bot, "PROMO_TEASER_FROM", datetime(2099, 1, 1, tzinfo=timezone.utc))
+    asyncio.run(bot.promo_ad_note(update, context))
+    assert context.bot.sent == []
+    monkeypatch.setattr(bot, "PROMO_TEASER_FROM", datetime(2020, 1, 1, tzinfo=timezone.utc))
+    asyncio.run(bot.promo_ad_note(update, context))
+    asyncio.run(bot.promo_ad_note(update, _context()))
+    (_, text, _), = context.bot.sent
+    assert "Version 2.2.0 is live" in text and "https://t.me/MEaTiRT" in text
+    for lang in ("uz", "ru"):
+        assert "https://t.me/MEaTiRT" in load("anon_bot", "i18n").t(lang, "gift_teaser")
