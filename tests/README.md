@@ -20,6 +20,7 @@ The four tests of the keys and the walls are the exception: their notes are kept
 | [test_channels.py](test_channels.py) | DownloaderBot in channels: a post that is text with a link gets the media put into it, or posted anew when it cannot hold i… |
 | [test_credit_and_copyright.py](test_credit_and_copyright.py) | Since 2.2.0: the copyright note under every file DownloaderBot sends, a person told when the operator adds credit, "can't be sent" naming both ceilings. |
 | [test_fresh_read.py](test_fresh_read.py) | 2.1.7's fix, ported: the one video site is read afresh before its file is fetched. |
+| [test_note_and_edits.py](test_note_and_edits.py) | Since 2.2.1: DownloaderBot's copyright note turned off per chat with /disclaimer; AnonBot's edits and /delete carried to the other side, switched with /editing. |
 | [test_gift_claim.py](test_gift_claim.py) | Since 2.2.0: the 220 ⚡ gift is claimed with the offer's button or /gift, within 3 days, and spent until 1 December. |
 | [test_hardening.py](test_hardening.py) | The walls around programs that open strangers' files, and secrets kept out of reach (notes kept privately). |
 | [test_manager_soft_stop.py](test_manager_soft_stop.py) | ManagerBot's half of the soft stop (since 2.1.6): /shutdown and /restart ask first, the request carries its time, and the watchdog says "stopped as… |

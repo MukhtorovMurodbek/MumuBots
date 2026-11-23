@@ -157,3 +157,19 @@ Bot's own header upright, the person's own words in italics.
   which is the same shape uncaptioned media already uses, and beats
   either truncating what somebody wrote or refusing the whole thing.
 - `reply_to_message_id = None` — already visually anchored by the header line right above
+
+### `compose()`
+
+The bot's own header upright, the person's own words in italics: shared by relay_content and
+edit_relayed so an edited copy looks exactly like the first one.
+
+### `EditTooLong`
+
+The edited message no longer fits in one message, so its single copy cannot take it.
+
+### `edit_relayed()`
+
+Carries an edit onto its one copy in the other chat (2.2.1). Text is edited as text. A photo, video,
+animation, audio or document is replaced through edit_message_media with the edited message's own file
+and caption, which also carries a swapped file; anything else (a voice message) has only its caption
+edited. The buttons are passed again: an edit without them would take them away.

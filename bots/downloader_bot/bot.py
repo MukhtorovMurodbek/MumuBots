@@ -86,6 +86,8 @@ from db import (
     forget_group,
     move_group_settings,
     channel_ids,
+    get_copyright_note_off,
+    set_copyright_note_off,
 )
 from shared_features import (
     note_active,
@@ -366,6 +368,7 @@ BOT_COMMANDS = [
     BotCommand("start", "What this bot does, and how to start"),
     BotCommand("language", "Choose the language / Tilni tanlash / Выбрать язык"),
     BotCommand("settings", "Captions and file quality"),
+    BotCommand("disclaimer", "The copyright note under files"),
     BotCommand("channels", "Channels: the video in each post with a link"),
     BotCommand("cancel", "Stop the current step"),
     BotCommand("help", "Everything this bot does"),
@@ -611,6 +614,10 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + i18n.t(lang, "lossless_status", state=lossless_state))
     rows = (_caption_keyboard(lang, caption_on).inline_keyboard
             + _lossless_keyboard(lang, lossless_on).inline_keyboard)
+    note_on = await _note_wanted(update.effective_chat.id)
+    text += "\n\n" + i18n.t(lang, "note_settings_line",
+                             state=i18n.t(lang, "caption_state_on" if note_on else "caption_state_off"))
+    rows += ((InlineKeyboardButton(i18n.t(lang, "note_settings_button"), callback_data=NOTE_PREFIX + "show"),),)
     if large_files.CONFIGURED:
         large_on = await asyncio.to_thread(get_large_files_enabled, update.effective_user.id)
         text += "\n\n" + _large_status(lang, large_on)
@@ -1060,7 +1067,8 @@ async def _merge_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if os.path.getsize(out_path) > large_files.BOT_API_SEND_BYTES:
                 raise _MergeStop("merge_too_big")
 
-            caption = _media_caption(lang, await asyncio.to_thread(get_caption_enabled, user_id))
+            caption = _media_caption(lang, await asyncio.to_thread(get_caption_enabled, user_id),
+                                     await _note_wanted(chat_id))
             with open(out_path, "rb") as handle:
                 await message.reply_document(
                     handle, filename=merge.output_name(platform, kind),
@@ -1132,7 +1140,7 @@ async def _reply_image_with_button(update, context, data: bytes, stem: str, lang
     sent = await _reply_image(update, data, stem,
                               reply_markup=None if group is not None else _nudge_kb(lang, token, lossless),
                               lossless=lossless,
-                              caption=_media_caption(lang, await _credit_wanted(update.effective_user.id)))
+                              caption=await _caption_for(update, lang))
     filename = f"{stem}.{_image_extension(data)}"
     await asyncio.to_thread(delivery_cache.keep_bytes, update.effective_user.id, platform, url,
                             resolvers.MediaItem("photo", filename=filename), data, filename,
@@ -1143,12 +1151,88 @@ async def _reply_image_with_button(update, context, data: bytes, stem: str, lang
 COPYRIGHT_URL = (os.environ.get("TERMS_URL") or "").strip()
 
 
-def _media_caption(lang: str, credit: bool) -> str:
-    caption = (i18n.t(lang, "copyright_note", url=html.escape(COPYRIGHT_URL, quote=True)) if COPYRIGHT_URL
-               else i18n.t(lang, "copyright_note_plain"))
+def _copyright_note(lang: str) -> str:
+    return (i18n.t(lang, "copyright_note", url=html.escape(COPYRIGHT_URL, quote=True)) if COPYRIGHT_URL
+            else i18n.t(lang, "copyright_note_plain"))
+
+
+def _media_caption(lang: str, credit: bool, note: bool = True) -> "str | None":
+    parts = [_copyright_note(lang)] if note else []
     if credit:
-        caption += "\n\n" + html.escape(i18n.t(lang, "download_credit_caption", username=BOT_USERNAME))
-    return caption
+        parts.append(html.escape(i18n.t(lang, "download_credit_caption", username=BOT_USERNAME)))
+    return "\n\n".join(parts) or None
+
+
+async def _note_wanted(chat_id: int) -> bool:
+    try:
+        return await asyncio.to_thread(get_copyright_note_off, chat_id) is None
+    except Exception:
+        logger.debug("Could not read whether this chat turned the note off", exc_info=True)
+        return True
+
+
+async def _caption_for(update, lang: str) -> "str | None":
+    return _media_caption(lang, await _credit_wanted(update.effective_user.id),
+                          await _note_wanted(update.effective_chat.id))
+
+
+NOTE_PREFIX = "note:"
+
+
+async def _may_change_note(bot, chat, user, sender_chat=None) -> bool:
+    if chat.type not in GROUP_TYPES:
+        return True
+    if sender_chat is not None and sender_chat.id == chat.id:
+        return True
+    if user is None:
+        return False
+    return await _is_group_admin(bot, chat.id, user.id)
+
+
+async def _note_screen(chat, lang: str, may_change: bool):
+    off_since = await asyncio.to_thread(get_copyright_note_off, chat.id)
+    group = chat.type in GROUP_TYPES
+    if off_since is None:
+        text = i18n.t(lang, "note_on_group" if group else "note_on", note=_copyright_note(lang))
+        rows = [[InlineKeyboardButton(i18n.t(lang, "note_button_off"), callback_data=NOTE_PREFIX + "off"),
+                 InlineKeyboardButton(i18n.t(lang, "note_button_keep"), callback_data=NOTE_PREFIX + "keep")]]
+    else:
+        text = i18n.t(lang, "note_off_group" if group else "note_off", since=html.escape(off_since[:10]))
+        rows = [[InlineKeyboardButton(i18n.t(lang, "note_button_on"), callback_data=NOTE_PREFIX + "on")]]
+    if not may_change:
+        return text + "\n\n" + i18n.t(lang, "note_admins_only"), None
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def disclaimer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user, chat, message = update.effective_user, update.effective_chat, update.effective_message
+    lang = await i18n.get_lang(user.id, context) if user is not None else "en"
+    may_change = await _may_change_note(context.bot, chat, user, getattr(message, "sender_chat", None))
+    text, markup = await _note_screen(chat, lang, may_change)
+    await context.bot.send_message(chat.id, text, parse_mode=ParseMode.HTML, reply_markup=markup, **NO_PREVIEW)
+
+
+async def note_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query, user = update.callback_query, update.effective_user
+    chat = query.message.chat
+    lang = await i18n.get_lang(user.id, context)
+    choice = query.data[len(NOTE_PREFIX):]
+    if choice != "show" and not await _may_change_note(context.bot, chat, user):
+        await query.answer(i18n.t(lang, "note_admins_only"), show_alert=True)
+        return
+    if choice == "keep":
+        await query.answer(i18n.t(lang, "note_kept"))
+        with contextlib.suppress(BadRequest):
+            await query.edit_message_reply_markup(reply_markup=None)
+        return
+    if choice in ("off", "on"):
+        await asyncio.to_thread(set_copyright_note_off, chat.id, user.id, choice == "off")
+        await query.answer(i18n.t(lang, "note_turned_off" if choice == "off" else "note_turned_on"))
+    else:
+        await query.answer()
+    text, markup = await _note_screen(chat, lang, True)
+    await edit_in_place(query.message, context.bot, text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                        **NO_PREVIEW)
 
 
 async def _reply_image(update: Update, data: bytes, stem: str, reply_markup=None,
@@ -1203,7 +1287,7 @@ async def _send_media(update, context, items_with_paths, lang,
                       probing: "video.ProbeRun | None" = None,
                       title: "str | None" = None, duration: "int | None" = None) -> "list[tuple[str, str]] | None":
     group = _GROUP.get()
-    caption = _media_caption(lang, await _credit_wanted(update.effective_user.id))
+    caption = await _caption_for(update, lang)
     if lossless is None:
         lossless = (group["as_file"] if group is not None
                     else await asyncio.to_thread(get_lossless_enabled, update.effective_user.id))
@@ -1645,7 +1729,7 @@ async def _credit_wanted(user_id: int) -> bool:
 
 
 async def _send_large(update, context, items_with_paths, lang, status=None) -> None:
-    caption = _media_caption(lang, await _credit_wanted(update.effective_user.id))
+    caption = await _caption_for(update, lang)
     probing = video.ProbeRun()
 
     async def waiting() -> None:
@@ -1936,6 +2020,7 @@ GROUP_TYPES = ("group", "supergroup")
 GROUP_COMMANDS = [
     BotCommand("settings", "What gets downloaded here, and how"),
     BotCommand("help", "How the bot works in a group"),
+    BotCommand("disclaimer", "The copyright note under files (admins)"),
 ]
 
 
@@ -2049,6 +2134,8 @@ async def group_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if user is not None:
                 note_active(context, user)
             await _group_hello(update, context)
+        elif command == "disclaimer":
+            await disclaimer_command(update, context)
         elif command is None and user is not None:
             text = (message.text or message.caption or "") if message is not None else ""
             detected = platforms.detect_platform(text) if text else None
@@ -2516,6 +2603,8 @@ def main():
     app.add_handler(CommandHandler("settings", settings_command))
     app.add_handler(CommandHandler("channels", channels_command))
     app.add_handler(CommandHandler("caption", caption_toggle))
+    app.add_handler(CommandHandler("disclaimer", disclaimer_command))
+    app.add_handler(CallbackQueryHandler(note_callback, pattern="^" + NOTE_PREFIX))
     app.add_handler(CommandHandler("lossless", lossless_toggle))
     app.add_handler(CommandHandler("dbdump", dbdump_command))
     app.add_handler(CommandHandler("messageas", messageas_command))

@@ -1047,3 +1047,13 @@ Exports every table in this bot's own schema to one CSV per table,
 zipped together -- this bot's data only, never a sibling's. Deliberately not pg_dump-based -- that binary
 isn't guaranteed to exist wherever this bot ends up hosted, while this
 only needs the psycopg connection already used everywhere else here.
+
+### `get_edit_route()`
+
+Where an edit or a deletion of a message goes (2.2.1): every copy the bot made of it in the other chat
+(rows whose `peer_message_id` is this message), both sides, and whether the guest is blocked. Only the
+other chat is searched, so a message's own row never counts as its copy.
+
+### `forget_anon_relays()`
+
+Drops the rows of messages /delete removed, so nothing points at a message that no longer exists.

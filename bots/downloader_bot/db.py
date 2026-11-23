@@ -296,6 +296,15 @@ def init_db(dsn: str = DATABASE_URL) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS copyright_note_off (
+                chat_id BIGINT PRIMARY KEY,
+                turned_off_by BIGINT NOT NULL,
+                turned_off_at TEXT NOT NULL
+            )
+            """
+        )
         _note_plain_names(conn)
         conn.commit()
 
@@ -317,9 +326,31 @@ def set_group_settings(chat_id: int, settings: dict) -> None:
         conn.commit()
 
 
+def get_copyright_note_off(chat_id: int) -> "str | None":
+    with pooled_read() as conn:
+        row = conn.execute("SELECT turned_off_at FROM copyright_note_off WHERE chat_id = %s",
+                           (chat_id,)).fetchone()
+        return row[0] if row else None
+
+
+def set_copyright_note_off(chat_id: int, user_id: int, off: bool) -> None:
+    with pooled() as conn:
+        if off:
+            conn.execute(
+                "INSERT INTO copyright_note_off (chat_id, turned_off_by, turned_off_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT (chat_id) DO UPDATE SET turned_off_by = excluded.turned_off_by, "
+                "turned_off_at = excluded.turned_off_at",
+                (chat_id, user_id, datetime.now(timezone.utc).isoformat()),
+            )
+        else:
+            conn.execute("DELETE FROM copyright_note_off WHERE chat_id = %s", (chat_id,))
+        conn.commit()
+
+
 def forget_group(chat_id: int) -> None:
     with pooled() as conn:
         conn.execute("DELETE FROM group_settings WHERE chat_id = %s", (chat_id,))
+        conn.execute("DELETE FROM copyright_note_off WHERE chat_id = %s", (chat_id,))
         conn.commit()
 
 
@@ -341,6 +372,13 @@ def move_group_settings(old_chat_id: int, new_chat_id: int) -> None:
             (new_chat_id, old_chat_id),
         )
         conn.execute("DELETE FROM group_settings WHERE chat_id = %s", (old_chat_id,))
+        conn.execute(
+            "INSERT INTO copyright_note_off (chat_id, turned_off_by, turned_off_at) "
+            "SELECT %s, turned_off_by, turned_off_at FROM copyright_note_off WHERE chat_id = %s "
+            "ON CONFLICT (chat_id) DO NOTHING",
+            (new_chat_id, old_chat_id),
+        )
+        conn.execute("DELETE FROM copyright_note_off WHERE chat_id = %s", (old_chat_id,))
         conn.commit()
 
 
@@ -737,6 +775,9 @@ def erase_user(user_id: int) -> int:
         for table in ("settings", "donation_prompts", "activity_events", "download_events"):
             cur = conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             removed += cur.rowcount or 0
+        cur = conn.execute("DELETE FROM copyright_note_off WHERE chat_id = %s OR turned_off_by = %s",
+                           (user_id, user_id))
+        removed += cur.rowcount or 0
         conn.execute(
             "UPDATE star_transactions SET username_sealed = NULL "
             "WHERE user_id = %s AND username_sealed IS NOT NULL",

@@ -750,6 +750,44 @@ says so (parse_mode), the MTProto route included (big_files.send_document's `htm
 "just in case", the way other download bots mark what they send. A channel's post keeps its own
 text: what is put into it is the channel's, not the bot's.
 
+Since 2.2.1 (2026-11-23) the note can be left out (`note`), for a chat that turned it off with
+/disclaimer, and the caption is None when neither the note nor the credit line is wanted.
+
+### `_note_wanted()`
+
+Whether files sent in this chat carry the copyright note: yes unless the chat turned it off. Keyed by
+the chat, not the person, so a group's switch applies to everyone posting links there. A database error
+keeps the note on: leaving it off by mistake is the worse failure.
+
+### `_caption_for()`
+
+The caption for a download in this update's chat: the credit line as the person (or the group) wants it,
+and the note as the chat wants it.
+
+### `_may_change_note()`
+
+In a private chat the person decides; in a group only an admin does, or an anonymous admin writing as
+the group. Asked again on every tap, not only when /disclaimer was sent: a group member can tap the
+buttons under an admin's message.
+
+### `_note_screen()`
+
+The message the switch lives on (2.2.1, the operator's request: "users get the disclaimer at least
+once so that they know they are in charge of what they download"). While the note is on, it shows the
+note in full, says that whoever sent the link is responsible for how the file is used and shared, and
+asks before turning it off: the message itself is the time the person sees it, whether or not a file
+was ever sent. Turning it back on needs no question.
+
+### `disclaimer_command()`
+
+/disclaimer, in a private chat and (through group_router) in a group. Also reached from /settings'
+button. Sent as HTML because the note carries its link.
+
+### `note_callback()`
+
+The buttons: "Yes" records the chat, who confirmed it and when (copyright_note_off), "No" takes the
+buttons away, "Turn the note back on" deletes the row.
+
 ### `_reply_image()`
 
 One image back, compressed as a photo or verbatim as a file -- see

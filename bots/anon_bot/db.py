@@ -475,6 +475,49 @@ def get_reaction_route(chat_id: int, message_id: int) -> "dict | None":
             "blocked": bool(row[4])}
 
 
+def get_edit_route(chat_id: int, message_id: int) -> "dict | None":
+    with pooled_read() as conn:
+        row = conn.execute(
+            """
+            SELECT c.id, c.conv_number, c.owner_user_id, c.follower_user_id,
+                   EXISTS (SELECT 1 FROM anon_blocks b
+                           WHERE b.owner_user_id = c.owner_user_id
+                             AND b.follower_user_id = c.follower_user_id),
+                   c.owner_sealed, c.follower_sealed,
+                   ARRAY(SELECT t.message_id FROM anon_relay t
+                         WHERE t.conversation_id = r.conversation_id
+                           AND t.peer_message_id = r.message_id
+                           AND t.chat_id <> r.chat_id
+                         ORDER BY t.message_id)
+            FROM anon_relay r
+            JOIN anon_conversations c ON c.id = r.conversation_id
+            WHERE r.chat_id = %s AND r.message_id = %s
+            """,
+            (vault.pseudonym(chat_id), message_id),
+        ).fetchone()
+    if row is None:
+        return None
+    owner = _open_id("anon_conversations", row[0], row[5], "anon.conversation.owner", row[2])
+    follower = _open_id("anon_conversations", row[0], row[6], "anon.conversation.follower", row[3])
+    if owner is None or follower is None:
+        return None
+    return {"conversation_id": int(row[0]), "conv_number": row[1],
+            "owner_user_id": owner, "follower_user_id": follower,
+            "blocked": bool(row[4]), "twins": [int(m) for m in row[7] or ()]}
+
+
+def forget_anon_relays(chat_id: int, message_ids) -> None:
+    ids = list(message_ids)
+    if not ids:
+        return
+    with pooled() as conn:
+        conn.execute(
+            "DELETE FROM anon_relay WHERE chat_id = %s AND message_id = ANY(%s::bigint[])",
+            (vault.pseudonym(chat_id), ids),
+        )
+        conn.commit()
+
+
 def record_star_invoice(
     user_id: int,
     username: str | None,

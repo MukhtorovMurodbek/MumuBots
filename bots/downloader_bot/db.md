@@ -276,6 +276,19 @@ _At `def get_group_settings(chat_id: int):`:_
 The stored settings of a group, as stored (groups.normalize makes them whole),
 or None for a group that never changed any.
 
+### `get_copyright_note_off()`
+
+When this chat turned the copyright note off (2.2.1), or None while it is on. The table is kept apart
+from `settings`, whose ids are people the bot may message unprompted (list_all_users): a group id
+there would put the group into a broadcast. MumuCombined 2.2.1 made the same table, so a choice made
+there carries over.
+
+### `set_copyright_note_off()`
+
+Turn the note off for a chat, recording who confirmed it and when; or back on, which deletes the row.
+erase_user deletes a person's own chat's row and every group row they confirmed, so the note comes back
+there; move_group_settings moves a group's row with its settings, and forget_group deletes it.
+
 ### `forget_group()`
 
 The bot has left the group, or was removed: nothing of it is kept.

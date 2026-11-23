@@ -803,6 +803,56 @@ written for that, and nothing downstream has any use for an edit.
   The user got silence and the operator got no crash report; the suite
   was the only thing that noticed.
 
+Since 2.2.1 (2026-11-23, after a channel poll said yes) the edit is carried over instead, for whoever
+/editing allows (`_edits_allowed`): the bot edits its own copy in the other chat, which it may do, and
+the person sees a short note that removes itself. Whoever it leaves out keeps the old answer.
+
+### `_edits_mode()`
+
+Who may carry an edit or a deletion over: a family setting (`anon:edits`) the operator changes with
+/editing, without a redeploy, read at most once a minute. "everyone" is also what a missing or
+unreadable setting means; "admins" is ABOT_ADMIN_ID only (how it was tried first); "off" is nobody.
+
+### `_menus()`
+
+/delete is in the public menu once it is for everyone, and in the admin's own menu while only the
+admins have it.
+
+### `_twin_dressing()`
+
+The header and buttons a relayed message carries on the recipient's side, so an edit or a deletion
+note looks like what was sent. The Block button matters most: an owner must always be able to block.
+
+### `_relay_edit()`
+
+An edit reaches the other side only where its copy is one message (anon_logic.edit_relayed); a long
+text sent in parts, or a file sent after a separate header, keeps the old answer. A blocked guest's
+edits go nowhere, like their messages. The relay row does not record whether the copy was a later item
+of an album (sent without header and buttons), so every copy is rebuilt with them. "Message is not
+modified" is not an error.
+
+### `_delete_twins()`
+
+Telegram lets a bot delete a message only within 48 hours of sending it; a copy already gone counts as
+deleted.
+
+### `delete_command()`
+
+/delete, as a reply to one's own message: Telegram tells a bot nothing when somebody deletes a message
+in its chat, so this is the only way. The other side's copies go first; the person's own message and
+the command go only once that worked, so a refusal leaves everything where it was. When a guest
+deletes, the owner keeps a line in its place with the usual buttons, recorded as part of the
+conversation, so the guest can still be blocked and answered. To whoever /editing leaves out, /delete
+does not exist.
+
+### `_editing_text()`
+
+The admin's switch, in English like every admin command.
+
+### `editing_callback()`
+
+Saves the mode and republishes the menus so /delete appears or goes at once.
+
 _At `async def relay_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):`:_
 
 ---------- reactions: passed across, as the bot's own ----------

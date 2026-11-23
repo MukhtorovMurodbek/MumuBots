@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -41,6 +42,8 @@ from live_message import LiveMessage, edit_in_place
 from anon_logic import (
     REACTION_NOTE_SECONDS,
     RELAYABLE_REACTIONS,
+    EditTooLong,
+    edit_relayed,
     message_allowed,
     new_conversation_allowed,
     pick_reaction,
@@ -60,6 +63,8 @@ from db import (
     get_anon_stats,
     get_conversation,
     get_conversation_for_relay,
+    get_edit_route,
+    forget_anon_relays,
     get_reaction_route,
     get_relay_row,
     get_routing_context,
@@ -173,6 +178,8 @@ def build_help_text(lang: str, full: bool = False) -> str:
         text = i18n.t(lang, "help_brief").rstrip("\n")
     else:
         text = i18n.t(lang, "help_text", reactions=" ".join(RELAYABLE_REACTIONS)).rstrip("\n")
+        if _edits_cache["mode"] == "everyone":
+            text += "\n\n" + i18n.t(lang, "help_edits")
     blurb = sibling_bots_blurb(BOT_NAME, lang)
     return text + "\n\n" + blurb if blurb else text
 
@@ -211,7 +218,41 @@ ADMIN_COMMANDS = [
     BotCommand("status", "🔒 Uptime, host, errors, active users"),
     BotCommand("messageas", "🔒 messageas <user_id> <text> — DM as this bot"),
     BotCommand("dbdump", "🔒 This bot's tables as a zip of CSVs"),
+    BotCommand("editing", "🔒 Who may edit and delete relayed messages"),
 ]
+
+
+DELETE_COMMAND = BotCommand("delete", "Delete a message on both sides — reply to it")
+
+EDITS_SETTING = "anon:edits"
+EDITS_DEFAULT = "everyone"
+EDITS_MODES = ("admins", "everyone", "off")
+EDITS_REFRESH_SECONDS = 60
+_edits_cache: dict = {"at": None, "mode": EDITS_DEFAULT}
+
+
+def _edits_mode(fresh: bool = False) -> str:
+    at = _edits_cache["at"]
+    if not fresh and at is not None and time.monotonic() - at < EDITS_REFRESH_SECONDS:
+        return _edits_cache["mode"]
+    mode = family_link.get_setting(EDITS_SETTING, EDITS_DEFAULT)
+    if mode not in EDITS_MODES:
+        mode = EDITS_DEFAULT
+    _edits_cache.update(at=time.monotonic(), mode=mode)
+    return mode
+
+
+async def _edits_allowed(user_id: int) -> bool:
+    mode = await asyncio.to_thread(_edits_mode)
+    return mode == "everyone" or (mode == "admins" and _is_admin(user_id))
+
+
+def _menus(mode: str):
+    if mode == "everyone":
+        return BOT_COMMANDS + [DELETE_COMMAND], ADMIN_COMMANDS
+    if mode == "admins":
+        return BOT_COMMANDS, ADMIN_COMMANDS + [DELETE_COMMAND]
+    return BOT_COMMANDS, ADMIN_COMMANDS
 
 
 def _link_url(token: str) -> str:
@@ -1148,9 +1189,61 @@ async def cancel_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
     await finish_cancel_choice(update, context, lang, stopped)
 
 
+def _twin_dressing(route: dict, to_owner: bool, lang: str):
+    if to_owner:
+        return (i18n.t(lang, "incoming_header", conv_number=route["conv_number"]),
+                _incoming_keyboard(route["conversation_id"], lang))
+    return i18n.t(lang, "incoming_header_follower"), _follower_keyboard(route["conversation_id"], lang)
+
+
+
+async def _relay_edit(context, edited, user_id: int) -> "str | None":
+    route = await asyncio.to_thread(get_edit_route, edited.chat_id, edited.message_id)
+    if route is None or user_id not in (route["owner_user_id"], route["follower_user_id"]):
+        return None
+    to_owner = user_id != route["owner_user_id"]
+    if to_owner and route["blocked"]:
+        return None
+    if len(route["twins"]) != 1:
+        return "edit_not_relayed_parts" if route["twins"] else None
+    recipient = route["owner_user_id"] if to_owner else route["follower_user_id"]
+    their_lang = await asyncio.to_thread(get_user_language, recipient) or "en"
+    header, keyboard = _twin_dressing(route, to_owner, their_lang)
+    try:
+        await edit_relayed(context.bot, edited, recipient, route["twins"][0], header=header,
+                           reply_markup=keyboard)
+    except EditTooLong:
+        return "edit_not_relayed_parts"
+    except Forbidden:
+        return "edit_not_relayed"
+    except BadRequest as exc:
+        if "not modified" in str(exc).lower():
+            return None
+        logger.info("An edit could not be carried over: %s", exc)
+        return "edit_not_relayed"
+    note_stat("anon_relay", "edit")
+    return "edit_relayed"
+
+
+
 async def edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edited = update.edited_message
     try:
+        user = update.effective_user
+        if update.effective_chat.type == "private" and user is not None and await _edits_allowed(user.id):
+            lang = await i18n.get_lang(user.id, context)
+            wait = message_allowed(user.id)
+            if wait:
+                await edited.reply_text(i18n.t(lang, "too_fast", seconds=wait))
+                return
+            if await _refuse_if_updating(edited, lang, user.id, edited.chat_id):
+                return
+            answer = await _relay_edit(context, edited, user.id)
+            if answer == "edit_relayed":
+                await _show_briefly(context, edited.chat_id, i18n.t(lang, answer))
+            elif answer is not None:
+                await edited.reply_text(i18n.t(lang, answer))
+            return
         conversation_id = await asyncio.to_thread(
             get_conversation_for_relay, update.effective_chat.id, edited.message_id
         )
@@ -1161,6 +1254,116 @@ async def edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Could not answer an edited message")
     finally:
         raise ApplicationHandlerStop
+
+
+async def _delete_twins(bot, chat_id: int, twins) -> "str | None":
+    for twin in twins:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=twin)
+        except Forbidden:
+            return "delete_failed"
+        except BadRequest as exc:
+            reason = str(exc).lower()
+            if "not found" in reason:
+                continue
+            return "delete_too_old" if "can't be deleted" in reason or "cant be deleted" in reason else "delete_failed"
+    return None
+
+
+
+async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user, message = update.effective_user, update.message
+    if message is None or update.effective_chat.type != "private" or not await _edits_allowed(user.id):
+        return await _deny(update, context)
+    lang = await i18n.get_lang(user.id, context)
+    target = message.reply_to_message
+    if target is None:
+        await message.reply_text(i18n.t(lang, "delete_how"))
+        return
+    if target.from_user is None or target.from_user.id != user.id:
+        await message.reply_text(i18n.t(lang, "delete_only_own"))
+        return
+    if await _refuse_if_updating(message, lang, user.id, message.chat_id):
+        return
+    route = await asyncio.to_thread(get_edit_route, message.chat_id, target.message_id)
+    if (route is None or not route["twins"]
+            or user.id not in (route["owner_user_id"], route["follower_user_id"])):
+        await message.reply_text(i18n.t(lang, "delete_not_relayed"))
+        return
+    to_owner = user.id != route["owner_user_id"]
+    if to_owner and route["blocked"]:
+        await message.reply_text(i18n.t(lang, "delete_failed"))
+        return
+    recipient = route["owner_user_id"] if to_owner else route["follower_user_id"]
+    problem = await _delete_twins(context.bot, recipient, route["twins"])
+    if problem:
+        await message.reply_text(i18n.t(lang, problem))
+        return
+    await asyncio.to_thread(forget_anon_relays, recipient, route["twins"])
+    await asyncio.to_thread(forget_anon_relays, message.chat_id, [target.message_id])
+    for mine in (target.message_id, message.message_id):
+        try:
+            await context.bot.delete_message(chat_id=message.chat_id, message_id=mine)
+        except Exception:
+            logger.debug("Could not delete the sender's own copy", exc_info=True)
+    note_stat("anon_relay", "delete")
+    if to_owner:
+        their_lang = await asyncio.to_thread(get_user_language, recipient) or "en"
+        header, keyboard = _twin_dressing(route, True, their_lang)
+        try:
+            marker = await context.bot.send_message(
+                chat_id=recipient, text=header + "\n\n" + i18n.t(their_lang, "delete_marker"),
+                reply_markup=keyboard, disable_notification=True)
+            await asyncio.to_thread(record_anon_relays, recipient, [marker.message_id],
+                                    route["conversation_id"])
+        except Exception:
+            logger.debug("Could not leave the deletion note", exc_info=True)
+    await _show_briefly(context, message.chat_id, i18n.t(lang, "deleted_both"))
+
+
+
+def _editing_text(mode: str) -> str:
+    return ("✏️ Edits and /delete are carried over for: " + {
+        "admins": "the admin account(s) only (ABOT_ADMIN_ID)",
+        "everyone": "everyone",
+        "off": "nobody",
+    }[mode] + ".\n\nEveryone else is told that an edit did not reach the other side, and /delete does "
+             "not exist for them. A change takes effect within a minute.")
+
+
+
+def _editing_keyboard(mode: str) -> InlineKeyboardMarkup:
+    labels = {"admins": "Admins only", "everyone": "Everyone", "off": "Off"}
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(("✅ " if mode == m else "") + labels[m], callback_data=f"aq_edits:{m}")
+        for m in EDITS_MODES]])
+
+
+
+async def editing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return await _deny(update, context)
+    mode = await asyncio.to_thread(_edits_mode, True)
+    await update.message.reply_text(_editing_text(mode), reply_markup=_editing_keyboard(mode))
+
+
+
+async def editing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not _is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    mode = query.data.split(":", 1)[1]
+    if mode not in EDITS_MODES:
+        await query.answer()
+        return
+    await asyncio.to_thread(family_link.set_setting, EDITS_SETTING, mode)
+    mode = await asyncio.to_thread(_edits_mode, True)
+    await query.answer("Saved.")
+    public, admin_only = _menus(mode)
+    await publish_commands(context.application, public, admin_only, ADMIN_IDS)
+    await edit_in_place(query.message, context.bot, _editing_text(mode), reply_markup=_editing_keyboard(mode))
+
 
 
 async def relay_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1381,7 +1584,8 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _post_init(application):
     await tune_runtime(application)
     await lifecycle.on_start(BOT_NAME)
-    await lifecycle.optional("command menu", publish_commands(application, BOT_COMMANDS, ADMIN_COMMANDS, ADMIN_IDS))
+    public, admin_only = _menus(await asyncio.to_thread(_edits_mode, True))
+    await lifecycle.optional("command menu", publish_commands(application, public, admin_only, ADMIN_IDS))
     await lifecycle.optional("profile text", publish_profile(application))
 
 
@@ -1467,6 +1671,9 @@ def main():
     app.add_handler(CommandHandler("dbdump", dbdump_command))
     app.add_handler(CommandHandler("messageas", messageas_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("editing", editing_command))
+    app.add_handler(CallbackQueryHandler(editing_callback, pattern=r"^aq_edits:"))
+    app.add_handler(CommandHandler("delete", delete_command))
 
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CommandHandler("en", set_language_en))

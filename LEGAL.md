@@ -7,7 +7,7 @@ sections apply to all four; a bot's own section adds what is particular to it.
 
 **Operator contact:** mukhtorovmurodbek@gmail.com
 
-_Last reviewed: 18 November 2026._
+_Last reviewed: 23 November 2026._
 
 **Privacy:** [every bot](#privacy-every-bot) ·
 [StickerBot](#stickerbot-privacy) · [ConvertBot](#convertbot-privacy) ·
@@ -276,6 +276,10 @@ Reddit or X and sends back the media behind it. Everything under
 
 - **The caption, quality and large-file settings** that go with the chosen
   language.
+- **Whether the copyright note is off** in a chat, for a chat where it was
+  turned off with `/disclaimer`: the chat, who confirmed it, and when. Removed
+  when the note is turned back on, or with `/deletemydata` by the person who
+  confirmed it (the note then comes back in that chat).
 - **The last download, for 10 minutes.** What the bot has just sent stays on
   its server for 10 minutes, so that the buttons under it, or the same link sent
   again, are answered without fetching the post a second time. Each of those starts
@@ -285,8 +289,9 @@ Reddit or X and sends back the media behind it. Everything under
   to can get it back, and a download over 100 MB is never kept.
 - **For a group chat the bot was added to:** the group's id and its `/settings`
   (which sites' links to download, the quality, video or file, the credit line,
-  who may change them). Nothing about the group's members. Deleted when the bot
-  leaves the group or is removed from it. To see the links, the bot reads every
+  who may change them), and whether its admins turned the copyright note off.
+  Nothing about the group's members. Deleted when the bot leaves the group or is
+  removed from it. To see the links, the bot reads every
   message in the group (it can only as an admin, or with Telegram's privacy mode
   off for it) and keeps nothing from those without one. A link it downloads is
   handled like one sent in a private chat, on the allowance of the person who
@@ -367,7 +372,9 @@ applies. Also held:
 
 Not held: **what anybody writes.** Messages are relayed and never stored. They
 exist in the two Telegram chats, where each side can delete their own copy, and
-in no database belonging to this bot. The one exception is what a person chooses
+in no database belonging to this bot. An edit is carried to the other side's
+copy the same way, from the edited message, and `/delete` uses the message-id
+map to find the other side's copy; neither writes anything down. The one exception is what a person chooses
 to send the operator themselves, with `/feedback`. Nor are **reactions**: a reaction
 on a message in a conversation is put on the other side's copy by the bot,
 beside the bot's own picture, so the other person sees the reaction and not
@@ -530,6 +537,12 @@ post. It holds only each person's last download, for 10 minutes, and references 
 has already sent (see below); before it re-uses one of those it checks, at least
 every 12 hours, that the post is still public. It has nothing else to take down.
 
+**The note under files.** Every file the bot sends carries a short copyright
+note. A person can turn it off in their own chat, and a group's admins in their
+group, with `/disclaimer`: the bot first shows the note in full and turns it off
+only when that is confirmed. Turning it off changes nothing above. What happens
+to a download stays the responsibility of the person who asked for it.
+
 **The last download.** What the bot has just sent is held on its server for 10
 minutes, so that the buttons under it, or the same link sent again, are answered
 without fetching the post a second time. It is a convenience, not storage: it is
@@ -580,3 +593,10 @@ issue a new link that invalidates the old one. Those three are the tools this
 bot offers, and they work immediately. Reports of abuse should go to the
 operator, and — where a Telegram account is involved — to Telegram, which is
 the only party able to act on an account.
+
+**Edits and deletions.** An edit to a message that was already passed on is
+carried over to the other side's copy. `/delete`, sent as a reply to one's own
+message, deletes it on both sides; Telegram allows that for 48 hours after it
+was sent. The other side may have read, copied or saved it before then. When a
+guest deletes a message, the inbox owner keeps a short line in its place, so
+the guest can still be blocked. The operator can switch this off.
