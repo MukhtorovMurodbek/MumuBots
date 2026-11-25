@@ -2185,7 +2185,7 @@ async def _cmd_gift(context, args):
 
 
 PROMO_KEY = "gift-220-users"
-PROMO_USERS = 200
+PROMO_USERS = 220
 PROMO_CREDITS = 220
 PROMO_CLAIM_DAYS = 3
 PROMO_SPEND_DAYS = 28
@@ -2245,7 +2245,7 @@ def _read_promo(fresh: bool = False) -> tuple:
 
 
 def promo_closes_for(started: datetime) -> datetime:
-    return _end_of_day((started.astimezone(timezone.utc) + timedelta(days=PROMO_CLAIM_DAYS)).date())
+    return PROMO_SPEND_UNTIL
 
 
 def promo_window(fresh: bool = False) -> "tuple[datetime, datetime] | None":
@@ -2266,7 +2266,7 @@ def promo_open(now: "datetime | None" = None, fresh: bool = False) -> bool:
     return window[0] <= now < window[1]
 
 
-PROMO_SPEND_UNTIL = datetime(2026, 12, 2, tzinfo=timezone.utc)
+PROMO_SPEND_UNTIL = datetime(2026, 12, 1, tzinfo=timezone.utc)
 
 
 def promo_expiry(claimed_at: datetime) -> datetime:

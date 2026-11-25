@@ -9,7 +9,7 @@ import pytest
 from conftest import load
 
 STARTED = datetime(2026, 11, 17, tzinfo=timezone.utc)
-CLOSES = datetime(2026, 12, 3, tzinfo=timezone.utc)
+CLOSES = datetime(2026, 12, 1, tzinfo=timezone.utc)
 
 
 class _Bot:
@@ -43,13 +43,14 @@ def gift(monkeypatch):
     return sf, link, given
 
 
-def test_claiming_lasts_three_days_and_every_gift_ends_on_1_december():
+def test_claiming_and_every_gift_end_at_the_start_of_1_december():
     link = load("convert_bot", "family_link")
-    assert link.PROMO_CLAIM_DAYS == 3
-    assert link.promo_closes_for(datetime(2026, 11, 18, 5, tzinfo=timezone.utc)) == datetime(2026, 11, 22, tzinfo=timezone.utc)
-    for claimed in (datetime(2026, 11, 18, tzinfo=timezone.utc), datetime(2026, 11, 21, 23, tzinfo=timezone.utc)):
-        assert link.promo_expiry(claimed) == datetime(2026, 12, 2, tzinfo=timezone.utc)
-    assert link.promo_spend_by() == "01.12.2026"
+    start_of_december = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert link.PROMO_USERS == 220
+    assert link.promo_closes_for(datetime(2026, 11, 25, 9, tzinfo=timezone.utc)) == start_of_december
+    for claimed in (datetime(2026, 11, 25, tzinfo=timezone.utc), datetime(2026, 11, 30, 23, tzinfo=timezone.utc)):
+        assert link.promo_expiry(claimed) == start_of_december
+    assert link.promo_spend_by() == "30.11.2026"
 
 
 def test_the_first_message_gets_an_offer_with_the_dates_and_a_button_not_the_credit(gift):
@@ -57,7 +58,7 @@ def test_the_first_message_gets_an_offer_with_the_dates_and_a_button_not_the_cre
     context = _context()
     asyncio.run(sf._offer_gift(context, 5, 5))
     (_, text, markup), = context.bot.sent
-    assert "Claim it by 02.12.2026 (UTC)" in text and "spent until 01.12.2026" in text and "/gift" in text
+    assert "Claim it by 30.11.2026 (UTC)" in text and "spent until 30.11.2026" in text and "/gift" in text
     button = markup.inline_keyboard[0][0]
     assert button.text == "🎁 Claim 220 ⚡" and button.callback_data == sf.PROMO_CALLBACK and given == set()
 
@@ -68,7 +69,7 @@ def test_the_button_or_gift_claims_it_once(gift):
     asyncio.run(sf._claim_and_tell(context, 5, 5))
     asyncio.run(sf._claim_and_tell(context, 5, 5))
     first, second = (text for _, text, _ in context.bot.sent)
-    assert "01.12.2026" in first and given == {5}
+    assert "30.11.2026" in first and given == {5}
     assert second.startswith("🎁 This gift has already been claimed")
 
 
@@ -88,11 +89,11 @@ def test_the_texts_name_both_dates_in_every_language(lang):
     for folder in ("convert_bot", "downloader_bot"):
         link = load(folder, "family_link")
         offer = link.promo_offer(lang, CLOSES)
-        assert "02.12.2026" in offer and "01.12.2026" in offer and "/gift" in offer and "{" not in offer
+        assert "30.11.2026" in offer and "01.12.2026" not in offer and "/gift" in offer and "{" not in offer
         for key in ("gift_claim_button", "gift_already_had", "gift_not_open"):
             assert link.phrase(key, lang, amount=220) != key
     ad = load("anon_bot", "family_link").promo_ad(lang, CLOSES)
-    assert "/gift" in ad and "01.12.2026" in ad and "{" not in ad
+    assert "/gift" in ad and "30.11.2026" in ad and "{" not in ad
 
 
 def test_before_the_gift_anonbot_teases_it_once_from_11_kst(monkeypatch):

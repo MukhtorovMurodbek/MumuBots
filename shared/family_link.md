@@ -1144,11 +1144,13 @@ the number the texts name is true when they are read. The key
 (`gift-220-users`) and the amount stay as they were, so nothing already
 written under them changes.
 
-From the start, for PROMO_CLAIM_DAYS (3 since 2026-11-18; it was 14), ConvertBot and DownloaderBot
+From the start until PROMO_SPEND_UNTIL (since 2.2.2, 2026-11-25, the operator: "until start of
+december 1"; before, PROMO_CLAIM_DAYS, 3 days, and 14 before that), ConvertBot and DownloaderBot
 offer the gift to whoever writes to them, and the offer's button or /gift gives them PROMO_CREDITS ⚡
 of bonus credit, once (grant_bonus_once: the claim and the credit in one transaction), to spend
-until PROMO_SPEND_UNTIL -- the same day for everyone, the end of 1 December 2026, as the operator
-asked on 2026-11-18. PROMO_SPEND_DAYS (28 days from the claim) was the rule before and is no
+until PROMO_SPEND_UNTIL -- the same moment for everyone, the start of 1 December 2026 (UTC); it was
+the end of 1 December until 2.2.2. PROMO_USERS is 220 since 2.2.2, the mark the users reached, so
+the texts say so; it was 200 while 204 was "close enough". PROMO_SPEND_DAYS (28 days from the claim) was the rule before and is no
 longer used for it. AnonBot shows its ad to each person once
 meanwhile. /promo stop ends the claiming early; credit already given stays.
 
@@ -1195,13 +1197,14 @@ message while the database is down.
 ### `promo_closes_for()`
 
 When claiming ends for a gift started at `started`, unless it is
-stopped first: the end of the PROMO_CLAIM_DAYS-th day after the start (UTC).
+stopped first: PROMO_SPEND_UNTIL, whenever it started (2.2.2); PROMO_CLAIM_DAYS is kept but no
+longer used for it.
 ManagerBot's card uses it to say what a start now would mean.
 
 ### `promo_window()`
 
 (started, closes) once the gift has been started, else None.
-`closes` is the end of the PROMO_CLAIM_DAYS-th day after the start, or the
+`closes` is promo_closes_for's moment, or the
 moment it was stopped if that came first. Blocking; raises on a database
 error.
 
@@ -1216,7 +1219,7 @@ When a gift claimed at `claimed_at` runs out: PROMO_SPEND_UNTIL, whenever it was
 
 ### `promo_spend_by()`
 
-The last day the gift can be spent, as the texts show it (01.12.2026).
+The last day the gift can be spent, as the texts show it (30.11.2026).
 
 ### `claim_promo_gift()`
 
